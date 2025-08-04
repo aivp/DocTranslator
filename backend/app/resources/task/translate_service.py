@@ -108,6 +108,7 @@ class TranslateEngine:
             'backup_model': task.backup_model,
             'comparison_id': task.comparison_id,
             'prompt_id': task.prompt_id,
+            'doc2x_api_key':task.doc2x_secret_key,
             'extension': os.path.splitext(task.origin_filepath)[1]  # 动态获取文件扩展名
         }
 

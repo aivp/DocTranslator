@@ -193,6 +193,18 @@ def insert_initial_settings(app):
          "group": "other_setting"},
         {"id": 10, "alias": "version", "value": "community", "serialized": 0,
          "created_at": "2025-02-18 01:57:39", "updated_at": "2025-03-04 00:57:20.624926",
+         "group": "site_setting"},
+        {"id": 11, "alias": "site_title", "value": "DocTranslator AI文档翻译", "serialized": 0,
+         "created_at": "2025-07-16 01:57:39", "updated_at": "2025-07-16 02:57:20.624926",
+         "group": "site_setting"},
+        {"id": 12, "alias": "site_name", "value": "DocTranslator", "serialized": 0,
+         "created_at": "2025-07-16 01:57:39", "updated_at": "2025-07-16 02:57:20.624926",
+         "group": "site_setting"},
+        {"id": 13, "alias": "site_logo", "value": "", "serialized": 0,
+         "created_at": "2025-07-16 01:57:39", "updated_at": "2025-07-17 00:57:20.624926",
+         "group": "site_setting"},
+        {"id": 14, "alias": "admin_site_title", "value": "DocTranslator后台管理中心", "serialized": 0,
+         "created_at": "2025-07-17 01:57:39", "updated_at": "2025-07-17 03:57:20.624926",
          "group": "site_setting"}
     ]
 

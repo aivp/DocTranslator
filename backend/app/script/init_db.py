@@ -60,7 +60,6 @@ def safe_init_mysql(app: Flask, sql_file: str = 'init.sql') -> bool:
 
 
 def get_platform_path(file_path: str) -> Path:
-    """处理跨平台文件路径问题"""
     # 统一转换为绝对路径
     path = Path(file_path).absolute()
 
@@ -105,7 +104,7 @@ def parse_db_url(db_url: str) -> Optional[dict]:
 
 
 def check_database_initialized(conn_info: dict, retries: int = 3) -> bool:
-    """带重试机制的数据库初始化检查"""
+    """数据库初始化检查"""
     for attempt in range(retries):
         try:
             connection = None
@@ -148,7 +147,7 @@ def execute_with_retry(conn_info: dict, sql_path: Path, retries: int = 3) -> boo
 
 
 def execute_safe_init(conn_info: dict, sql_path: Path) -> bool:
-    """增强的安全初始化执行"""
+    """安全初始化执行"""
     connection = None
     try:
         # 创建连接（设置更长的超时时间）

@@ -12,6 +12,16 @@ import time
 
 from .baidu.main import baidu_translate
 
+# 导入Qwen翻译模块
+try:
+    from .qwen_translate import qwen_translate, check_qwen_availability
+except ImportError:
+    # 如果Qwen模块不存在，使用默认函数
+    def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None):
+        return text
+    def check_qwen_availability():
+        return False, "Qwen模块未找到"
+
 
 def get(trans, event, texts, index):
     if event.is_set():
@@ -23,8 +33,26 @@ def get(trans, event, texts, index):
         max_threads = int(threads)
     translate_id = trans['id']
     target_lang = trans['lang']
+    
+    # ============== 模型配置 ==============
     model = trans['model']
     backup_model = trans['backup_model']
+    
+    # 打印当前配置（仅第一次）
+    if index == 0:
+        try:
+            # 检查Qwen服务可用性
+            if model == 'qwen-mt-plus':
+                qwen_available, qwen_message = check_qwen_availability()
+                print(f"Qwen服务检查: {qwen_message}")
+                if not qwen_available:
+                    print("警告: Qwen服务不可用，将使用备用方案")
+                else:
+                    print("Qwen翻译服务已启用")
+        except:
+            pass
+    # ==========================================
+    
     prompt = trans['prompt']
     extension = trans['extension'].lower()
     text = texts[index]
@@ -79,10 +107,45 @@ def get(trans, event, texts, index):
             text['complete'] = True
 
     # ============== AI翻译处理 ==============
-    elif server == 'openai':
+    elif server == 'openai' or server == 'doc2x' or server == 'qwen':
         try:
             oldtrans = db.get("select * from translate_logs where md5_key=%s", md5_key)
             # mredis.set("threading_count",threading_num+1)
+            # 目标语言映射处理
+            LANGUAGE_MAPPING = {
+                '中文': 'Chinese',
+                '英语': 'English',
+                '英文': 'English',  # 兼容旧版本
+                '阿拉伯语': 'Arabic',
+                '法语': 'French',
+                '德文': 'German',  # 兼容旧版本
+                '德语': 'German',
+                '西班牙语': 'Spanish',
+                '西班牙文': 'Spanish',  # 兼容旧版本
+                '俄语': 'Russian',
+                '俄文': 'Russian',  # 兼容旧版本
+                '意大利语': 'Italian',
+                '意大利文': 'Italian',  # 兼容旧版本
+                '泰语': 'Thai',
+                '越南语': 'Vietnamese',
+                '印尼语/马来语': 'Indonesian',
+                '印尼语': 'Indonesian',
+                '马来语': 'Malay',
+                '菲律宾语（他加禄语）': 'Filipino',
+                '菲律宾语': 'Filipino',
+                '他加禄语': 'Filipino',
+                '缅甸语': 'Burmese',
+                '柬埔寨语（高棉语）': 'Khmer',
+                '柬埔寨语': 'Khmer',
+                '高棉语': 'Khmer',
+                '老挝语': 'Lao',
+                '柬语': 'Khmer',
+                '葡萄牙语': 'Portuguese'
+            }
+            
+            # 使用映射字典处理目标语言
+            target_lang = LANGUAGE_MAPPING.get(target_lang, target_lang)
+
             if text['complete'] == False:
                 content = ''
                 if oldtrans:
@@ -99,15 +162,34 @@ def get(trans, event, texts, index):
                 #         content = get_content_by_image(text['text'], target_lang)
                 #         time.sleep(0.1)
                 # ---------------这里实现不同模型格式的请求--------------
+
                 elif extension == ".md":
-                    content = req(text['text'], target_lang, model, prompt, True)
+                    if model == 'qwen-mt-plus':
+                        content = qwen_translate(text['text'], target_lang)
+                    else:
+                        content = req(text['text'], target_lang, model, prompt, True)
                 else:
-                    content = req(text['text'], target_lang, model, prompt, False)
+                    # 根据是否有上下文选择翻译方式
+                    if 'context_text' in text and text.get('context_type') == 'body':
+                        # 正文段落：使用带上下文的文本
+                        if model == 'qwen-mt-plus':
+                            content = qwen_translate(text['text'], target_lang)
+                        else:
+                            content = req(text['context_text'], target_lang, model, prompt, False)
+                    else:
+                        # 其他内容：使用原始文本
+                        if model == 'qwen-mt-plus':
+                            content = qwen_translate(text['text'], target_lang)
+                        else:
+                            content = req(text['text'], target_lang, model, prompt, False)
                     # print("content", text['content'])
                 text['count'] = count_text(text['text'])
                 if check_translated(content):
                     # 过滤deepseek思考过程
-                    text['text'] = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+                    cleaned_content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+                    # 清理上下文标记
+                    # cleaned_content = clean_translation_result(cleaned_content)
+                    text['text'] = cleaned_content
                     if oldtrans is None:
                         db.execute("INSERT INTO translate_logs set api_url=%s,api_key=%s,"
                                    + "backup_model=%s ,created_at=%s ,prompt=%s,  "
@@ -175,12 +257,13 @@ def get(trans, event, texts, index):
                 text['complete'] = True
             # traceback.print_exc()
             # print("translate error")
+    
     texts[index] = text
     # print(text)
     if not event.is_set():
         process(texts, translate_id)
     # set_threading_num(mredis)
-    exit(0)
+    return True  # 返回结果而不是exit(0)
 
 
 def get11(trans, event, texts, index):
@@ -348,9 +431,38 @@ def req(text, target_lang, model, prompt, ext):
     if ext == True:
         # 如果是 md 格式，追加提示文本
         prompt += "。 请帮助我翻译以下 Markdown 文件中的内容。请注意，您只需翻译文本部分，而不应更改任何 Markdown 标签或格式。保持原有的标题、列表、代码块、链接和其他 Markdown 标签的完整性。"
+    
+    # 检查是否包含上下文标记
+    if '[前文:' in text or '[后文:' in text:
+        # 有上下文的情况：增强提示词
+        enhanced_prompt = f"""
+        {prompt}
+        
+        严格指令：
+        1. 只翻译方括号外的文本，不要翻译方括号内的任何内容
+        2. 纯大写英文的为专有名词，不要翻译
+        3. 请结合上下文的语义语境进行翻译
+        4. 不要输出任何方括号标记
+        5. 不要添加任何解释、说明或思考过程
+        6. 只返回纯翻译结果
+        7. 目标语言为{target_lang}
+        
+        示例：
+        输入："[前文: Hello] World [后文: Program]"
+        输出："世界"
+        
+        输入："[前文: 你好] 世界 [后文: 程序]"
+        输出："world"
+        
+        记住：方括号内的内容是上下文参考用于翻译前后的语义语境，不需要翻译和输出！
+        """
+    else:
+        # 没有上下文的情况：使用原始提示词
+        enhanced_prompt = prompt
+    
     # 构建 message
     message = [
-        {"role": "system", "content": prompt.replace("{target_lang}", target_lang)},
+        {"role": "system", "content": enhanced_prompt.replace("{target_lang}", target_lang)},
         {"role": "user", "content": text}
     ]
     # print(openai.base_url)
@@ -527,3 +639,31 @@ def use_backup_model(trans, event, texts, index, message):
             error(trans['id'], message)
             print(message)
         event.set()
+
+
+def clean_translation_result(text):
+    """清理翻译结果，移除上下文标记"""
+    import re
+    
+    # 移除上下文标记
+    text = re.sub(r'\[前文:.*?\]', '', text)
+    text = re.sub(r'\[后文:.*?\]', '', text)
+    
+    # 移除可能的解释性内容
+    text = re.sub(r'翻译.*?[:：]\s*', '', text)
+    text = re.sub(r'根据上下文.*?[:：]\s*', '', text)
+    text = re.sub(r'答案是.*?[:：]\s*', '', text)
+    text = re.sub(r'结果.*?[:：]\s*', '', text)
+    text = re.sub(r'应该是.*?[:：]\s*', '', text)
+    text = re.sub(r'输出.*?[:：]\s*', '', text)
+    text = re.sub(r'输入.*?[:：]\s*', '', text)
+    
+    # 移除可能的思考过程
+    text = re.sub(r'让我分析.*?[:：]\s*', '', text)
+    text = re.sub(r'根据.*?[:：]\s*', '', text)
+    text = re.sub(r'记住.*?[:：]\s*', '', text)
+    
+    # 清理多余的空格
+    text = re.sub(r'\s+', ' ', text)
+    
+    return text.strip()

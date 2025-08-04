@@ -14,6 +14,7 @@ class Setting(db.Model):
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)  # 更新时间
     deleted_flag = db.Column(db.Enum('N', 'Y'), default='N')  # 删除标记
     group = db.Column(db.String(32))  # 分组
+    remark = db.Column(db.String(255))  # 备注
 
     def to_dict(self):
         return {
@@ -21,5 +22,6 @@ class Setting(db.Model):
             'alias': self.alias,
             'value': self.value,
             'serialized': self.serialized,
-            'group': self.group
+            'group': self.group,
+            'remark': self.remark
         }

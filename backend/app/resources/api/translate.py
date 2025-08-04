@@ -55,6 +55,7 @@ def get_unified_lang_name(lang_code):
     lower_code = str(lang_code).lower()
     return LANG_CODE_TO_CHINESE.get(lower_code, lang_code)  # 找不到时返回原值
 
+
 class TranslateStartResource(Resource):
     @jwt_required()
     def post(self):
@@ -75,7 +76,7 @@ class TranslateStartResource(Resource):
 
         # if data['server'] == 'openai':
         #     return APIResponse.error("Doc2x服务需要密钥", 400)
-        # elif data['server'] == 'baidu':
+        # elif data['server'] == 'doc2x' and not data['doc2x_api_key']:
         #     return APIResponse.error("Doc2x服务需要密钥", 400)
         try:
             # 获取用户信息
@@ -104,6 +105,11 @@ class TranslateStartResource(Resource):
             # 生成翻译结果绝对路径
             target_abs_path = get_absolute_storage_path(origin_filename)
 
+            # 如果是pdf，需要改成docx-----------
+            if origin_filename.lower().endswith('.pdf'):
+                origin_filename = origin_filename + '.docx'
+                target_abs_path = target_abs_path + '.docx'
+
             # 获取翻译类型（取最后一个type值）
             translate_type = data.get('type[2]', 'trans_all_only_inherit')
 
@@ -123,7 +129,7 @@ class TranslateStartResource(Resource):
                 translate_settings[setting.alias] = setting.value
             # 更新翻译记录
             translate.server = data.get('server', 'openai')
-            translate.origin_filename = data['file_name']
+            translate.origin_filename = origin_filename
             translate.target_filepath = target_abs_path  # 存储翻译结果的绝对路径
 
             translate.model = data['model']
@@ -178,7 +184,7 @@ class TranslateStartResource(Resource):
             return APIResponse.error("任务启动失败", 500)
 
 
-# 修复时间显示
+# 获取翻译记录列表
 class TranslateListResource(Resource):
     @jwt_required()
     def get(self):
@@ -239,11 +245,14 @@ class TranslateListResource(Resource):
 
             # 格式化完成时间（精确到秒）
             end_at_str = t.end_at.strftime('%Y-%m-%d %H:%M:%S') if t.end_at else "--"
-
+            origin_filename=t.origin_filename
+            # 如果是pdf，需要改成docx-----------
+            if t.origin_filename.lower().endswith('.pdf') and t.server == 'doc2x':
+                origin_filename = t.origin_filename + '.docx'
             data.append({
                 'id': t.id,
                 'file_type': file_type,
-                'origin_filename': t.origin_filename,
+                'origin_filename': origin_filename,
                 'status': t.status,
                 'status_name': status_name,
                 'process': float(t.process),  # 将 Decimal 转换为 float
@@ -251,9 +260,10 @@ class TranslateListResource(Resource):
                 'end_at': end_at_str,  # 完成时间
                 'start_at': t.start_at.strftime('%Y-%m-%d %H:%M:%S') if t.start_at else "--",
                 # 开始时间
-                'lang': get_unified_lang_name(t.lang), # 标准输出语言中文名称
+                'lang': get_unified_lang_name(t.lang),  # 标准输出语言中文名称
                 'target_filepath': t.target_filepath,
-                'uuid': t.uuid
+                'uuid': t.uuid,
+                'server': t.server,
             })
 
         # 返回响应数据

@@ -110,7 +110,9 @@ def start(trans):
 
 def split_paragraph(paragraph, max_length):
     """将段落分割成多个部分，每部分不超过 max_length 字符，并考虑断句"""
-    sentences = re.split(r'(?<=[.!?。！？]) +|(?<=[。！？])\s*', paragraph)  # 按句子分割
+    # 扩展的标点符号切分：支持更多语义边界
+    # 包括：句号、感叹号、问号、分号、冒号、省略号、破折号等
+    sentences = re.split(r'(?<=[.!?。！？;；:：…—]) +|(?<=[。！？；：…—])\s*', paragraph)  # 按句子分割
     current_length = 0
     current_part = []
     parts = []
@@ -118,9 +120,15 @@ def split_paragraph(paragraph, max_length):
     for sentence in sentences:
         if current_length + len(sentence) > max_length:
             # 如果当前部分长度加上句子长度超过最大长度，保存当前部分
-            parts.append(' '.join(current_part))
-            current_part = [sentence]  # 开始新的部分
-            current_length = len(sentence)
+            if current_part:
+                parts.append(' '.join(current_part))
+                current_part = [sentence]  # 开始新的部分
+                current_length = len(sentence)
+            else:
+                # 如果单个句子就超过限制，强制分割
+                parts.append(sentence)
+                current_part = []
+                current_length = 0
         else:
             current_part.append(sentence)
             current_length += len(sentence)

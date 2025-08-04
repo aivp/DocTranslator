@@ -1,4 +1,5 @@
 # resources/admin/setting.py
+import json
 import os
 import shutil
 from flask import request, current_app
@@ -12,14 +13,14 @@ from app.utils.validators import validate_id_list
 
 class AdminSettingNoticeResource(Resource):
     def get(self):
-        """获取通知设置[^1]"""
+        """获取通知设置"""
         setting = Setting.query.filter_by(alias='notice_setting').first()
         if not setting:
             return APIResponse.success(data={'users': []})
         return APIResponse.success(data={'users': eval(setting.value)})
 
     def post(self):
-        """更新通知设置[^1]"""
+        """更新通知设置"""
         data = request.json
         users = validate_id_list(data.get('users'))
 
@@ -36,7 +37,7 @@ class AdminSettingNoticeResource(Resource):
 
 class AdminSettingApiResource(Resource):
     def get(self):
-        """获取API配置[^2]"""
+        """获取API配置"""
         settings = Setting.query.filter(Setting.group == 'api_setting').all()
         data = {
             'api_url': settings[0].value,
@@ -48,7 +49,7 @@ class AdminSettingApiResource(Resource):
         return APIResponse.success(data=data)
 
     def post(self):
-        """更新API配置[^2]"""
+        """更新API配置"""
         data = request.json
         required_fields = ['api_url', 'api_key', 'models', 'default_model', 'default_backup']
         if not all(field in data for field in required_fields):
@@ -66,7 +67,7 @@ class AdminSettingApiResource(Resource):
 
 class AdminInfoSettingOtherResource(Resource):
     def get(self):
-        """获取其他设置[^3]"""
+        """获取其他设置"""
         settings = Setting.query.filter(Setting.group == 'other_setting').all()
         data = {
             'prompt': settings[0].value,
@@ -97,25 +98,58 @@ class AdminEditSettingOtherResource(Resource):
 
 class AdminSettingSiteResource(Resource):
     def get(self):
-        """获取站点设置[^4]"""
-        setting = Setting.query.filter_by(alias='version').first()
-        if not setting:
-            return APIResponse.success(data={'version': 'community'})
-        return APIResponse.success(data={'version': setting.value})
+        """获取站点设置"""
+        settings = Setting.query.filter_by(group='site_setting').all()
+        if not settings:
+            return APIResponse.success(data={'version': 'business'})
+        data = {
+            'version': settings[0].value,
+            'site_title': settings[1].value,
+            'site_name': settings[2].value,
+            'site_logo': settings[3].value,
+            'update_time':settings[3].remark or None,
+            'admin_site_title': settings[4].value,
+        }
+        return APIResponse.success(data=data)
 
     def post(self):
-        """更新站点版本[^4]"""
-        version = request.json.get('version')
-        if not version or version not in ['business', 'community']:
-            return APIResponse.error('版本号无效', 400)
+        """更新站点设置"""
+        data = request.json
+        if not data or not isinstance(data, dict):
+            return APIResponse.error('请求参数错误', 400)
 
-        setting = Setting.query.filter_by(alias='version').first()
-        if not setting:
-            setting = Setting(alias='version', group='site_setting')
-        setting.value = version
-        db.session.add(setting)
+        # 定义可更新字段及类型约束
+        allowed_fields = {
+            'version': str,
+            'site_title': str,
+            'site_name': str,
+            'site_logo': str,
+            'admin_site_title': str,
+            'update_time': str
+        }
+
+        # 验证并更新字段
+        for key, value in data.items():
+            if key in allowed_fields:
+                # 类型检查
+                if not isinstance(value, allowed_fields[key]):
+                    return APIResponse.error(f'字段 {key} 类型错误', 400)
+
+                # 额外处理 site_logo 的 remark
+                if key == 'site_logo' and 'update_time' in data:
+                    setting = Setting.query.filter_by(alias=key, group='site_setting').first()
+                    if setting:
+                        setting.remark = data['update_time']
+
+                # 更新字段
+                setting = Setting.query.filter_by(alias=key, group='site_setting').first()
+                if not setting:
+                    setting = Setting(alias=key, group='site_setting')
+                setting.value = str(value)
+                db.session.add(setting)
+
         db.session.commit()
-        return APIResponse.success(message='站点版本已更新')
+        return APIResponse.success(message='站点设置已更新')
 
 
 # ----系统存储设置-----

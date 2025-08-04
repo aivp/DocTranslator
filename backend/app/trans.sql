@@ -1,5 +1,4 @@
 
-
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
@@ -10,7 +9,9 @@ SET time_zone = "+00:00";
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
 /*!40101 SET NAMES utf8mb4 */;
 
-
+--
+-- 数据库： `trans`
+--
 
 -- --------------------------------------------------------
 
@@ -21,6 +22,7 @@ SET time_zone = "+00:00";
 CREATE TABLE `alembic_version` (
   `version_num` text NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 -- --------------------------------------------------------
 
@@ -58,6 +60,9 @@ CREATE TABLE `comparison_fav` (
 
 -- --------------------------------------------------------
 
+
+-- --------------------------------------------------------
+
 --
 -- 表的结构 `customer`
 --
@@ -78,14 +83,8 @@ CREATE TABLE `customer` (
   `total_storage` bigint(20) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
---
--- 转存表中的数据 `customer`
---
-
-INSERT INTO `customer` (`id`, `customer_no`, `phone`, `name`, `password`, `email`, `level`, `status`, `deleted_flag`, `created_at`, `updated_at`, `storage`, `total_storage`) VALUES
-(1, NULL, NULL, NULL, 'scrypt:32768:8:1$FTZLV5ptzN1KMmIS$aa80b88763b514b30f647130cd535b39cdbab617cebebedab8b954e2616f72ca01f180520a82a61dbf63ea6e88618aa039287ed540857e110ffabd0252c3ac3f', 'test', 'common', 'enabled', 'N', '2025-04-20 08:17:17', '2025-04-22 02:48:49', 7354362, 104857600);
-
 -- --------------------------------------------------------
+
 
 --
 -- 表的结构 `prompt`
@@ -102,21 +101,6 @@ CREATE TABLE `prompt` (
   `updated_at` date DEFAULT NULL,
   `deleted_flag` text
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
---
--- 转存表中的数据 `prompt`
---
-
-INSERT INTO `prompt` (`id`, `title`, `share_flag`, `added_count`, `content`, `customer_id`, `created_at`, `updated_at`, `deleted_flag`) VALUES
-(1, '小说翻译专家', 'Y', 0, 'You are a highly skilled translation engine with expertise in fiction literature, known as the \'Fiction Translation Expert.\' Your function is to translate texts into {target_lang}, focusing on enhancing the narrative and emotional depth of fiction translations. Ensure every word captures the essence of the original work, providing nuanced and faithful renditions of novels, short stories, and other narrative forms. Use your expertise to translate fiction into the target language with enhanced emotional resonance and cultural relevance. Maintain the original storytelling elements and cultural references without adding any explanations or annotations.', 0, '2025-04-20', NULL, 'N'),
-(2, '电商翻译大师', 'Y', 0, 'You are a highly skilled translation engine with expertise in the e-commerce sector, known as the \'E-commerce Expert.\' Your function is to translate texts accurately into {target_lang}, ensuring that product descriptions, customer reviews, and e-commerce articles resonate with online shoppers. Carefully designed prompts ensure translations are both precise and culturally relevant, enhancing the shopping experience. Maintain the original tone and information without adding any explanations or annotations.', 0, '2025-04-20', NULL, 'N'),
-(3, '金融领域翻译专家', 'Y', 0, 'You are a highly skilled translation engine with expertise in the financial sector, known as the \'Financial Expert.\' Your function is to translate texts accurately into {target_lang}, maintaining the original format, financial terms, market data, and currency abbreviations. Carefully designed prompts ensure translations are both precise and professional, tailored for financial articles and reports. Do not add any explanations or annotations to the translated text.', 0, '2025-04-20', NULL, 'N'),
-(4, 'GitHub 翻译增强器', 'Y', 0, 'You are a sophisticated translation engine with expertise in GitHub content, known as the \'GitHub Translation Enhancer.\' Your function is to translate texts accurately into {target_lang}, preserving technical terms, code snippets, markdown formatting, and platform-specific language. Carefully designed prompts ensure translations are both precise and contextually appropriate, tailored for GitHub repositories, issues, pull requests, and comments. Do not add any explanations or annotations to the translated text.', 0, '2025-04-20', NULL, 'N'),
-(5, '法律领域翻译专家', 'Y', 0, 'You are a highly skilled translation engine with expertise in the legal sector, known as the \'Legal Expert.\' Your function is to translate texts accurately into {target_lang}, maintaining the original format, legal terminology, references, and abbreviations. Carefully designed prompts ensure translations are both precise and professional, tailored for legal documents, articles, and reports. Do not add any explanations or annotations to the translated text.', 0, '2025-04-20', NULL, 'N'),
-(6, '医学领域翻译专家', 'Y', 0, 'You are a highly skilled translation engine with expertise in the medical sector, known as the \'Medical Expert.\' Your function is to translate texts accurately into {target_lang}, maintaining the original format, medical terms, and abbreviations. Carefully designed prompts ensure translations are both precise and professional, tailored for medical articles, reports, and documents. Do not add any explanations or annotations to the translated text.', 0, '2025-04-20', NULL, 'N'),
-(7, '新闻媒体译者', 'Y', 0, 'You are a highly skilled translation engine with expertise in the news media sector, known as the \'Media Expert.\' Your function is to translate texts accurately into {target_lang}, preserving the nuances, tone, and style of journalistic writing. Carefully designed prompts ensure translations are both precise and contextually appropriate, tailored for news articles, reports, and media content. Do not add any explanations or annotations to the translated text.', 0, '2025-04-20', NULL, 'N'),
-(8, '学术论文翻译大师', 'Y', 0, 'You are a highly skilled translation engine with expertise in academic paper translation, known as the \'Academic Paper Translation Expert.\' Your function is to translate academic texts accurately into {target_lang}, ensuring the precise translation of complex concepts and specialized terminology while preserving the original academic tone. Carefully designed prompts ensure translations are both scholarly and contextually appropriate, tailored for journals, research papers, and scholarly articles across various disciplines. Do not add any explanations or annotations to the translated text.', 0, '2025-04-20', NULL, 'N'),
-(9, '科技类翻译大师', 'Y', 0, 'You are a highly skilled translation engine with expertise in the technology sector, known as the \'Technology Expert.\' Your function is to translate texts accurately into {target_lang}, maintaining the original format, technical terms, and abbreviations. Carefully designed prompts ensure translations are both precise and professional, tailored for technology articles, reports, and documents. Do not add any explanations or annotations to the translated text.', 0, '2025-04-20', NULL, 'N');
 
 -- --------------------------------------------------------
 
@@ -163,7 +147,7 @@ CREATE TABLE `setting` (
   `updated_at` datetime DEFAULT NULL,
   `deleted_flag` text,
   `group` text,
-
+  `remark` varchar(255) DEFAULT NULL COMMENT '配置备注/版本标识'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -213,7 +197,6 @@ CREATE TABLE `translate` (
   `app_key` text
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-
 -- --------------------------------------------------------
 
 --
@@ -230,12 +213,33 @@ CREATE TABLE `user` (
   `updated_at` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- --------------------------------------------------------
+
 --
--- 转存表中的数据 `user`
+-- 表的结构 `users`
 --
 
-INSERT INTO `user` (`id`, `name`, `password`, `email`, `deleted_flag`, `created_at`, `updated_at`) VALUES
-(1, 'admin', '123456', 'admin', 'N', NULL, NULL);
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL,
+  `email` varchar(120) NOT NULL,
+  `username` varchar(50) DEFAULT NULL,
+  `password_hash` varchar(256) DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `verification_codes`
+--
+
+CREATE TABLE `verification_codes` (
+  `id` int(11) NOT NULL,
+  `email` varchar(120) DEFAULT NULL,
+  `code` varchar(6) NOT NULL,
+  `created_at` datetime DEFAULT NULL,
+  `is_used` tinyint(1) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 --
 -- 转储表的索引
@@ -246,6 +250,8 @@ INSERT INTO `user` (`id`, `name`, `password`, `email`, `deleted_flag`, `created_
 --
 ALTER TABLE `alembic_version`
   ADD PRIMARY KEY (`version_num`(255));
+
+
 
 --
 -- 表的索引 `comparison`
@@ -259,11 +265,19 @@ ALTER TABLE `comparison`
 ALTER TABLE `comparison_fav`
   ADD PRIMARY KEY (`id`);
 
+
 --
 -- 表的索引 `customer`
 --
 ALTER TABLE `customer`
   ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `income`
+--
+ALTER TABLE `income`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uniq_year_region` (`year`,`region`);
 
 --
 -- 表的索引 `prompt`
@@ -302,6 +316,20 @@ ALTER TABLE `user`
   ADD PRIMARY KEY (`id`);
 
 --
+-- 表的索引 `users`
+--
+ALTER TABLE `users`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `ix_users_email` (`email`);
+
+--
+-- 表的索引 `verification_codes`
+--
+ALTER TABLE `verification_codes`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `ix_verification_codes_email` (`email`);
+
+--
 -- 在导出的表使用AUTO_INCREMENT
 --
 
@@ -317,17 +345,19 @@ ALTER TABLE `comparison`
 ALTER TABLE `comparison_fav`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
+
 --
 -- 使用表AUTO_INCREMENT `customer`
 --
 ALTER TABLE `customer`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
 
 --
 -- 使用表AUTO_INCREMENT `prompt`
 --
 ALTER TABLE `prompt`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- 使用表AUTO_INCREMENT `prompt_fav`
@@ -351,13 +381,25 @@ ALTER TABLE `setting`
 -- 使用表AUTO_INCREMENT `translate`
 --
 ALTER TABLE `translate`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- 使用表AUTO_INCREMENT `user`
 --
 ALTER TABLE `user`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- 使用表AUTO_INCREMENT `users`
+--
+ALTER TABLE `users`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- 使用表AUTO_INCREMENT `verification_codes`
+--
+ALTER TABLE `verification_codes`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

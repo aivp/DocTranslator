@@ -49,7 +49,9 @@ class FileUploadResource(Resource):
         try:
             # 生成存储路径
             save_dir = self.get_upload_dir()
-            filename = file.filename  # 直接使用原始文件名
+            filename = file.filename
+
+            # 直接使用原始文件名
             save_path = os.path.join(save_dir, filename)
 
             # 检查路径是否安全
