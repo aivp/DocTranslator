@@ -394,18 +394,17 @@ class DownloadTemplateResource(Resource):
     def get(self):
         """下载模板文件[^3]"""
         from flask import send_file
-        from io import BytesIO
-        import pandas as pd
+        import os
 
-        # 创建模板文件
-        df = pd.DataFrame(columns=['源术语', '目标术语'])
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False)
-        output.seek(0)
+        # 静态模板文件路径
+        template_path = os.path.join(current_app.root_path, 'static', 'templates', '术语表模板.xlsx')
+        
+        # 检查文件是否存在
+        if not os.path.exists(template_path):
+            return APIResponse.error('模板文件不存在', 404)
 
         return send_file(
-            output,
+            template_path,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
             download_name='术语表模板.xlsx'
@@ -419,28 +418,81 @@ class ImportComparisonResource(Resource):
         """
         导入 Excel 文件
         """
+        print("开始导入文件")
         # 检查是否上传了文件
         if 'file' not in request.files:
+            print("未找到文件")
             return APIResponse.error('未选择文件', 400)
         file = request.files['file']
+        print(f"文件信息: {file.filename}, 文件大小: {len(file.read()) if hasattr(file, 'read') else 'unknown'}")
+        file.seek(0)  # 重置文件指针
 
         try:
             # 读取 Excel 文件
             import pandas as pd
-            df = pd.read_excel(file)
+            df = pd.read_excel(file, header=None)  # 不指定header，按行读取
+            
+            # 添加调试信息
+            print(f"文件行数: {len(df)}")
+            print(f"文件列数: {len(df.columns) if len(df) > 0 else 0}")
+            if len(df) >= 6:
+                print(f"第6行内容: {df.iloc[5].tolist()}")
+            if len(df) >= 2:
+                print(f"第2行内容: {df.iloc[1].tolist()}")
+            if len(df) >= 4:
+                print(f"第4行内容: {df.iloc[3].tolist()}")
 
-            # 检查文件是否包含所需的列
-            if not {'源术语', '目标术语'}.issubset(df.columns):
-                return APIResponse.error('文件格式不符合模板要求', 406)
-            # 解析 Excel 文件内容
-            content = ';'.join(
-                [f"{row['源术语']}: {row['目标术语']}" for _, row in df.iterrows()])  # 按 ': ' 分隔
+            # 检查文件是否包含所需的列（验证逻辑不变）
+            # 从第6行开始查找列标题
+            if len(df) < 6:
+                return APIResponse.error(f'文件格式不符合模板要求：文件行数不足，需要至少6行，实际{len(df)}行', 406)
+            
+            # 检查第6行是否有数据（不是列标题行）
+            row_6 = df.iloc[5]  # 第6行（索引5）
+            print(f"第6行内容: {row_6.tolist()}")
+            
+            # 直接使用A列和B列作为源术语和目标术语
+            source_col = 0  # A列
+            target_col = 1  # B列
+            
+            # 从第6行开始解析术语数据
+            content_list = []
+            for i in range(5, len(df)):  # 从第6行开始（索引5）
+                row = df.iloc[i]
+                source_term = row[source_col]
+                target_term = row[target_col]
+                
+                # 检查是否为空值
+                if pd.notna(source_term) and pd.notna(target_term) and str(source_term).strip() and str(target_term).strip():
+                    content_list.append(f"{str(source_term).strip()}: {str(target_term).strip()}")
+            
+            content = '; '.join(content_list)
+            
+            # 尝试从模板中获取额外信息，如果缺少则使用默认值
+            title = '导入的术语表'
+            origin_lang = '未知'
+            target_lang = '未知'
+            
+            # 检查是否有术语表标题（A2单元格）
+            if len(df) >= 2 and pd.notna(df.iloc[1, 0]):
+                title_value = str(df.iloc[1, 0]).strip()
+                if title_value and title_value != '术语表标题':
+                    title = title_value
+            
+            # 检查是否有源语种和对照语种信息（A4和B4单元格）
+            if len(df) >= 4:
+                # 从第4行获取语言信息
+                if pd.notna(df.iloc[3, 0]):  # A4单元格
+                    origin_lang = str(df.iloc[3, 0]).strip()
+                if pd.notna(df.iloc[3, 1]):  # B4单元格
+                    target_lang = str(df.iloc[3, 1]).strip()
+            
             # 创建术语表
             comparison = Comparison(
-                title='导入的术语表',
-                origin_lang='未知',
-                target_lang='未知',
-                content=content,  # 使用改进后的格式
+                title=title,
+                origin_lang=origin_lang,
+                target_lang=target_lang,
+                content=content,
                 customer_id=get_jwt_identity(),
                 share_flag='N'
             )

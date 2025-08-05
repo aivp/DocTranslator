@@ -121,7 +121,7 @@ def handle_429_error(attempt, error_msg):
         logging.error("达到429错误最大重试次数 (100)，返回原文")
         return False  # 停止重试
 
-def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, max_retries=3):
+def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, max_retries=10):
     """
     使用阿里云Qwen-MT翻译模型进行翻译
     """

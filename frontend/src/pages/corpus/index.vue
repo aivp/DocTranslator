@@ -153,7 +153,7 @@
       </div>
 
       <!-- 备案信息 -->
-      <Filing />
+      <Filing v-if="false"/>
     </div>
 
     <!-- 术语弹窗 -->
@@ -478,6 +478,8 @@ function command_terms(type) {
 
 //上传文件
 function upload_success(response) {
+  console.log("上传成功")
+  console.log(response)
   if (response.code == 200) {
     ElMessage({ message: '导入成功', type: 'success' })
     getTermList()
@@ -493,6 +495,7 @@ function upload_before(file) {
     ElMessage({ message: '请上传模板格式的文件', type: 'error' })
     return false
   }
+  console.log("isXlsx",isXlsx)
   return isXlsx
 }
 

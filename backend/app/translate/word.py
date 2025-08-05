@@ -121,8 +121,7 @@ def start(trans):
     # 过滤掉特殊符号和纯数字
     filtered_texts = []
     for i, item in enumerate(texts):
-        context_type = item.get('context_type', None)
-        if should_translate(item['text'], context_type):
+        if should_translate(item['text']):
             filtered_texts.append(item)
         else:
             # 对于不需要翻译的内容，标记为已完成
@@ -158,21 +157,10 @@ def start(trans):
     return True
 
 
-def should_translate(text, context_type=None):
+def should_translate(text):
     """判断文本是否需要翻译（过滤特殊符号和纯数字）"""
     if not text or len(text) == 0:
         return False
-
-    # 目录内容特殊处理：保留包含页码的目录项
-    if context_type == "toc":
-        # 目录项通常包含标题和页码，即使包含数字也应该翻译
-        # 过滤掉纯数字或纯标点的目录项
-        if NUMBERS_PATTERN.match(text.strip()):
-            return False
-        if common.is_all_punc(text.strip()):
-            return False
-        # 目录项通常包含文字内容，应该翻译
-        return True
 
     # 过滤纯特殊符号
     if SPECIAL_SYMBOLS_PATTERN.match(text):
@@ -185,6 +173,7 @@ def should_translate(text, context_type=None):
     # 过滤全是标点符号的文本
     if common.is_all_punc(text):
         return False
+
 
     return True
 
@@ -350,10 +339,7 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
     if document.sections:
         process_sections_parallel()
     
-    # 4. 目录内容（单线程，因为需要特殊处理）
-    extract_toc_content(document, texts)
-    
-    # 5. 批注内容（单线程，因为需要ZIP操作）
+    # 4. 批注内容（单线程，因为需要ZIP操作）
     if hasattr(document, 'comments') and document.comments:
         extract_comments(file_path, texts)
     
@@ -832,129 +818,3 @@ def check_text(text):
         return False
     
     return not common.is_all_punc(text)
-
-
-def extract_toc_content(document, texts):
-    """提取目录内容"""
-    print("开始提取目录内容...")
-    
-    toc_count = 0
-    for i, paragraph in enumerate(document.paragraphs):
-        if is_toc_paragraph(paragraph):
-            print(f"发现目录段落 {i}: {paragraph.text[:50]}...")
-            extract_paragraph_with_merge(paragraph, texts, "toc")
-            toc_count += 1
-    
-    print(f"目录内容提取完成，共处理 {toc_count} 个目录段落")
-
-
-def is_toc_paragraph(paragraph):
-    """判断段落是否是目录段落"""
-    try:
-        # 1. 检查段落样式名称
-        if hasattr(paragraph, 'style') and paragraph.style:
-            style_name = paragraph.style.name.lower()
-            if 'toc' in style_name or '目录' in style_name:
-                return True
-        
-        # 2. 检查是否包含TOC域代码
-        if has_toc_field_code(paragraph):
-            return True
-        
-        # 3. 检查文本特征（目录格式）
-        text = paragraph.text.strip()
-        if is_toc_text_format(text):
-            return True
-        
-        # 4. 检查段落格式（目录通常有特殊格式）
-        if has_toc_formatting(paragraph):
-            return True
-        
-        return False
-    except Exception as e:
-        print(f"检查目录段落时出错: {str(e)}")
-        return False
-
-
-def has_toc_field_code(paragraph):
-    """检查段落是否包含TOC域代码"""
-    try:
-        if hasattr(paragraph, '_element'):
-            # 查找TOC域代码
-            toc_fields = paragraph._element.findall(
-                './/w:fldSimple[@w:instr="TOC"]', 
-                {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
-            )
-            if toc_fields:
-                return True
-            
-            # 查找TOC指令文本
-            instr_texts = paragraph._element.findall(
-                './/w:instrText[contains(text(), "TOC")]',
-                {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
-            )
-            if instr_texts:
-                return True
-        
-        return False
-    except Exception as e:
-        print(f"检查TOC域代码时出错: {str(e)}")
-        return False
-
-
-def is_toc_text_format(text):
-    """检查文本是否符合目录格式"""
-    if not text:
-        return False
-    
-    # 1. 检查是否包含页码格式（标题......页码）
-    if re.search(r'\.{2,}\s*\d+$', text):
-        return True
-    
-    # 2. 检查是否包含制表符和页码
-    if '\t' in text and re.search(r'\d+$', text):
-        return True
-    
-    # 3. 检查是否包含省略号和页码
-    if '...' in text and re.search(r'\d+$', text):
-        return True
-    
-    # 4. 检查是否包含常见的目录关键词
-    toc_keywords = ['目录', 'contents', 'index', 'table of contents']
-    if any(keyword in text.lower() for keyword in toc_keywords):
-        return True
-    
-    # 5. 检查是否包含章节编号格式（如：1.1, 1.2, 2.1等）
-    if re.search(r'^\d+\.\d+', text):
-        return True
-    
-    return False
-
-
-def has_toc_formatting(paragraph):
-    """检查段落是否具有目录格式特征"""
-    try:
-        # 1. 检查段落格式
-        if hasattr(paragraph, 'paragraph_format'):
-            # 目录通常有特殊的缩进
-            if paragraph.paragraph_format.left_indent:
-                return True
-        
-        # 2. 检查run格式
-        for run in paragraph.runs:
-            # 目录通常有特殊的字体大小
-            if hasattr(run, 'font') and run.font.size:
-                # 检查是否是较小的字体（目录通常字体较小）
-                if run.font.size.pt < 12:
-                    return True
-            
-            # 检查是否有特殊的字符格式
-            if hasattr(run, 'font') and run.font:
-                # 目录通常有特殊的颜色或格式
-                if run.font.color or run.font.highlight_color:
-                    return True
-        
-        return False
-    except Exception as e:
-        print(f"检查目录格式时出错: {str(e)}")
-        return False

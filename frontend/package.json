@@ -1,13 +1,13 @@
 {
-    "name": "ez-work",
+    "name": "doc-trans",
     "private": true,
-    "version": "0.0.0",
+    "version": "1.0.0",
     "type": "module",
     "scripts": {
         "dev": "vite",
         "build:dev": "vite build --mode development",
         "build:com": "vite build --mode community",
-        "build:prod": "vite build --mode production",
+        "build": "vite build --mode production",
         "docker": "vite build --env-file ./.env.docker",
         "lint-fix": "eslint --fix --ext .js --ext .jsx --ext .vue src/",
         "lint": "eslint --ext .js --ext .jsx --ext .vue src/",

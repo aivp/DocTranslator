@@ -16,8 +16,7 @@
           :headers="{ token: userStore.token }"
           :before-upload="beforeUpload"
           :before-remove="delUploadFile"
-          :on-change="(file, fileList) => flhandleFileListChange(file, fileList)"
-        >
+          :on-change="(file, fileList) => flhandleFileListChange(file, fileList)">
           <div class="left_box pc_show">
             <div class="icon_box" v-if="!fileListShow">
               <img src="@/assets/icon_a.png" />
@@ -33,7 +32,7 @@
               <span>上传文档</span>
             </button>
             <div class="title phone_show">点击按钮选择添加文档</div>
-            <div class="tips">支持格式{{ accpet_tip }}，文件≤30MB</div>
+            <div class="tips">支持格式{{ accpet_tip }}，建议文件≤30MB</div>
           </div>
         </el-upload>
       </div>
@@ -56,16 +55,14 @@
                 type="text"
                 class="phone_show"
                 @click="downAllTransFile"
-                v-if="editionInfo !== 'community' && translatesData.length > 0"
-              >
+                v-if="editionInfo !== 'community' && translatesData.length > 0">
                 全部下载
               </el-button>
               <el-button
                 type="text"
                 class="phone_show"
                 @click="delAllTransFile"
-                v-if="translatesData && translatesData.length > 0"
-              >
+                v-if="translatesData && translatesData.length > 0">
                 全部删除
               </el-button>
             </div>
@@ -73,21 +70,11 @@
           <!-- 存储空间展示 -->
           <div class="t_right">
             <span class="storage">存储空间({{ storageTotal }}M)</span>
-            <el-progress
-              class="translated-process"
-              :percentage="storagePercentage"
-              color="#055CF9"
-            />
-            <el-button
-              class="pc_show all_down"
-              @click="downAllTransFile"
-              v-if="translatesData.length > 0"
-            >
+            <el-progress class="translated-process" :percentage="storagePercentage" color="#055CF9" />
+            <el-button class="pc_show all_down" @click="downAllTransFile" v-if="translatesData.length > 0">
               全部下载
             </el-button>
-            <el-button class="pc_show" @click="delAllTransFile" v-if="translatesData.length > 0"
-              >全部删除</el-button
-            >
+            <el-button class="pc_show" @click="delAllTransFile" v-if="translatesData.length > 0">全部删除</el-button>
           </div>
           <!-- <div class="t_right">
             <el-button class="pc_show" @click="delAllTransFile" v-if="translatesData.length > 0"
@@ -114,11 +101,7 @@
               <span class="file_name">{{ res.file_name }}</span>
             </div>
             <div class="table_li status">
-              <el-progress
-                class="translated-process"
-                :percentage="res['percentage']"
-                color="#055CF9"
-              >
+              <el-progress class="translated-process" :percentage="res['percentage']" color="#055CF9">
                 <template #default="{ percentage }">
                   <span class="percentage">{{ percentage }}%</span>
                 </template>
@@ -166,12 +149,8 @@
             <div class="table_li">
               <!-- 翻译成功图标 -->
               <template v-if="item.status == 'done'">
-                <el-link
-                  class="icon_down"
-                  :href="API_URL + '/api/translate/download/' + item.id"
-                  target="_blank"
-                >
-                  <span class="icon_handle"> <DownloadIcon /></span>
+                <el-link class="icon_down" :href="API_URL + '/api/translate/download/' + item.id" target="_blank">
+                  <span class="icon_handle"><DownloadIcon /></span>
                   <!-- <img src="@assets/icon_down.png" alt="" /> -->
                 </el-link>
               </template>
@@ -191,15 +170,14 @@
           <div
             v-if="no_data"
             class="table_row no_data"
-            style="border: none; padding-top: 15px; justify-content: center; color: #c4c4c4"
-          >
+            style="border: none; padding-top: 15px; justify-content: center; color: #c4c4c4">
             暂无数据
           </div>
         </div>
       </div>
 
       <!-- 备案信息 -->
-      <Filing />
+      <Filing v-if="false"/>
     </div>
 
     <!-- pc 立即翻译按钮 -->
@@ -210,8 +188,7 @@
         size="large"
         color="#055CF9"
         class="translate-btn"
-        @click="handleTranslate(transform)"
-      >
+        @click="handleTranslate(transform)">
         立即翻译
       </el-button>
     </div>
@@ -233,25 +210,19 @@ import {
   delTranslate,
   delAllTranslate,
   downAllTranslate,
-  getFinishCount
+  doc2xStartService,
+  doc2xQueryStatusService,
+  getFinishCount,
 } from '@/api/trans'
 import { storage } from '@/api/account'
-import uploadedPng from '@assets/uploaded.png'
 import uploadPng from '@assets/upload.png'
-import loadingPng from '@assets/loading.gif'
-import finishPng from '@assets/finish.png'
-import completedPng from '@assets/completed.png'
 import { ElMessage, ElMessageBox } from 'element-plus'
-// import hash from 'object-hash'
-// import request from '@/utils/request'
 import { useTranslateStore } from '@/store/translate'
 import { useUserStore } from '@/store/user'
 const userStore = useUserStore()
 const translateStore = useTranslateStore()
 // 当前翻译服务 computed计算
 const currentServiceType = computed(() => translateStore.currentService)
-const uploaded = ref(false)
-const translated = ref(false)
 // 翻译数据表格加载状态
 const isLoadingData = ref(true)
 const upload_load = ref(false)
@@ -260,7 +231,7 @@ const no_data = ref(true)
 
 const accepts = '.docx,.xlsx,.pptx,.pdf,.txt,.csv,.md'
 const fileListShow = ref(false)
-const translating = {}
+
 const result = ref({})
 const target_count = ref('')
 const target_time = ref('')
@@ -303,8 +274,10 @@ const form = ref({
   origin_lang: '', // 添加起始语言字段
   comparison_id: '', //术语id
   prompt_id: '', //提示语id,
+  translate_id: null,
   doc2x_secret_key: '',
-  doc2x_flag: 'N'
+  server: 'openai',
+  doc2x_flag: 'N',
 })
 
 const target_tip = computed(() => {
@@ -354,7 +327,7 @@ function process(uuid) {
           ElMessage({
             message: '翻译失败' || '未知错误',
             type: 'error',
-            duration: 5000
+            duration: 5000,
           })
           // 更新翻译任务列表
           getTranslatesData(1)
@@ -379,7 +352,7 @@ function process(uuid) {
 
           // 任务完成时，更新翻译任务列表
           ElMessage.success({
-            message: '文件翻译成功！'
+            message: '文件翻译成功！',
           })
           getTranslatesData(1)
         } else {
@@ -391,7 +364,7 @@ function process(uuid) {
         ElMessage({
           message: res.message || '查询任务进度失败',
           type: 'error',
-          duration: 5000
+          duration: 5000,
         })
         // 任务失败时，更新翻译任务列表
         getTranslatesData(1)
@@ -402,14 +375,50 @@ function process(uuid) {
       ElMessage({
         message: '翻译过程失败.',
         type: 'error',
-        duration: 5000
+        duration: 5000,
       })
       // 任务失败时，更新翻译任务列表
       getTranslatesData(1)
     })
 }
-
-// 启动翻译-----立即翻译
+// doc2x进度查询
+const doc2xStatusQuery = async (data) => {
+  const res = await doc2xQueryStatusService(data)
+  if (res.code == 200) {
+    console.log('doc2x进度查询', res.data)
+    // 如果返回的字段中明确表示任务失败
+    if (res.data.status === 'failed') {
+      // 处理任务失败
+      ElMessage({
+        message: '翻译失败' || '未知错误',
+        type: 'error',
+        duration: 5000,
+      })
+      // 更新翻译任务列表
+      getTranslatesData(1)
+      return // 直接返回，不再继续查询
+    } else if (res.data.status == 'done') {
+      // 任务完成时，更新翻译任务列表
+      ElMessage.success({
+        message: '文件翻译成功！',
+      })
+      getTranslatesData(1)
+    } else {
+      // 如果未完成，继续调用 process 函数
+      setTimeout(() => doc2xStatusQuery(data), 10000)
+    }
+  } else {
+    // 处理错误情况（res.code != 200）
+    ElMessage({
+      message: res.message || '查询任务进度失败',
+      type: 'error',
+      duration: 5000,
+    })
+    // 任务失败时，更新翻译任务列表
+    getTranslatesData(1)
+  }
+}
+// 启动翻译-----立即翻译-------
 async function handleTranslate(transform) {
   // 首先再次赋值，防止没有更新
   form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
@@ -421,12 +430,53 @@ async function handleTranslate(transform) {
   //   })
   //   return
   // }
+  const file_suffix = form.value.files[0].file_name.split('.').pop().toLowerCase()
+  // 先判断是不是pdf文件和是否启用doc2x
+  if (file_suffix == 'pdf' && translateStore.common.doc2x_flag == 'N') {
+    return ElMessage({
+      message: '使用pdf翻译请先配置doc2x密钥',
+      type: 'error',
+    })
+  }
+  if (
+    file_suffix == 'pdf' &&
+    translateStore.common.doc2x_flag == 'Y' &&
+    translateStore.common.doc2x_secret_key !== ''
+  ) {
+    form.value.server = 'doc2x'
+    form.value.doc2x_flag = translateStore.common.doc2x_flag
+    form.value.doc2x_secret_key = translateStore.common.doc2x_secret_key
+    console.log('翻译pdf表单：', form.value)
+    // 1.启动doc2x翻译
+    // const res = await doc2xStartService(form.value)
+    // if (res.code == 200) {
+    //   ElMessage({
+    //     message: '提交doc2x翻译任务成功！',
+    //     type: 'success',
+    //   })
+    //   // 更新uuid
+    //   form.value.uuid = res.data.uuid
+    //   // 刷新翻译列表
+    //   getTranslatesData(1)
+    //   // 启动任务查询
+    //   doc2xStatusQuery({ translate_id: form.value.translate_id })
+    // } else {
+    //   ElMessage({
+    //     message: '提交翻译任务失败~',
+    //     type: 'error',
+    //   })
+    // }
+    // // 4.清空上传文件列表
+    // uploadRef.value.clearFiles()
+    // return res
+  }
+
   if (currentServiceType.value == 'ai') {
     // 2.检查翻译设置是否完整
     if (form.value.server === '') {
       ElMessage({
         message: '请选择翻译服务提供商',
-        type: 'error'
+        type: 'error',
       })
       return
     }
@@ -434,7 +484,7 @@ async function handleTranslate(transform) {
     if (form.value.type === '') {
       ElMessage({
         message: '请选择翻译类型',
-        type: 'error'
+        type: 'error',
       })
       return
     }
@@ -442,7 +492,7 @@ async function handleTranslate(transform) {
     if (form.value.model === '') {
       ElMessage({
         message: '请选择翻译模型',
-        type: 'error'
+        type: 'error',
       })
       return
     }
@@ -450,7 +500,7 @@ async function handleTranslate(transform) {
     if (form.value.langs.length < 1) {
       ElMessage({
         message: '请选择目标语言',
-        type: 'error'
+        type: 'error',
       })
       return
     }
@@ -458,7 +508,7 @@ async function handleTranslate(transform) {
     if (form.value.prompt === '') {
       ElMessage({
         message: '请输入翻译提示词',
-        type: 'error'
+        type: 'error',
       })
       return
     }
@@ -466,7 +516,7 @@ async function handleTranslate(transform) {
     if (form.value.api_key === '' && !userStore.isVip) {
       ElMessage({
         message: '请输入API密钥',
-        type: 'error'
+        type: 'error',
       })
       return
     }
@@ -474,7 +524,7 @@ async function handleTranslate(transform) {
     if (form.value.app_key === '' || form.value.app_id === '' || form.value.to_lang === '') {
       ElMessage({
         message: '请填写百度翻译相关信息!',
-        type: 'error'
+        type: 'error',
       })
       return
     }
@@ -490,7 +540,7 @@ async function handleTranslate(transform) {
   if (res.code == 200) {
     ElMessage({
       message: '提交翻译任务成功！',
-      type: 'success'
+      type: 'success',
     })
     // 刷新翻译列表
     getTranslatesData(1)
@@ -499,7 +549,7 @@ async function handleTranslate(transform) {
   } else {
     ElMessage({
       message: '提交翻译任务失败~',
-      type: 'error'
+      type: 'error',
     })
   }
 
@@ -510,12 +560,34 @@ async function handleTranslate(transform) {
 async function retryTranslate(item) {
   form.value.uuid = item.uuid
   form.value.file_name = item.origin_filename
+  form.value.server = item.server
+  // 先判断是不是doc2x失败
+  // if (item.server == 'doc2x') {
+  //   // 1.启动doc2x翻译
+  //   const res = await doc2xStartService(form.value)
+  //   if (res.code == 200) {
+  //     ElMessage({
+  //       message: '提交doc2x翻译任务成功！',
+  //       type: 'success',
+  //     })
+  //     // 刷新翻译列表
+  //     getTranslatesData(1)
+  //     // 启动任务查询
+  //     doc2xStatusQuery({ translate_id: item.id })
+  //   } else {
+  //     ElMessage({
+  //       message: '提交doc2x任务失败~',
+  //       type: 'error',
+  //     })
+  //   }
+  //   return
+  // }
   // 3.重启翻译任务
   const res = await transalteFile(form.value)
   if (res.code == 200) {
     ElMessage({
       message: '启动翻译任务成功！',
-      type: 'success'
+      type: 'success',
     })
     // 刷新翻译列表
     getTranslatesData(1)
@@ -524,13 +596,11 @@ async function retryTranslate(item) {
   } else {
     ElMessage({
       message: '启动翻译任务失败~',
-      type: 'error'
+      type: 'error',
     })
   }
 }
-function changeFile() {
-  uploaded.value = false
-}
+
 // 上传之前   && editionInfo.value != 'community'
 function beforeUpload(file) {
   if (!userStore.token) {
@@ -541,7 +611,7 @@ function beforeUpload(file) {
     ElMessage({
       message: '不支持该文件格式',
       type: 'error',
-      duration: 5000
+      duration: 5000,
     })
     return false
   }
@@ -554,20 +624,21 @@ function uploadSuccess(res, file) {
     const uploadedFile = {
       file_path: res.data.filepath,
       file_name: res.data.filename,
-      uuid: res.data.uuid
+      uuid: res.data.uuid,
     }
     form.value.file_name = res.data.filename
     form.value.files.push(uploadedFile)
     // 更新文件大小
     form.value.size = file.size
-    // 获取到uuid
+    // 获取到uuid和translate_id
     form.value.uuid = res.data.uuid
+    form.value.translate_id = res.data.translate_id
     // 更新存储空间
     getStorageInfo()
   } else {
     ElMessage({
       message: res.message,
-      type: 'error'
+      type: 'error',
     })
   }
   setTimeout(() => {
@@ -578,7 +649,7 @@ function uploadSuccess(res, file) {
 function uploadError(data) {
   ElMessage({
     message: `上传失败，${JSON.parse(data.message).message}`,
-    type: 'error'
+    type: 'error',
   })
 }
 
@@ -599,21 +670,21 @@ function delUploadFile(file, files) {
       if (response.code === 200) {
         ElMessage({
           message: '文件删除成功',
-          type: 'success'
+          type: 'success',
         })
         // 更新存储空间
         getStorageInfo()
       } else {
         ElMessage({
           message: '文件删除失败，请稍后再试',
-          type: 'error'
+          type: 'error',
         })
       }
     })
     .catch((error) => {
       ElMessage({
         message: '文件删除失败，请稍后再试',
-        type: 'error'
+        type: 'error',
       })
     })
 
@@ -630,7 +701,7 @@ function delUploadFile(file, files) {
   }
 }
 
-//获取翻译列表数据的方法
+//获取翻译列表数据
 async function getTranslatesData(page, uuid) {
   //删除翻译中的任务
   if (uuid) {
@@ -667,6 +738,7 @@ async function getTranslatesData(page, uuid) {
   // 切换状态
   isLoadingData.value = false
   getStorageInfo()
+  getCount()
 }
 
 //获取存储空间等信息的方法
@@ -688,7 +760,7 @@ async function delTransFile(id, index) {
     await ElMessageBox.confirm('是否确定要删除？', '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
-      type: 'warning'
+      type: 'warning',
     })
     isLoadingData.value = true
     translatesData.value.splice(index, 1)
@@ -718,7 +790,7 @@ function delAllTransFile() {
   ElMessageBox.confirm('是否确定要删除全部？', '提示', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
-    type: 'warning'
+    type: 'warning',
   }).then(() => {
     translatesData.value = []
     no_data.value = true
@@ -738,8 +810,8 @@ async function downAllTransFile() {
   try {
     const response = await fetch(API_URL + '/api/translate/download/all', {
       headers: {
-        token: `${localStorage.getItem('token')}` // 手动设置 JWT Token
-      }
+        token: `${localStorage.getItem('token')}`, // 手动设置 JWT Token
+      },
     })
 
     if (!response.ok) {

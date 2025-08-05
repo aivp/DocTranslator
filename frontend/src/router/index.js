@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Layout from '@/pages/layout/index.vue'
 import { useUserStore } from '@/store/user'
 import { ElMessage } from 'element-plus'
+import { setPageTitle } from '@/utils/title'
 //配置路由
 const constantRoute = [
   {
@@ -123,6 +124,9 @@ router.beforeEach((to) => {
   // }
   // 其他情况正常放行
   return true
+})
+router.afterEach((to) => {
+  setPageTitle(to.meta.title)
 })
 
 export default router
