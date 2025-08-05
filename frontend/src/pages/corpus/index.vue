@@ -39,9 +39,10 @@
                 name="file"
                 :before-upload="upload_before"
                 :action="uploadUrl"
-                :headers="{ token: store.token }"
+                :headers="{ token: userStore.token }"
                 :show-file-list="false"
                 :on-success="(response, file, fileList) => upload_success(response)"
+                :on-error="(err, file, fileList) => upload_error(err)"
                 class="blue_color"
               >
                 导入
@@ -486,6 +487,31 @@ function upload_success(response) {
   } else {
     ElMessage({ message: response.message, type: 'error' })
   }
+}
+function upload_error(error) {
+  console.log("上传失败")
+  console.log(error)
+  
+  let errorMessage = '导入失败'
+  
+  try {
+    // UploadAjaxError的message属性包含JSON字符串
+    if (error.message) {
+      const errorData = JSON.parse(error.message)
+      if (errorData.message) {
+        // 确保Unicode编码被正确解码
+        errorMessage = decodeURIComponent(JSON.stringify(errorData.message).replace(/\\u/g, '%u'))
+      }
+    }
+  } catch (e) {
+    console.error('解析错误响应失败:', e)
+    // 如果解析失败，尝试直接使用error.message
+    if (error.message && typeof error.message === 'string') {
+      errorMessage = error.message
+    }
+  }
+  
+  ElMessage({ message: errorMessage, type: 'error' })
 }
 //上传文件校验
 function upload_before(file) {

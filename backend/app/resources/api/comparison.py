@@ -445,7 +445,16 @@ class ImportComparisonResource(Resource):
             # 检查文件是否包含所需的列（验证逻辑不变）
             # 从第6行开始查找列标题
             if len(df) < 6:
-                return APIResponse.error(f'文件格式不符合模板要求：文件行数不足，需要至少6行，实际{len(df)}行', 406)
+                return APIResponse.error(f'请正确填写语义对照表后再上传', 406)
+            row = df.iloc[0]
+            if '术语表标题' not in row.values:
+                return APIResponse.error(f'请获取正确的导入模板并按格式填写上传', 406)
+            row = df.iloc[2]
+            if '源语种' not in row.values or '对照语种' not in row.values:
+                return APIResponse.error(f'请获取正确的导入模板并按格式填写上传', 406)
+            row = df.iloc[4]
+            if '源术语' not in row.values or '目标术语' not in row.values:
+                return APIResponse.error(f'请获取正确的导入模板并按格式填写上传', 406)
             
             # 检查第6行是否有数据（不是列标题行）
             row_6 = df.iloc[5]  # 第6行（索引5）
