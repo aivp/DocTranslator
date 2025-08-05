@@ -484,7 +484,7 @@ function upload_success(response) {
     ElMessage({ message: '导入成功', type: 'success' })
     getTermList()
   } else {
-    ElMessage({ message: data.message, type: 'error' })
+    ElMessage({ message: response.message, type: 'error' })
   }
 }
 //上传文件校验
