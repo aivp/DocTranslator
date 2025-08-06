@@ -61,6 +61,11 @@ def get(trans, event, texts, index):
     app_id = trans['app_id']
     app_key = trans['app_key']
     comparison_id = trans.get('comparison_id', 0)
+    # 确保comparison_id不为None，如果是None则设为0
+    if comparison_id is None:
+        comparison_id = 0
+    else:
+        comparison_id = int(comparison_id)
     server = trans.get('server', 'openai')
     old_text = text['text']
     md5_key = md5_encryption(

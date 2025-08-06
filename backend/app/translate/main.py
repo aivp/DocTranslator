@@ -119,7 +119,13 @@ def main():
         print(e)
 
 def get_prompt(prompt_id, comparison):
-    if prompt_id>0:
+    # 确保prompt_id不为None，如果是None则设为0
+    if prompt_id is None:
+        prompt_id = 0
+    else:
+        prompt_id = int(prompt_id)
+    
+    if prompt_id > 0:
         prompt=db.get("select content from prompt where id=%s and deleted_flag='N'", prompt_id)
         if prompt and len(prompt['content'])>0:
             return prompt['content']
@@ -128,7 +134,13 @@ def get_prompt(prompt_id, comparison):
     return prompt['value']
 
 def get_comparison(comparison_id):
-    if comparison_id>0:
+    # 确保comparison_id不为None，如果是None则设为0
+    if comparison_id is None:
+        comparison_id = 0
+    else:
+        comparison_id = int(comparison_id)
+    
+    if comparison_id > 0:
         comparison=db.get("select content from comparison where id=%s and deleted_flag='N'", comparison_id)
         if comparison and len(comparison['content'])>0:
             return comparison['content'].replace(',',':').replace(';','\n');
