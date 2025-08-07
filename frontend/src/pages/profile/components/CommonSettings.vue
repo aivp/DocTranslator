@@ -16,7 +16,12 @@
 
     <!-- 线程数 -->
     <el-form-item label="线程数:" prop="threads">
-      <el-input-number v-model="form.threads" :min="1" :max="20" :step="1" />
+      <el-input-number
+        v-model="form.threads"
+        :min="1"
+        :max="40"
+        :step="1"
+      />
     </el-form-item>
     <el-alert type="warning" description="启用后，所有pdf将使用doc2x进行处理。doc2x目前是进行pdf解析,将pdf转换成word、md等文件" show-icon :closable="false" />
 
@@ -103,8 +108,8 @@ const rules = reactive({
     {
       type: 'number',
       min: 1,
-      max: 20,
-      message: '线程数必须在1-20之间',
+      max: 40,
+      message: '线程数必须在1-40之间',
       trigger: 'blur'
     }
   ],

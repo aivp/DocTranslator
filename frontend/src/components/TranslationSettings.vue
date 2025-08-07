@@ -157,7 +157,7 @@
         <el-input-number
           v-model="settingsForm.aiServer.threads"
           :min="1"
-          :max="20"
+          :max="40"
           :controls="true"
           style="width: 50%" />
       </el-form-item>
@@ -402,16 +402,16 @@ const rules = {
     {
       required: true,
       message: '请设置线程数',
-      trigger: 'blur',
+      trigger: 'blur'
     },
     {
       type: 'number',
       min: 1,
-      max: 20,
-      message: '线程数必须在1到20之间',
-      trigger: 'blur',
-    },
-  ],
+      max: 40,
+      message: '线程数必须在1到40之间',
+      trigger: 'blur'
+    }
+  ]
 }
 
 // 提示语选择变化
