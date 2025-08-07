@@ -207,7 +207,14 @@ def get(trans, event, texts, index):
                             content = req(text['text'], target_lang, model, prompt, False)
                     # print("content", text['content'])
                 text['count'] = count_text(text['text'])
-                if check_translated(content):
+                
+                # 检查是否是data_inspection_failed导致的空字符串
+                if content == "" and model == 'qwen-mt-plus':
+                    # data_inspection_failed错误，直接设置为完成状态，不进行重试
+                    logging.warning(f"内容检查失败，跳过此内容: {text['text'][:50]}...")
+                    text['text'] = ""  # 设置为空字符串
+                    text['complete'] = True
+                elif check_translated(content):
                     # 过滤deepseek思考过程
                     cleaned_content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
                     # 清理上下文标记
@@ -223,7 +230,11 @@ def get(trans, event, texts, index):
                                    str(target_lang),
                                    str(old_text),
                                    str(content), str(md5_key))
-                text['complete'] = True
+                    text['complete'] = True
+                else:
+                    # 翻译失败，记录警告但继续处理
+                    logging.warning(f"翻译失败，保留原文: {text['text'][:50]}...")
+                    text['complete'] = True
         except openai.AuthenticationError as e:
             # set_threading_num(mredis)
             return use_backup_model(trans, event, texts, index, "openai密钥或令牌无效")

@@ -41,6 +41,38 @@ SPECIAL_SYMBOLS_PATTERN = re.compile(
 NUMBERS_PATTERN = re.compile(r'^[\d\s\.,\-\+\*\/\(\)\[\]\{\}]+$')
 
 
+def check_image(run):
+    """检查run是否包含图片"""
+    try:
+        # 检查是否包含drawing元素（图片）
+        if run.element.find('.//w:drawing', namespaces=run.element.nsmap) is not None:
+            return True
+        # 检查是否包含图片对象
+        if run.element.find('.//w:object', namespaces=run.element.nsmap) is not None:
+            return True
+        # 检查是否包含图片引用
+        if run.element.find('.//w:pict', namespaces=run.element.nsmap) is not None:
+            return True
+        return False
+    except:
+        return False
+
+
+def clear_image(paragraph):
+    """清除段落中的图片，但保留文本内容"""
+    runs_to_remove = []
+    for run in paragraph.runs:
+        if check_image(run):
+            runs_to_remove.append(run)
+    
+    # 从后往前删除，避免索引变化
+    for run in reversed(runs_to_remove):
+        try:
+            run._element.getparent().remove(run._element)
+        except:
+            pass
+
+
 
 
 
@@ -94,6 +126,7 @@ def start(trans):
         print(f"Word预处理失败，使用原文档: {str(e)}")
         optimized_doc_path = trans['file_path']
     # ===========================================
+    # optimized_doc_path = trans['file_path'] #启用以跳过预处理
 
     # 加载Word文档
     try:
@@ -134,8 +167,15 @@ def start(trans):
     run_translation(trans, filtered_texts, max_threads)
 
     # ============== 写入翻译结果 ==============
-    # 保留原始格式
-    text_count = apply_translations(document, texts)
+    # 检查是否启用自适应样式
+    use_adaptive_styles = trans.get('adaptive_styles', False)  # 默认不启用
+    
+    if use_adaptive_styles:
+        print("启用样式自适应功能：字体大小和行间距将根据翻译后文本长度自动调整")
+        text_count = apply_translations_with_adaptive_styles(document, texts)
+    else:
+        print("使用原始样式：保持原始字体大小和行间距")
+        text_count = apply_translations(document, texts)
     # ===========================================
 
     # 保存文档
@@ -207,6 +247,16 @@ def extract_paragraph_with_merge(paragraph, texts, context_type):
     
     for merged_item in merged_runs:
         if not check_text(merged_item['text']):
+            continue
+        
+        # 检查是否包含图片，如果包含则跳过
+        has_image = False
+        for run in merged_item['runs']:
+            if check_image(run):
+                has_image = True
+                break
+        
+        if has_image:
             continue
         
         texts.append({
@@ -388,6 +438,19 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000):
     merged_count = 0
     
     for run in paragraph_runs:
+        # 跳过包含图片的run
+        if check_image(run):
+            # 保存当前组
+            if current_group:
+                merged.append(merge_compatible_runs(current_group))
+                if len(current_group) > 1:
+                    merged_count += len(current_group) - 1
+                current_group = []
+                current_length = 0
+            
+            # 图片run单独处理，但不添加到翻译列表
+            continue
+        
         if not check_text(run.text):
             continue
         
@@ -461,6 +524,16 @@ def extract_paragraph_with_context(paragraph, texts, context_type):
     
     for i, merged_item in enumerate(merged_runs):
         if not check_text(merged_item['text']):
+            continue
+        
+        # 检查是否包含图片，如果包含图片则跳过，避免在图片后添加空行
+        has_image = False
+        for run in merged_item['runs']:
+            if check_image(run):
+                has_image = True
+                break
+        
+        if has_image:
             continue
         
         # 判断是否是段落边界
@@ -639,8 +712,110 @@ def run_translation(trans, texts, max_threads):
         print("所有翻译任务已完成")
 
 
-def apply_translations(document, texts):
-    """应用翻译结果到文档，完全保留原始格式"""
+def calculate_adaptive_font_size(original_text, translated_text, original_font_size):
+    """根据翻译后文本长度计算自适应字体大小"""
+    try:
+        if not original_font_size:
+            return None
+        
+        # 计算文本长度比例
+        original_length = len(original_text.strip())
+        translated_length = len(translated_text.strip())
+        
+        if original_length == 0:
+            return original_font_size
+        
+        # 计算长度比例
+        length_ratio = translated_length / original_length
+        
+        # 如果翻译后文本变长，适当缩小字体
+        if length_ratio > 1.2:  # 文本长度增加超过20%
+            # 根据长度比例计算新的字体大小，但不要小于原始大小的70%
+            new_size = max(original_font_size * 0.7, original_font_size / length_ratio)
+            return int(new_size)
+        elif length_ratio < 0.8:  # 文本长度减少超过20%
+            # 如果文本变短，可以适当增大字体，但不要超过原始大小的120%
+            new_size = min(original_font_size * 1.2, original_font_size / length_ratio)
+            return int(new_size)
+        else:
+            # 长度变化不大，保持原始字体大小
+            return original_font_size
+            
+    except Exception as e:
+        print(f"计算自适应字体大小失败: {str(e)}")
+        return original_font_size
+
+
+def calculate_adaptive_line_spacing(original_text, translated_text, original_line_spacing):
+    """根据翻译后文本长度计算自适应行间距"""
+    try:
+        # 计算文本行数变化
+        original_lines = len(original_text.split('\n'))
+        translated_lines = len(translated_text.split('\n'))
+        
+        if original_lines == 0:
+            return original_line_spacing
+        
+        # 计算行数比例
+        line_ratio = translated_lines / original_lines
+        
+        # 如果行数增加，适当增加行间距
+        if line_ratio > 1.1:  # 行数增加超过10%
+            # 增加行间距，但不要超过原始行间距的150%
+            new_spacing = min(original_line_spacing * 1.5, original_line_spacing * line_ratio)
+            return new_spacing
+        elif line_ratio < 0.9:  # 行数减少超过10%
+            # 如果行数减少，可以适当减少行间距，但不要少于原始行间距的80%
+            new_spacing = max(original_line_spacing * 0.8, original_line_spacing * line_ratio)
+            return new_spacing
+        else:
+            # 行数变化不大，保持原始行间距
+            return original_line_spacing
+            
+    except Exception as e:
+        print(f"计算自适应行间距失败: {str(e)}")
+        return original_line_spacing
+
+
+def apply_adaptive_styles(run, original_text, translated_text):
+    """应用自适应样式到run"""
+    try:
+        # 获取原始字体大小
+        original_font_size = None
+        if run.font.size:
+            try:
+                original_font_size = run.font.size.pt
+            except:
+                original_font_size = None
+        
+        # 计算自适应字体大小
+        if original_font_size:
+            adaptive_font_size = calculate_adaptive_font_size(original_text, translated_text, original_font_size)
+            if adaptive_font_size and adaptive_font_size != original_font_size:
+                from docx.shared import Pt
+                run.font.size = Pt(adaptive_font_size)
+                print(f"字体大小自适应: {original_font_size}pt -> {adaptive_font_size}pt")
+        
+        # 获取段落对象并应用行间距自适应
+        try:
+            paragraph = run._element.getparent()
+            if hasattr(paragraph, 'paragraph_format') and paragraph.paragraph_format:
+                # 获取原始行间距
+                original_line_spacing = paragraph.paragraph_format.line_spacing
+                if original_line_spacing:
+                    adaptive_line_spacing = calculate_adaptive_line_spacing(original_text, translated_text, original_line_spacing)
+                    if adaptive_line_spacing and adaptive_line_spacing != original_line_spacing:
+                        paragraph.paragraph_format.line_spacing = adaptive_line_spacing
+                        print(f"行间距自适应: {original_line_spacing} -> {adaptive_line_spacing}")
+        except Exception as e:
+            print(f"应用行间距自适应失败: {str(e)}")
+                    
+    except Exception as e:
+        print(f"应用自适应样式失败: {str(e)}")
+
+
+def apply_translations_with_adaptive_styles(document, texts):
+    """应用翻译结果到文档，同时应用自适应样式"""
     text_count = 0
 
     for item in texts:
@@ -648,32 +823,58 @@ def apply_translations(document, texts):
             continue
 
         if item['type'] == 'run':
-            # 直接替换run文本，保留所有格式
-            item['run'].text = item.get('text', item['run'].text)
+            # 检查run是否包含图片，如果包含则跳过
+            if check_image(item['run']):
+                continue
+            
+            # 获取原始文本和翻译后文本
+            original_text = item['run'].text
+            translated_text = item.get('text', original_text)
+            
+            # 应用翻译结果
+            item['run'].text = translated_text
+            
+            # 应用自适应样式
+            apply_adaptive_styles(item['run'], original_text, translated_text)
+            
             text_count += 1
         elif item['type'] == 'merged_run':
             # 处理合并的run，需要将翻译结果分配回原始run
             merged_item = item['merged_item']
             translated_text = item.get('text', merged_item['text'])
+            original_text = merged_item['text']
+            
+            # 检查是否包含图片，如果包含则跳过
+            has_image = False
+            for run in merged_item['runs']:
+                if check_image(run):
+                    has_image = True
+                    break
+            
+            if has_image:
+                continue
             
             if merged_item['type'] == 'merged':
                 # 合并的run组，需要智能分配翻译结果
-                distribute_translation_to_runs(merged_item['runs'], translated_text)
+                distribute_translation_to_runs_with_adaptive_styles(merged_item['runs'], translated_text, original_text)
             else:
                 # 单个run，直接替换
-                merged_item['runs'][0].text = translated_text
+                run = merged_item['runs'][0]
+                run.text = translated_text
+                apply_adaptive_styles(run, original_text, translated_text)
             
             text_count += 1
 
     return text_count
 
 
-def distribute_translation_to_runs(runs, translated_text):
-    """将翻译结果智能分配回原始run，保持格式"""
+def distribute_translation_to_runs_with_adaptive_styles(runs, translated_text, original_text):
+    """将翻译结果智能分配回原始run，同时应用自适应样式"""
     
     # 如果只有一个run，直接替换
     if len(runs) == 1:
         runs[0].text = translated_text
+        apply_adaptive_styles(runs[0], original_text, translated_text)
         return
     
     # 计算原始文本的总长度
@@ -689,7 +890,12 @@ def distribute_translation_to_runs(runs, translated_text):
             
             if current_pos < len(translated_text):
                 end_pos = min(current_pos + target_length, len(translated_text))
-                run.text = translated_text[current_pos:end_pos]
+                allocated_text = translated_text[current_pos:end_pos]
+                run.text = allocated_text
+                
+                # 应用自适应样式
+                apply_adaptive_styles(run, run.text, allocated_text)
+                
                 current_pos = end_pos
             else:
                 run.text = ""
@@ -700,7 +906,9 @@ def distribute_translation_to_runs(runs, translated_text):
             # 按run数量分配单词
             for i, run in enumerate(runs):
                 if i < len(words):
-                    run.text = words[i]
+                    allocated_text = words[i]
+                    run.text = allocated_text
+                    apply_adaptive_styles(run, run.text, allocated_text)
                 else:
                     run.text = ""
         else:
@@ -709,7 +917,9 @@ def distribute_translation_to_runs(runs, translated_text):
             for i, run in enumerate(runs):
                 start_pos = i * chars_per_run
                 end_pos = start_pos + chars_per_run if i < len(runs) - 1 else len(translated_text)
-                run.text = translated_text[start_pos:end_pos]
+                allocated_text = translated_text[start_pos:end_pos]
+                run.text = allocated_text
+                apply_adaptive_styles(run, run.text, allocated_text)
 
 
 def update_special_elements(docx_path, texts):
@@ -818,3 +1028,89 @@ def check_text(text):
         return False
     
     return not common.is_all_punc(text)
+
+
+def apply_translations(document, texts):
+    """应用翻译结果到文档，完全保留原始格式"""
+    text_count = 0
+
+    for item in texts:
+        if not item.get('complete', False):
+            continue
+
+        if item['type'] == 'run':
+            # 检查run是否包含图片，如果包含则跳过
+            if check_image(item['run']):
+                continue
+            # 直接替换run文本，保留所有格式
+            item['run'].text = item.get('text', item['run'].text)
+            text_count += 1
+        elif item['type'] == 'merged_run':
+            # 处理合并的run，需要将翻译结果分配回原始run
+            merged_item = item['merged_item']
+            translated_text = item.get('text', merged_item['text'])
+            
+            # 检查是否包含图片，如果包含则跳过
+            has_image = False
+            for run in merged_item['runs']:
+                if check_image(run):
+                    has_image = True
+                    break
+            
+            if has_image:
+                continue
+            
+            if merged_item['type'] == 'merged':
+                # 合并的run组，需要智能分配翻译结果
+                distribute_translation_to_runs(merged_item['runs'], translated_text)
+            else:
+                # 单个run，直接替换
+                merged_item['runs'][0].text = translated_text
+            
+            text_count += 1
+
+    return text_count
+
+
+def distribute_translation_to_runs(runs, translated_text):
+    """将翻译结果智能分配回原始run，保持格式"""
+    
+    # 如果只有一个run，直接替换
+    if len(runs) == 1:
+        runs[0].text = translated_text
+        return
+    
+    # 计算原始文本的总长度
+    original_total_length = sum(len(run.text) for run in runs)
+    
+    # 如果翻译后文本长度变化不大，按比例分配
+    if abs(len(translated_text) - original_total_length) <= 2:
+        # 按原始比例分配
+        current_pos = 0
+        for run in runs:
+            original_ratio = len(run.text) / original_total_length
+            target_length = int(len(translated_text) * original_ratio)
+            
+            if current_pos < len(translated_text):
+                end_pos = min(current_pos + target_length, len(translated_text))
+                run.text = translated_text[current_pos:end_pos]
+                current_pos = end_pos
+            else:
+                run.text = ""
+    else:
+        # 长度变化较大，尝试按空格和标点分割
+        words = translated_text.split()
+        if len(words) >= len(runs):
+            # 按run数量分配单词
+            for i, run in enumerate(runs):
+                if i < len(words):
+                    run.text = words[i]
+                else:
+                    run.text = ""
+        else:
+            # 单词数量少于run数量，平均分配
+            chars_per_run = len(translated_text) // len(runs)
+            for i, run in enumerate(runs):
+                start_pos = i * chars_per_run
+                end_pos = start_pos + chars_per_run if i < len(runs) - 1 else len(translated_text)
+                run.text = translated_text[start_pos:end_pos]

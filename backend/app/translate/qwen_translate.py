@@ -177,6 +177,11 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             logging.error(f"Qwen翻译API调用失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
             logging.error(f"错误类型: {type(e).__name__}")
             
+            # 检查是否是data_inspection_failed错误
+            if "data_inspection_failed" in error_msg or "inappropriate content" in error_msg:
+                logging.warning(f"检测到内容检查失败，跳过此内容: {text[:50]}...")
+                return ""  # 直接返回空字符串，不进行重试
+            
             # 检查是否是频率限制错误
             if "429" in error_msg or "limit_requests" in error_msg:
                 # 429错误使用专门的重试策略
@@ -215,7 +220,7 @@ def check_qwen_availability():
         completion = client.chat.completions.create(
             model="qwen-mt-plus",
             messages=[{"role": "user", "content": "Hello"}],
-            extra_body={"translation_options": {"source_lang": "en", "target_lang": "zh"}}
+            extra_body={"translation_options": {"source_lang": "auto", "target_lang": "Chinese"}}
         )
         
         return True, "Qwen翻译服务正常"
