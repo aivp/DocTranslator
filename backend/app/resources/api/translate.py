@@ -188,90 +188,129 @@ class TranslateStartResource(Resource):
 class TranslateListResource(Resource):
     @jwt_required()
     def get(self):
-        """获取翻译记录列表"""
-        # 获取查询参数
-        page = request.args.get('page', '1')
-        limit = request.args.get('limit', '100')
-        status_filter = request.args.get('status')
-        # 将字符串参数转换为整数
+        """获取翻译任务列表"""
         try:
-            page = int(page)
-            limit = int(limit)
-        except ValueError:
-            return APIResponse.error("Invalid page or limit value"), 400
-        # 构建查询条件
-        query = Translate.query.filter_by(
-            customer_id=get_jwt_identity(),
-            deleted_flag='N'
-        )
+            # 获取查询参数
+            page = request.args.get('page', 1, type=int)
+            limit = request.args.get('limit', 10, type=int)
+            status_filter = request.args.get('status', None)
+            skip_uuids = request.args.get('skip_uuids', '').split(',') if request.args.get('skip_uuids') else []
 
-        # 检查 status_filter 是否是合法值
-        if status_filter:
-            valid_statuses = {'none', 'process', 'done', 'failed'}
-            if status_filter not in valid_statuses:
-                return APIResponse.error(f"Invalid status value: {status_filter}"), 400
-            query = query.filter_by(status=status_filter)
+            # 构建查询
+            query = Translate.query.filter_by(deleted_flag='N')
+            
+            # 添加用户ID过滤，确保用户只能看到自己的任务
+            query = query.filter_by(customer_id=get_jwt_identity())
+            
+            # 过滤掉正在翻译中的任务
+            if skip_uuids and skip_uuids[0]:
+                query = query.filter(~Translate.uuid.in_(skip_uuids))
 
-        # 执行分页查询
-        pagination = query.paginate(page=page, per_page=limit, error_out=False)
+            # 状态过滤
+            if status_filter:
+                valid_statuses = {'none', 'process', 'done', 'failed'}
+                if status_filter not in valid_statuses:
+                    return APIResponse.error(f"Invalid status value: {status_filter}"), 400
+                query = query.filter_by(status=status_filter)
 
-        # 处理每条记录
-        data = []
-        for t in pagination.items:
-            # 计算花费时间（基于 created_at 和 end_at）
-            # 修复时间计算（强制显示分秒格式）
-            if t.start_at and t.end_at:
-                spend_time = t.end_at - t.start_at
+            # 执行分页查询
+            pagination = query.paginate(page=page, per_page=limit, error_out=False)
+
+            # 处理每条记录
+            data = []
+            for t in pagination.items:
+                # 使用健壮的时间计算函数
+                spend_time_str = self._calculate_spend_time(t)
+                
+                # 获取状态中文描述
+                status_name_map = {
+                    'none': '未开始',
+                    'process': '进行中',
+                    'done': '已完成',
+                    'failed': '失败'
+                }
+                status_name = status_name_map.get(t.status, '未知状态')
+
+                # 获取文件类型
+                file_type = self.get_file_type(t.origin_filename)
+
+                # 格式化完成时间（精确到秒）
+                end_at_str = t.end_at.strftime('%Y-%m-%d %H:%M:%S') if t.end_at else "--"
+                origin_filename=t.origin_filename
+                # 如果是pdf，需要改成docx-----------
+                if t.origin_filename.lower().endswith('.pdf') and t.server == 'doc2x':
+                    origin_filename = t.origin_filename + '.docx'
+                data.append({
+                    'id': t.id,
+                    'file_type': file_type,
+                    'origin_filename': origin_filename,
+                    'status': t.status,
+                    'status_name': status_name,
+                    'process': float(t.process),  # 将 Decimal 转换为 float
+                    'spend_time': spend_time_str,  # 花费时间
+                    'end_at': end_at_str,  # 完成时间
+                    'start_at': t.start_at.strftime('%Y-%m-%d %H:%M:%S') if t.start_at else "--",
+                    # 开始时间
+                    'lang': get_unified_lang_name(t.lang),  # 标准输出语言中文名称
+                    'target_filepath': t.target_filepath,
+                    'uuid': t.uuid,
+                    'server': t.server,
+                })
+
+            # 返回响应数据
+            return APIResponse.success({
+                'data': data,
+                'total': pagination.total,
+                'current_page': pagination.page
+            })
+        except Exception as e:
+            current_app.logger.error(f"获取翻译列表失败: {str(e)}", exc_info=True)
+            return APIResponse.error("获取翻译列表失败", 500)
+
+    @staticmethod
+    def _calculate_spend_time(translate_record):
+        """健壮的时间计算函数，处理各种异常情况"""
+        try:
+            # 优先使用 start_at 和 end_at
+            if translate_record.start_at and translate_record.end_at:
+                spend_time = translate_record.end_at - translate_record.start_at
                 total_seconds = spend_time.total_seconds()
-
+                
+                # 防护措施：避免负数时间
+                if total_seconds < 0:
+                    current_app.logger.warning(
+                        f"任务 {translate_record.id} 时间计算异常: "
+                        f"start_at: {translate_record.start_at}, end_at: {translate_record.end_at}"
+                    )
+                    return "--"
+                
                 # 强制分秒格式（即使不足1分钟也显示0分xx秒）
                 minutes = int(total_seconds // 60)
                 seconds = int(total_seconds % 60)
-                spend_time_str = f"{minutes}分{seconds}秒"
+                return f"{minutes}分{seconds}秒"
+            
+            # 如果没有 start_at，尝试使用 created_at 和 end_at
+            elif translate_record.created_at and translate_record.end_at:
+                spend_time = translate_record.end_at - translate_record.created_at
+                total_seconds = spend_time.total_seconds()
+                
+                if total_seconds < 0:
+                    current_app.logger.warning(
+                        f"任务 {translate_record.id} 创建时间异常: "
+                        f"created_at: {translate_record.created_at}, end_at: {translate_record.end_at}"
+                    )
+                    return "--"
+                
+                minutes = int(total_seconds // 60)
+                seconds = int(total_seconds % 60)
+                return f"{minutes}分{seconds}秒"
+            
             else:
-                spend_time_str = "--"
-
-            # 获取状态中文描述
-            status_name_map = {
-                'none': '未开始',
-                'process': '进行中',
-                'done': '已完成',
-                'failed': '失败'
-            }
-            status_name = status_name_map.get(t.status, '未知状态')
-
-            # 获取文件类型
-            file_type = self.get_file_type(t.origin_filename)
-
-            # 格式化完成时间（精确到秒）
-            end_at_str = t.end_at.strftime('%Y-%m-%d %H:%M:%S') if t.end_at else "--"
-            origin_filename=t.origin_filename
-            # 如果是pdf，需要改成docx-----------
-            if t.origin_filename.lower().endswith('.pdf') and t.server == 'doc2x':
-                origin_filename = t.origin_filename + '.docx'
-            data.append({
-                'id': t.id,
-                'file_type': file_type,
-                'origin_filename': origin_filename,
-                'status': t.status,
-                'status_name': status_name,
-                'process': float(t.process),  # 将 Decimal 转换为 float
-                'spend_time': spend_time_str,  # 花费时间
-                'end_at': end_at_str,  # 完成时间
-                'start_at': t.start_at.strftime('%Y-%m-%d %H:%M:%S') if t.start_at else "--",
-                # 开始时间
-                'lang': get_unified_lang_name(t.lang),  # 标准输出语言中文名称
-                'target_filepath': t.target_filepath,
-                'uuid': t.uuid,
-                'server': t.server,
-            })
-
-        # 返回响应数据
-        return APIResponse.success({
-            'data': data,
-            'total': pagination.total,
-            'current_page': pagination.page
-        })
+                return "--"
+                
+        except Exception as e:
+            current_app.logger.error(f"时间计算异常，任务 {translate_record.id}: {str(e)}")
+            return "--"
 
     @staticmethod
     def get_file_type(filename):
@@ -379,20 +418,40 @@ class TranslateDeleteResource(Resource):
     @jwt_required()
     def delete(self, id):
         """软删除翻译记录[^4]"""
-        # 查询翻译记录
-        customer_id = get_jwt_identity()
-        translate = Translate.query.filter_by(
-            id=id,
-            customer_id=customer_id
-        ).first_or_404()
-        customer = Customer.query.get(customer_id)
-        # 更新 deleted_flag 为 'Y'
-        translate.deleted_flag = 'Y'
-        # 更新用户存储空间
-        customer.storage -= translate.size
-        db.session.commit()
-
-        return APIResponse.success(message='删除成功!')
+        try:
+            # 查询翻译记录
+            customer_id = get_jwt_identity()
+            translate = Translate.query.filter_by(
+                id=id,
+                customer_id=customer_id
+            ).first_or_404()
+            
+            customer = Customer.query.get(customer_id)
+            
+            # 记录删除前的存储空间
+            old_storage = customer.storage
+            file_size = translate.size or 0
+            
+            # 更新 deleted_flag 为 'Y'
+            translate.deleted_flag = 'Y'
+            
+            # 更新用户存储空间（使用size字段）
+            customer.storage = max(0, customer.storage - file_size)
+            
+            # 记录存储空间变化
+            current_app.logger.info(
+                f"用户 {customer_id} 删除文件 {translate.origin_filename}: "
+                f"存储空间 {old_storage} -> {customer.storage} "
+                f"(减少 {file_size} 字节)"
+            )
+            
+            db.session.commit()
+            return APIResponse.success(message='删除成功!')
+            
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"删除翻译记录失败: {str(e)}", exc_info=True)
+            return APIResponse.error('删除失败', 500)
 
 
 class TranslateDownloadResource(Resource):
@@ -504,29 +563,43 @@ class TranslateDeleteAllResource(Resource):
     @jwt_required()
     def delete(self):
         """删除用户所有翻译记录并更新存储空间"""
-        customer_id = get_jwt_identity()
+        try:
+            customer_id = get_jwt_identity()
 
-        # 先查询需要删除的记录及其总大小
-        records_to_delete = Translate.query.filter_by(
-            customer_id=customer_id,
-            deleted_flag='N'
-        ).all()
+            # 先查询需要删除的记录及其总大小
+            records_to_delete = Translate.query.filter_by(
+                customer_id=customer_id,
+                deleted_flag='N'
+            ).all()
 
-        total_size = sum(record.size for record in records_to_delete)
+            total_size = sum(record.size or 0 for record in records_to_delete)
+            
+            # 记录删除前的存储空间
+            customer = Customer.query.get(customer_id)
+            old_storage = customer.storage if customer else 0
 
-        # 执行批量删除
-        Translate.query.filter_by(
-            customer_id=customer_id,
-            deleted_flag='N'
-        ).delete()
+            # 执行批量软删除
+            for record in records_to_delete:
+                record.deleted_flag = 'Y'
 
-        # 更新用户存储空间
-        customer = Customer.query.get(customer_id)
-        if customer:
-            customer.storage = max(0, customer.storage - total_size)
+            # 更新用户存储空间
+            if customer:
+                customer.storage = max(0, customer.storage - total_size)
+                
+                # 记录存储空间变化
+                current_app.logger.info(
+                    f"用户 {customer_id} 批量删除文件: "
+                    f"存储空间 {old_storage} -> {customer.storage} "
+                    f"(减少 {total_size} 字节, 删除 {len(records_to_delete)} 个文件)"
+                )
 
-        db.session.commit()
-        return APIResponse.success(message="全部文件删除成功!")
+            db.session.commit()
+            return APIResponse.success(message="全部文件删除成功!")
+            
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"批量删除翻译记录失败: {str(e)}", exc_info=True)
+            return APIResponse.error('批量删除失败', 500)
 
 
 class TranslateFinishCountResource(Resource):
