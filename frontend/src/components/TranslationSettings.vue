@@ -5,6 +5,7 @@
     width="90%"
     modal-class="setting_dialog"
     :close-on-click-modal="false"
+    :style="{ minHeight: '600px' }"
     @close="formCancel">
     <!-- 当前服务显示 -->
     <div class="current-service-display">
@@ -646,6 +647,8 @@ defineExpose({
 
     &__body {
       padding: 0 30px 0 30px;
+      /* 确保所有内容可见 */
+      overflow: visible !important;
     }
   }
 
@@ -688,6 +691,15 @@ defineExpose({
   }
 }
 
+/* 确保doc2x功能完全可见 */
+h4:contains("Doc2x"),
+.el-alert:has(description:contains("doc2x")),
+.el-form-item:has(.el-radio-group) {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
 .no_label {
   label {
     opacity: 0;
@@ -723,7 +735,7 @@ defineExpose({
 
       &__body {
         padding: 0 !important;
-        max-height: 300px;
+        max-height: 600px; /* 增加高度，确保doc2x功能可见 */
         overflow-y: auto;
 
         .el-form-item {
@@ -750,7 +762,7 @@ defineExpose({
   }
   .el-dialog__body {
     padding: 0 !important;
-    max-height: 300px;
+    max-height: 600px; /* 增加高度，确保doc2x功能可见 */
     overflow-y: auto;
     .el-form-item {
       display: block !important;

@@ -32,7 +32,7 @@
               <span>上传文档</span>
             </button>
             <div class="title phone_show">点击按钮选择添加文档</div>
-            <div class="tips">支持格式{{ accpet_tip }}，建议文件≤30MB</div>
+            <div class="tips">支持格式{{ accpet_tip }}，建议文件≤500MB</div>
           </div>
         </el-upload>
       </div>
@@ -522,12 +522,45 @@ async function startBatchTranslation() {
       doc2x_secret_key: form.value.doc2x_secret_key
     }
     
+    // 先获取当前翻译列表，过滤出需要翻译的文件
+    const res = await translates({ page: 1, limit: 100 })
+    if (res.code !== 200) {
+      ElMessage.error('获取翻译列表失败，无法启动批量翻译')
+      return
+    }
+    
+    const translateList = res.data.data
+    const filesToTranslate = []
+    
+    // 过滤出需要翻译的文件（状态为 'none' 且在当前上传列表中）
+    for (const file of form.value.files) {
+      const existingTask = translateList.find(task => task.uuid === file.uuid)
+      if (existingTask && existingTask.status === 'none') {
+        filesToTranslate.push({
+          ...file,
+          existingTask
+        })
+      } else if (existingTask) {
+        console.log(`文件 ${file.file_name} 状态为 ${existingTask.status}，跳过翻译`)
+      } else {
+        console.log(`文件 ${file.file_name} 未找到对应任务，跳过翻译`)
+      }
+    }
+    
+    if (filesToTranslate.length === 0) {
+      ElMessage.warning('没有需要翻译的文件，所有文件都已完成或正在处理中')
+      return
+    }
+    
+    console.log(`实际需要翻译的文件数量: ${filesToTranslate.length}/${form.value.files.length}`)
+    
     let successCount = 0
     let failCount = 0
+    let skipCount = form.value.files.length - filesToTranslate.length
     
     // 逐个启动翻译任务
-    for (let i = 0; i < form.value.files.length; i++) {
-      const file = form.value.files[i]
+    for (let i = 0; i < filesToTranslate.length; i++) {
+      const file = filesToTranslate[i]
       
       try {
         // 准备翻译参数
@@ -542,34 +575,50 @@ async function startBatchTranslation() {
         const res = await transalteFile(translateParams)
         if (res.code === 200) {
           successCount++
-          console.log(`文件 ${i + 1}/${form.value.files.length} 翻译任务启动成功:`, file.file_name)
+          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动成功:`, file.file_name)
           
           // 启动进度查询
           process(file.uuid)
           
           // 如果不是最后一个文件，等待一下再启动下一个（避免API限流）
-          if (i < form.value.files.length - 1) {
+          if (i < filesToTranslate.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 1000))
           }
         } else {
           failCount++
-          console.log(`文件 ${i + 1}/${form.value.files.length} 翻译任务启动失败:`, file.file_name, res.message)
+          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动失败:`, file.file_name, res.message)
         }
       } catch (error) {
         failCount++
-        console.error(`文件 ${i + 1}/${form.value.files.length} 翻译任务启动异常:`, file.file_name, error)
+        console.error(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动异常:`, file.file_name, error)
       }
     }
     
     // 显示批量启动结果
+    let message = `批量翻译任务启动完成！`
+    if (successCount > 0) {
+      message += `成功: ${successCount} 个`
+    }
+    if (failCount > 0) {
+      message += `，失败: ${failCount} 个`
+    }
+    if (skipCount > 0) {
+      message += `，跳过: ${skipCount} 个（已完成或进行中）`
+    }
+    
     if (successCount > 0) {
       ElMessage.success({
-        message: `批量翻译任务启动完成！成功: ${successCount} 个，失败: ${failCount} 个`,
+        message: message,
+        duration: 5000
+      })
+    } else if (failCount > 0) {
+      ElMessage.error({
+        message: message,
         duration: 5000
       })
     } else {
-      ElMessage.error({
-        message: `批量翻译任务启动失败！所有文件都无法启动`,
+      ElMessage.warning({
+        message: message,
         duration: 5000
       })
     }
@@ -1029,31 +1078,57 @@ function delAllTransFile() {
   })
 }
 
+// 验证JWT token是否有效
+function isTokenValid() {
+  // 使用userStore中的token，而不是localStorage
+  if (!userStore.token) {
+    ElMessage.error('请先登录')
+    return false
+  }
+  
+  // 简单的token格式验证
+  if (userStore.token.split('.').length !== 3) {
+    ElMessage.error('登录状态异常，请重新登录')
+    userStore.logout() // 使用store的logout方法
+    return false
+  }
+  
+  return true
+}
+
 //下载全部文件
 async function downAllTransFile() {
   try {
-    const response = await fetch(API_URL + '/api/translate/download/all', {
-      headers: {
-        token: `${localStorage.getItem('token')}`, // 手动设置 JWT Token
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error('文件下载失败')
+    // 验证token是否有效
+    if (!isTokenValid()) {
+      return
     }
-
-    // 获取 ZIP 文件内容
+    
+    // 直接使用fetch下载文件，不使用request工具
+    const response = await fetch('/api/translate/download/all', {
+      headers: {
+        'token': userStore.token
+      }
+    })
+    
+    if (!response.ok) {
+      throw new Error('下载失败')
+    }
+    
+    // 获取文件流并创建下载
     const blob = await response.blob()
     const url = window.URL.createObjectURL(blob)
-
-    // 创建 `<a>` 标签并触发下载
+    
+    // 创建下载链接
     const a = document.createElement('a')
     a.href = url
-    a.download = `translations_${new Date().toISOString().slice(0, 10)}.zip` // 设置下载文件名
+    a.download = `translations_${new Date().toISOString().slice(0, 10)}.zip`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    window.URL.revokeObjectURL(url) // 释放 URL 对象
+    window.URL.revokeObjectURL(url)
+    
+    ElMessage.success('批量下载成功！')
   } catch (error) {
     console.error('下载失败:', error)
     ElMessage.error('文件下载失败，请稍后重试')
