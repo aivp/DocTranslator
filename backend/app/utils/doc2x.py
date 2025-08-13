@@ -32,7 +32,15 @@ class Doc2XService:
 
             result = response.json()
             if result.get("code") != "success":
-                raise Exception(result.get("msg", "API 请求失败"))
+                error_msg = result.get("msg", "API 请求失败")
+                # 提供更友好的错误信息
+                if "文件不合法" in error_msg:
+                    error_msg = "上传的文件格式不支持或文件损坏，请检查是否为有效的PDF文件"
+                elif "文件过大" in error_msg:
+                    error_msg = "文件大小超过限制，请压缩文件后重试"
+                elif "API密钥" in error_msg or "key" in error_msg.lower():
+                    error_msg = "API密钥无效或已过期，请检查密钥设置"
+                raise Exception(error_msg)
             return result["data"]
         except Exception as e:
             current_app.logger.error(f"doc2x 请求失败: {str(e)}")
@@ -41,13 +49,38 @@ class Doc2XService:
     @staticmethod
     def start_task(api_key: str, file_path: str) -> str:
         """阶段1: 启动任务 (parse/pdf)"""
-        with open(file_path, 'rb') as f:
-            return Doc2XService._make_request(
-                api_key,
-                "upload",
-                "parse/pdf",
-                files=f
-            )["uid"]
+        # 验证文件是否存在
+        if not os.path.exists(file_path):
+            raise Exception(f"文件不存在: {file_path}")
+        
+        # 验证文件大小
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            raise Exception("文件为空，无法处理")
+        
+        # 验证文件扩展名
+        if not file_path.lower().endswith('.pdf'):
+            raise Exception("只支持PDF文件格式")
+        
+        # 验证文件是否可读
+        try:
+            with open(file_path, 'rb') as f:
+                # 读取文件头部验证PDF格式
+                header = f.read(4)
+                if header != b'%PDF':
+                    raise Exception("文件不是有效的PDF格式")
+                f.seek(0)  # 重置文件指针
+                
+                return Doc2XService._make_request(
+                    api_key,
+                    "upload",
+                    "parse/pdf",
+                    files=f
+                )["uid"]
+        except Exception as e:
+            if "文件不是有效的PDF格式" in str(e):
+                raise e
+            raise Exception(f"文件读取失败: {str(e)}")
 
     @staticmethod
     def check_parse_status(api_key: str, uid: str) -> dict:

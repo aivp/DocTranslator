@@ -81,7 +81,8 @@ class AdminCreateCustomerResource(Resource):
             # name=data['name'],
             email=data['email'],
             password=hash_password(data['password']),
-            level=data.get('level', 'common')
+            level=data.get('level', 'common'),
+            total_storage=1073741824  # 设置默认1GB存储空间
         )
         db.session.add(customer)
         db.session.commit()

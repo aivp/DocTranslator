@@ -21,7 +21,7 @@ class Customer(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 创建时间
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)  # 更新时间
     storage = db.Column(db.BigInteger, default=0)  # 已使用的存储空间（字节）
-    total_storage = db.Column(db.BigInteger, default=104857600) # 默认100MB 总存储空间（字节）
+    total_storage = db.Column(db.BigInteger, default=1073741824) # 默认1GB 总存储空间（字节）
 
     def set_password(self, password):
         self.password = generate_password_hash(password)

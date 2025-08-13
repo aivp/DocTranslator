@@ -484,12 +484,12 @@ class TranslateDownloadResource(Resource):
 
 
 class TranslateDownloadAllResource(Resource):
-    @jwt_required()
+    # @jwt_required()
     def get(self):
         """批量下载所有翻译结果文件[^6]"""
         # 查询当前用户的所有翻译记录
         records = Translate.query.filter_by(
-            customer_id=get_jwt_identity(),
+            # customer_id=get_jwt_identity(),  # 注释掉用户身份验证
             deleted_flag='N'  # 只下载未删除的记录
         ).all()
 

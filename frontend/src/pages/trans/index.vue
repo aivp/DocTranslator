@@ -214,7 +214,7 @@ import {
   downAllTranslate,
   doc2xStartService,
   doc2xQueryStatusService,
-  getFinishCount,
+  getFinishCount
 } from '@/api/trans'
 import { storage } from '@/api/account'
 import uploadPng from '@assets/upload.png'
@@ -1105,7 +1105,7 @@ async function downAllTransFile() {
     }
     
     // 直接使用fetch下载文件，不使用request工具
-    const response = await fetch('/api/translate/download/all', {
+    const response = await fetch('/api/api/translate/download/all', {
       headers: {
         'token': userStore.token
       }

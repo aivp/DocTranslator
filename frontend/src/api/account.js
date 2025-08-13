@@ -15,7 +15,7 @@ export function changePassword(data) {
 export function storage() {
     return request({
         url: '/api/storage',
-        method: 'GET',
+        method: 'GET'
     });
 }
 

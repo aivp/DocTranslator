@@ -126,19 +126,31 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
     使用阿里云Qwen-MT翻译模型进行翻译
     """
     
+    # 输入验证
+    if not text or not text.strip():
+        logging.warning("输入文本为空，跳过翻译")
+        return text
+    
+    if not target_language:
+        logging.error("目标语言未指定")
+        return text
+    
+    logging.info(f"🚀 开始Qwen翻译: {text[:100]}... -> {target_language}")
+    
     for attempt in range(max_retries):
         try:
             # 检查API密钥
             if not dashscope_key:
-                logging.error("DASH_SCOPE_KEY未设置或为空")
+                logging.error("❌ DASH_SCOPE_KEY未设置或为空")
                 return text
                 
-            logging.info(f"开始Qwen翻译 (尝试 {attempt + 1}/{max_retries}): {text[:50]}... -> {target_language}")
+            logging.info(f"🔄 Qwen翻译尝试 {attempt + 1}/{max_retries}")
             
             # 初始化 OpenAI 客户端
             client = OpenAI(
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                api_key=dashscope_key
+                api_key=dashscope_key,
+                timeout=60.0  # 增加超时时间
             ) 
             
             # 设置翻译参数
@@ -150,17 +162,19 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             # 添加可选参数
             if tm_list is not None:
                 translation_options["tm_list"] = tm_list
+                logging.info(f"📚 使用术语库: {len(tm_list)} 个术语")
             if terms is not None:
                 translation_options["terms"] = terms
             if domains is not None:
                 translation_options["domains"] = domains
                 
-            logging.info(f"翻译参数: {translation_options}")
+            logging.debug(f"🔧 翻译参数: {translation_options}")
             
             # 等待请求间隔
             wait_for_rate_limit()
             
             # 调用API
+            logging.info(f"📡 发送API请求...")
             completion = client.chat.completions.create(
                 model="qwen-mt-plus",
                 messages=[{"role": "user", "content": text}],
@@ -168,38 +182,52 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             )
             
             # 提取翻译结果
+            if not completion.choices or len(completion.choices) == 0:
+                raise Exception("API返回结果为空")
+                
             translated_text = completion.choices[0].message.content
-            logging.info(f"翻译结果: {translated_text[:50]}...")
+            if not translated_text or not translated_text.strip():
+                raise Exception("翻译结果为空")
+                
+            logging.info(f"✅ 翻译成功: {translated_text[:100]}...")
             return translated_text
             
         except Exception as e:
             error_msg = str(e)
-            logging.error(f"Qwen翻译API调用失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
-            logging.error(f"错误类型: {type(e).__name__}")
+            error_type = type(e).__name__
+            
+            logging.error(f"❌ Qwen翻译API调用失败 (尝试 {attempt + 1}/{max_retries})")
+            logging.error(f"   错误类型: {error_type}")
+            logging.error(f"   错误信息: {error_msg}")
+            logging.error(f"   输入文本: {text[:100]}...")
             
             # 检查是否是data_inspection_failed错误
-            if "data_inspection_failed" in error_msg or "inappropriate content" in error_msg:
-                logging.warning(f"检测到内容检查失败，跳过此内容: {text[:50]}...")
+            if "data_inspection_failed" in error_msg.lower() or "inappropriate content" in error_msg.lower():
+                logging.warning(f"⚠️  检测到内容检查失败，跳过此内容: {text[:50]}...")
                 return ""  # 直接返回空字符串，不进行重试
             
             # 检查是否是频率限制错误
-            if "429" in error_msg or "limit_requests" in error_msg:
+            if "429" in error_msg or "limit_requests" in error_msg or "rate limit" in error_msg.lower():
+                logging.warning(f"⏰ 遇到频率限制错误 (429)")
                 # 429错误使用专门的重试策略
                 if handle_429_error(attempt, error_msg):
                     continue
                 else:
+                    logging.error(f"🚫 达到429错误最大重试次数，返回原文")
                     return text
             else:
                 # 非频率限制错误，使用原始重试策略
                 if attempt < max_retries - 1:
                     wait_time = (attempt + 1) * 2  # 递增等待时间：2秒、4秒、6秒
-                    logging.warning(f"遇到非频率限制错误，等待 {wait_time} 秒后重试...")
+                    logging.warning(f"⏳ 遇到非频率限制错误，等待 {wait_time} 秒后重试...")
                     time.sleep(wait_time)
                     continue
                 else:
-                    logging.error("达到最大重试次数，返回原文")
+                    logging.error(f"🚫 达到最大重试次数，返回原文")
                     return text
     
+    # 如果所有重试都失败了
+    logging.error(f"💥 所有重试都失败了，返回原文")
     return text
 
 def check_qwen_availability():

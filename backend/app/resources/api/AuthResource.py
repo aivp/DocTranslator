@@ -63,7 +63,8 @@ class UserRegisterResource(Resource):
             email=data['email'],
             password=hash_password(data['password']),
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
+            total_storage=1073741824  # 设置默认1GB存储空间
         )
         db.session.add(customer)
         db.session.commit()

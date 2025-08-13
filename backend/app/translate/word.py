@@ -16,6 +16,7 @@ import shutil
 import logging
 from typing import List, Dict, Any, Optional
 from ..utils.word_run_optimizer import SafeRunMerger, quick_optimize
+from docx.text.paragraph import Paragraph
 
 # 线程安全打印锁
 print_lock = Lock()
@@ -40,29 +41,50 @@ SPECIAL_SYMBOLS_PATTERN = re.compile(
 # 纯数字和简单标点的正则表达式
 NUMBERS_PATTERN = re.compile(r'^[\d\s\.,\-\+\*\/\(\)\[\]\{\}]+$')
 
+# 添加目录页码模式
+TOC_PAGE_PATTERN = re.compile(r'[\s\-—_]+\d+$')
 
-def check_image(run):
+
+def check_if_image(run):
     """检查run是否包含图片"""
-    try:
-        # 检查是否包含drawing元素（图片）
-        if run.element.find('.//w:drawing', namespaces=run.element.nsmap) is not None:
+    namespaces = run.element.nsmap
+    drawing = run.element.find('.//w:drawing', namespaces)
+    if drawing is not None:
+        blip = drawing.find('.//a:blip', {**namespaces, 'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+        if blip is not None:
             return True
-        # 检查是否包含图片对象
-        if run.element.find('.//w:object', namespaces=run.element.nsmap) is not None:
+    if run.element.find('.//w:object', namespaces) is not None:
+        return True
+    if run.element.find('.//w:pict', namespaces) is not None:
+        return True
+    return False
+
+def check_if_textbox(run):
+    """检查run是否包含文本框"""
+    namespaces = {**run.element.nsmap, 'v': 'urn:schemas-microsoft-com:vml'}
+    # 检查 DrawingML 文本框
+    drawing = run.element.find('.//w:drawing', namespaces)
+    if drawing is not None:
+        txbx = drawing.find('.//w:txbxContent', {**namespaces, 'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+        if txbx is not None:
             return True
-        # 检查是否包含图片引用
-        if run.element.find('.//w:pict', namespaces=run.element.nsmap) is not None:
+    
+    # 检查 VML 文本框
+    vtextbox = run.element.find('.//v:textbox', namespaces)
+    if vtextbox is not None:
+        # VML 文本框内部通常有 w:txbxContent
+        txbx = vtextbox.find('.//w:txbxContent', namespaces)
+        if txbx is not None:
             return True
-        return False
-    except:
-        return False
+    
+    return False
 
 
 def clear_image(paragraph):
     """清除段落中的图片，但保留文本内容"""
     runs_to_remove = []
     for run in paragraph.runs:
-        if check_image(run):
+        if check_if_image(run):
             runs_to_remove.append(run)
     
     # 从后往前删除，避免索引变化
@@ -214,7 +236,6 @@ def should_translate(text):
     if common.is_all_punc(text):
         return False
 
-
     return True
 
 
@@ -252,20 +273,62 @@ def extract_paragraph_with_merge(paragraph, texts, context_type):
         # 检查是否包含图片，如果包含则跳过
         has_image = False
         for run in merged_item['runs']:
-            if check_image(run):
+            if check_if_image(run):
                 has_image = True
                 break
         
         if has_image:
             continue
         
-        texts.append({
-            "text": merged_item['text'],
-            "type": "merged_run",
-            "merged_item": merged_item,
-            "complete": False,
-            "context_type": context_type  # 标记类型
-        })
+        # 过滤纯数字
+        if NUMBERS_PATTERN.match(merged_item['text']):
+            continue
+        
+        # 检查是否可能是目录项（以 -数字 或 —数字 结尾）
+        match = TOC_PAGE_PATTERN.search(merged_item['text'])
+        if match and context_type == "body":  # 假设目录在body
+            page_num = match.group(0)
+            main_text = merged_item['text'][:match.start()].rstrip()
+            
+            if main_text and should_translate(main_text):
+                # 创建文本项
+                texts.append({
+                    "text": main_text,
+                    "type": "merged_run",
+                    "merged_item": merged_item,  # 共享runs，翻译后需小心替换
+                    "complete": False,
+                    "context_type": context_type,
+                    "is_toc_text": True,
+                    "original_page_num": page_num
+                })
+            
+                # 创建页码项（不翻译）
+                if should_translate(page_num):  # 额外检查，但纯数字应False
+                    texts.append({
+                        "text": page_num,
+                        "type": "merged_run",
+                        "merged_item": {'text': page_num, 'runs': merged_item['runs'][-1:], 'type': 'single'},  # 取最后一个run作为页码
+                        "complete": False,  # 如果需要翻译
+                        "context_type": context_type,
+                        "is_toc_page": True
+                    })
+                else:
+                    texts.append({
+                        "text": page_num,
+                        "type": "merged_run",
+                        "merged_item": {'text': page_num, 'runs': merged_item['runs'][-1:], 'type': 'single'},
+                        "complete": True,
+                        "context_type": context_type,
+                        "is_toc_page": True
+                    })
+        else:
+            texts.append({
+                "text": merged_item['text'],
+                "type": "merged_run",
+                "merged_item": merged_item,
+                "complete": False,
+                "context_type": context_type  # 标记类型
+            })
 
 
 def extract_content_for_translation(document, file_path, texts, max_threads=4):
@@ -310,6 +373,30 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                 # 处理超链接
                 for hyperlink in paragraph.hyperlinks:
                     extract_hyperlink_with_merge(hyperlink, local_texts)
+                
+                # 处理段落中的文本框
+                for run in paragraph.runs:
+                    if check_if_textbox(run):
+                        # 处理 DrawingML
+                        drawing_elem = run.element.find('.//w:drawing', run.element.nsmap)
+                        if drawing_elem is not None:
+                            txbx_elem = drawing_elem.find('.//w:txbxContent', drawing_elem.nsmap)
+                            if txbx_elem is not None:
+                                for p_elem in txbx_elem:
+                                    if p_elem.tag == qn('w:p'):
+                                        tb_para = Paragraph(p_elem, paragraph)
+                                        extract_paragraph_with_merge(tb_para, local_texts, "textbox")
+                        
+                        # 处理 VML
+                        namespaces = {**run.element.nsmap, 'v': 'urn:schemas-microsoft-com:vml'}
+                        vtextbox_elem = run.element.find('.//v:textbox', namespaces)
+                        if vtextbox_elem is not None:
+                            txbx_elem = vtextbox_elem.find('.//w:txbxContent', namespaces)
+                            if txbx_elem is not None:
+                                for p_elem in txbx_elem:
+                                    if p_elem.tag == qn('w:p'):
+                                        tb_para = Paragraph(p_elem, paragraph)
+                                        extract_paragraph_with_merge(tb_para, local_texts, "textbox")
             
             # 线程安全地添加到主列表
             for text_item in local_texts:
@@ -333,6 +420,29 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                         # 处理表格中的超链接
                         for hyperlink in paragraph.hyperlinks:
                             extract_hyperlink_with_merge(hyperlink, local_texts)
+                        # 处理表格单元格中的文本框
+                        for run in paragraph.runs:
+                            if check_if_textbox(run):
+                                # 处理 DrawingML
+                                drawing_elem = run.element.find('.//w:drawing', run.element.nsmap)
+                                if drawing_elem is not None:
+                                    txbx_elem = drawing_elem.find('.//w:txbxContent', drawing_elem.nsmap)
+                                    if txbx_elem is not None:
+                                        for p_elem in txbx_elem:
+                                            if p_elem.tag == qn('w:p'):
+                                                tb_para = Paragraph(p_elem, paragraph)
+                                                extract_paragraph_with_merge(tb_para, local_texts, "textbox")
+                                
+                                # 处理 VML
+                                namespaces = {**run.element.nsmap, 'v': 'urn:schemas-microsoft-com:vml'}
+                                vtextbox_elem = run.element.find('.//v:textbox', namespaces)
+                                if vtextbox_elem is not None:
+                                    txbx_elem = vtextbox_elem.find('.//w:txbxContent', namespaces)
+                                    if txbx_elem is not None:
+                                        for p_elem in txbx_elem:
+                                            if p_elem.tag == qn('w:p'):
+                                                tb_para = Paragraph(p_elem, paragraph)
+                                                extract_paragraph_with_merge(tb_para, local_texts, "textbox")
             
             # 线程安全地添加到主列表
             for text_item in local_texts:
@@ -356,13 +466,59 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                 # 处理页眉中的超链接
                 for hyperlink in paragraph.hyperlinks:
                     extract_hyperlink_with_merge(hyperlink, local_texts)
-            
+                # 处理页眉中的文本框
+                for run in paragraph.runs:
+                    if check_if_textbox(run):
+                        # 处理 DrawingML
+                        drawing_elem = run.element.find('.//w:drawing', run.element.nsmap)
+                        if drawing_elem is not None:
+                            txbx_elem = drawing_elem.find('.//w:txbxContent', drawing_elem.nsmap)
+                            if txbx_elem is not None:
+                                for p_elem in txbx_elem:
+                                    if p_elem.tag == qn('w:p'):
+                                        tb_para = Paragraph(p_elem, paragraph)
+                                        extract_paragraph_with_merge(tb_para, local_texts, "textbox")
+                        
+                        # 处理 VML
+                        namespaces = {**run.element.nsmap, 'v': 'urn:schemas-microsoft-com:vml'}
+                        vtextbox_elem = run.element.find('.//v:textbox', namespaces)
+                        if vtextbox_elem is not None:
+                            txbx_elem = vtextbox_elem.find('.//w:txbxContent', namespaces)
+                            if txbx_elem is not None:
+                                for p_elem in txbx_elem:
+                                    if p_elem.tag == qn('w:p'):
+                                        tb_para = Paragraph(p_elem, paragraph)
+                                        extract_paragraph_with_merge(tb_para, local_texts, "textbox")
+
             # 处理页脚
             for paragraph in section.footer.paragraphs:
                 extract_paragraph_with_merge(paragraph, local_texts, "footer")
                 # 处理页脚中的超链接
                 for hyperlink in paragraph.hyperlinks:
                     extract_hyperlink_with_merge(hyperlink, local_texts)
+                # 处理页脚中的文本框
+                for run in paragraph.runs:
+                    if check_if_textbox(run):
+                        # 处理 DrawingML
+                        drawing_elem = run.element.find('.//w:drawing', run.element.nsmap)
+                        if drawing_elem is not None:
+                            txbx_elem = drawing_elem.find('.//w:txbxContent', drawing_elem.nsmap)
+                            if txbx_elem is not None:
+                                for p_elem in txbx_elem:
+                                    if p_elem.tag == qn('w:p'):
+                                        tb_para = Paragraph(p_elem, paragraph)
+                                        extract_paragraph_with_merge(tb_para, local_texts, "textbox")
+                        
+                        # 处理 VML
+                        namespaces = {**run.element.nsmap, 'v': 'urn:schemas-microsoft-com:vml'}
+                        vtextbox_elem = run.element.find('.//v:textbox', namespaces)
+                        if vtextbox_elem is not None:
+                            txbx_elem = vtextbox_elem.find('.//w:txbxContent', namespaces)
+                            if txbx_elem is not None:
+                                for p_elem in txbx_elem:
+                                    if p_elem.tag == qn('w:p'):
+                                        tb_para = Paragraph(p_elem, paragraph)
+                                        extract_paragraph_with_merge(tb_para, local_texts, "textbox")
             
             # 线程安全地添加到主列表
             for text_item in local_texts:
@@ -374,6 +530,34 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                       for section in document.sections]
             for future in as_completed(futures):
                 future.result()
+    
+    def process_inline_shapes_parallel():
+        """并行处理内嵌形状（inline shapes）"""
+        def process_shape(shape):
+            local_texts = []
+            try:
+                if hasattr(shape, 'has_text_frame') and shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        extract_paragraph_with_merge(paragraph, local_texts, "textbox")
+                        # 处理形状中的超链接
+                        for hyperlink in paragraph.hyperlinks:
+                            extract_hyperlink_with_merge(hyperlink, local_texts)
+            except Exception as e:
+                print(f"处理内嵌形状时出错: {str(e)}")
+            
+            # 线程安全地添加到主列表
+            for text_item in local_texts:
+                add_text_safe(text_item)
+        
+        # 使用线程池并行处理形状
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+            futures = [executor.submit(process_shape, shape) 
+                       for shape in document.inline_shapes]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"内嵌形状线程异常: {str(e)}")
     
     # 按顺序执行各个部分，避免依赖问题
     print("开始安全的多线程文本提取...")
@@ -389,7 +573,11 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
     if document.sections:
         process_sections_parallel()
     
-    # 4. 批注内容（单线程，因为需要ZIP操作）
+    # 4. 处理内嵌形状（inline shapes，可能包含文本框）
+    if document.inline_shapes:
+        process_inline_shapes_parallel()
+    
+    # 5. 批注内容（单线程，因为需要ZIP操作）
     if hasattr(document, 'comments') and document.comments:
         extract_comments(file_path, texts)
     
@@ -439,7 +627,7 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000):
     
     for run in paragraph_runs:
         # 跳过包含图片的run
-        if check_image(run):
+        if check_if_image(run):
             # 保存当前组
             if current_group:
                 merged.append(merge_compatible_runs(current_group))
@@ -529,7 +717,7 @@ def extract_paragraph_with_context(paragraph, texts, context_type):
         # 检查是否包含图片，如果包含图片则跳过，避免在图片后添加空行
         has_image = False
         for run in merged_item['runs']:
-            if check_image(run):
+            if check_if_image(run):
                 has_image = True
                 break
         
@@ -777,7 +965,7 @@ def calculate_adaptive_line_spacing(original_text, translated_text, original_lin
         return original_line_spacing
 
 
-def apply_adaptive_styles(run, original_text, translated_text):
+def apply_adaptive_styles(run, original_text, translated_text, context_type=None):
     """应用自适应样式到run"""
     try:
         # 获取原始字体大小
@@ -792,9 +980,18 @@ def apply_adaptive_styles(run, original_text, translated_text):
         if original_font_size:
             adaptive_font_size = calculate_adaptive_font_size(original_text, translated_text, original_font_size)
             if adaptive_font_size and adaptive_font_size != original_font_size:
+                # 如果是文本框，进一步缩小20%
+                if context_type == 'textbox':
+                    adaptive_font_size = int(adaptive_font_size * 0.8)
                 from docx.shared import Pt
                 run.font.size = Pt(adaptive_font_size)
                 print(f"字体大小自适应: {original_font_size}pt -> {adaptive_font_size}pt")
+            elif context_type == 'textbox':
+                # 对于文本框，即使长度没变，也缩小20%
+                adaptive_font_size = int(original_font_size * 0.8)
+                from docx.shared import Pt
+                run.font.size = Pt(adaptive_font_size)
+                print(f"文本框字体固定缩小: {original_font_size}pt -> {adaptive_font_size}pt")
         
         # 获取段落对象并应用行间距自适应
         try:
@@ -809,7 +1006,7 @@ def apply_adaptive_styles(run, original_text, translated_text):
                         print(f"行间距自适应: {original_line_spacing} -> {adaptive_line_spacing}")
         except Exception as e:
             print(f"应用行间距自适应失败: {str(e)}")
-                    
+                
     except Exception as e:
         print(f"应用自适应样式失败: {str(e)}")
 
@@ -824,7 +1021,7 @@ def apply_translations_with_adaptive_styles(document, texts):
 
         if item['type'] == 'run':
             # 检查run是否包含图片，如果包含则跳过
-            if check_image(item['run']):
+            if check_if_image(item['run']):
                 continue
             
             # 获取原始文本和翻译后文本
@@ -847,7 +1044,7 @@ def apply_translations_with_adaptive_styles(document, texts):
             # 检查是否包含图片，如果包含则跳过
             has_image = False
             for run in merged_item['runs']:
-                if check_image(run):
+                if check_if_image(run):
                     has_image = True
                     break
             
@@ -1040,20 +1237,29 @@ def apply_translations(document, texts):
 
         if item['type'] == 'run':
             # 检查run是否包含图片，如果包含则跳过
-            if check_image(item['run']):
+            if check_if_image(item['run']):
                 continue
             # 直接替换run文本，保留所有格式
             item['run'].text = item.get('text', item['run'].text)
+            # 如果是文本框，应用自适应样式
+            if item.get('context_type') == 'textbox':
+                original_text = item['run'].text  # 注意：这里 original_text 应该是替换前的，但由于已替换，使用 item['text'] 作为 translated
+                translated_text = item['run'].text
+                apply_adaptive_styles(item['run'], original_text, translated_text, context_type='textbox')
             text_count += 1
         elif item['type'] == 'merged_run':
             # 处理合并的run，需要将翻译结果分配回原始run
             merged_item = item['merged_item']
             translated_text = item.get('text', merged_item['text'])
             
+            # 如果是目录文本，附加原页码
+            if item.get('is_toc_text'):
+                translated_text += item['original_page_num']
+            
             # 检查是否包含图片，如果包含则跳过
             has_image = False
             for run in merged_item['runs']:
-                if check_image(run):
+                if check_if_image(run):
                     has_image = True
                     break
             
@@ -1066,6 +1272,13 @@ def apply_translations(document, texts):
             else:
                 # 单个run，直接替换
                 merged_item['runs'][0].text = translated_text
+            
+            # 如果是文本框，应用自适应样式到每个run
+            if item.get('context_type') == 'textbox':
+                original_text = merged_item['text']  # 原始合并文本
+                # 对于每个run，应用自适应（简化：对第一个run应用整体调整）
+                for run in merged_item['runs']:
+                    apply_adaptive_styles(run, original_text, translated_text, context_type='textbox')
             
             text_count += 1
 
