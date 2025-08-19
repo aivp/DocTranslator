@@ -12,9 +12,11 @@ from flask_restful import Resource
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import request, current_app
 from datetime import datetime
+from app.utils.token_checker import require_valid_token
 
 
 class FileUploadResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """文件上传接口"""
@@ -145,6 +147,7 @@ class FileUploadResource(Resource):
 
 
 class FileDeleteResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """文件删除接口[^1]"""

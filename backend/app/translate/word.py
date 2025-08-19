@@ -102,8 +102,6 @@ def clear_image(paragraph):
 
 
 
-
-
 def start(trans):
     """主入口函数，处理Word文档翻译"""
     # 初始化线程设置
@@ -2060,24 +2058,6 @@ def process_table_with_layout_adjustment(table, local_texts):
     
     # 调整表格布局
     adjust_table_layout_for_translation(table)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def convert_chinese_punctuation_to_english(text):

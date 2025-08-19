@@ -1,9 +1,19 @@
 # resources/customer.py
+from flask import request, current_app
+from flask_restful import Resource
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from datetime import datetime, timedelta
+from app import db
+from app.models import Customer
+from app.utils.security import hash_password, verify_password
 from app.utils.response import APIResponse
-import uuid
-from flask_restful import Resource, reqparse
-from flask_jwt_extended import jwt_required
-from app.models.customer import Customer
+from app.utils.mail_service import EmailService
+from app.utils.validators import (
+    validate_verification_code,
+    validate_password_confirmation,
+    validate_password_complexity
+)
+from app.utils.token_checker import require_valid_token
 
 
 class GuestIdResource(Resource):
@@ -16,6 +26,7 @@ class GuestIdResource(Resource):
 
 
 class CustomerDetailResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self, customer_id):
         """获取客户详细信息[^2]"""

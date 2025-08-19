@@ -13,10 +13,12 @@ from app.utils.validators import (
     validate_password_confirmation,
     validate_password_complexity
 )
+from app.utils.token_checker import require_valid_token
 import random
 
 
 class ChangePasswordResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """修改密码（旧密码验证）[^1]"""
@@ -52,6 +54,7 @@ class ChangePasswordResource(Resource):
 
 
 class SendChangeCodeResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """发送修改密码验证码[^2]"""
@@ -76,6 +79,7 @@ class SendChangeCodeResource(Resource):
 
 
 class EmailChangePasswordResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """通过邮箱验证码修改密码[^3]"""
@@ -111,6 +115,7 @@ class EmailChangePasswordResource(Resource):
 
 
 class StorageInfoResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
         """获取存储空间信息[^2]"""
@@ -194,6 +199,7 @@ class StorageInfoResource(Resource):
 
 
 class UserInfoResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
         """获取用户基本信息[^5]"""

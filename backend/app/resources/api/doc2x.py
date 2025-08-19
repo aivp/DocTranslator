@@ -10,10 +10,13 @@ from app import APIResponse, db
 from app.models import Customer, customer
 from app.models.translate import Translate
 from app.utils.doc2x import Doc2XService
+from app.utils.response import APIResponse
+from app.utils.token_checker import require_valid_token
 
 
 # 翻译启动接口
 class Doc2XTranslateStartResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         data = request.form
@@ -83,6 +86,7 @@ class Doc2XTranslateStartResource(Resource):
 
 # 状态查询接口
 class Doc2XTranslateStatusResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         data = request.form

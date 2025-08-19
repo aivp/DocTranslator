@@ -14,10 +14,12 @@ from app.models.comparison import Comparison, ComparisonFav
 from app.utils.response import APIResponse
 from sqlalchemy import func
 from datetime import datetime
+from app.utils.token_checker import require_valid_token
 
 
 
 class MyComparisonListResource(Resource):
+    @require_valid_token
     @jwt_required()
     def get(self):
         """获取我的术语表列表[^1]"""
@@ -64,6 +66,7 @@ class MyComparisonListResource(Resource):
 
 # 获取共享术语表列表
 class SharedComparisonListResource(Resource):
+    @require_valid_token
     @jwt_required()
     def get(self):
         """获取共享术语表列表[^3]"""
@@ -205,6 +208,7 @@ class SharedComparisonListResource111(Resource):
 
 # 编辑术语列表
 class EditComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def post(self, id):
         """编辑术语表"""
@@ -255,6 +259,7 @@ class EditComparisonResource(Resource):
 
 # 更新术语表共享状态
 class ShareComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def post(self, id):
         """修改共享状态[^4]"""
@@ -274,6 +279,7 @@ class ShareComparisonResource(Resource):
 
 # 复制到我的术语库
 class CopyComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def post(self, id):
         """复制到我的术语库[^5]"""
@@ -299,6 +305,7 @@ class CopyComparisonResource(Resource):
 
 # 收藏/取消收藏
 class FavoriteComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def post(self, id):
         """收藏/取消收藏[^6]"""
@@ -327,6 +334,7 @@ class FavoriteComparisonResource(Resource):
 
 # 创建新术语表
 class CreateComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def post(self):
         """创建新术语表[^1]"""
@@ -376,6 +384,7 @@ class CreateComparisonResource(Resource):
 
 # 删除术语表
 class DeleteComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def delete(self, id):
         """删除术语表[^2]"""
@@ -413,6 +422,7 @@ class DownloadTemplateResource(Resource):
 
 # 导入术语表
 class ImportComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def post(self):
         """
@@ -519,6 +529,7 @@ class ImportComparisonResource(Resource):
 
 # 导出单个术语表
 class ExportComparisonResource(Resource):
+    @require_valid_token
     @jwt_required()
     def get(self, id):
         """
@@ -584,6 +595,7 @@ class ExportComparisonResource6666(Resource):
 
 # 批量导出所有术语表
 class ExportAllComparisonsResource(Resource):
+    @require_valid_token
     @jwt_required()
     def get(self):
         """

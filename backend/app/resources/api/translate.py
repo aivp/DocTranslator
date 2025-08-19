@@ -16,6 +16,7 @@ from app.models.translate import Translate
 from app.resources.task.translate_service import TranslateEngine
 from app.utils.response import APIResponse
 from app.utils.check_utils import AIChecker
+from app.utils.token_checker import require_valid_token
 
 # 定义翻译配置（硬编码示例）
 TRANSLATE_SETTINGS = {
@@ -57,6 +58,7 @@ def get_unified_lang_name(lang_code):
 
 
 class TranslateStartResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """启动翻译任务（支持绝对路径和多参数）"""
@@ -186,6 +188,7 @@ class TranslateStartResource(Resource):
 
 # 获取翻译记录列表
 class TranslateListResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
         """获取翻译任务列表"""
@@ -334,6 +337,7 @@ class TranslateListResource(Resource):
 
 # 获取翻译设置
 class TranslateSettingResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
         """获取翻译配置（从数据库动态加载）[^1]"""
@@ -391,6 +395,7 @@ class TranslateSettingResource(Resource):
 
 
 class TranslateSettingResource66(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
         """获取翻译配置[^2]"""
@@ -398,6 +403,7 @@ class TranslateSettingResource66(Resource):
 
 
 class TranslateProcessResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """查询翻译进度[^3]"""
@@ -415,6 +421,7 @@ class TranslateProcessResource(Resource):
 
 
 class TranslateDeleteResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def delete(self, id):
         """软删除翻译记录[^4]"""
@@ -517,6 +524,7 @@ class TranslateDownloadAllResource(Resource):
 
 
 class OpenAICheckResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """OpenAI接口检测[^6]"""
@@ -535,6 +543,7 @@ class OpenAICheckResource(Resource):
 
 
 class PDFCheckResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """PDF扫描件检测[^7]"""
@@ -560,6 +569,7 @@ class TranslateTestResource(Resource):
 
 
 class TranslateDeleteAllResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def delete(self):
         """删除用户所有翻译记录并更新存储空间"""
@@ -603,6 +613,7 @@ class TranslateDeleteAllResource(Resource):
 
 
 class TranslateFinishCountResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
         """获取已完成翻译数量[^3]"""

@@ -1,17 +1,20 @@
 # resources/prompt.py
 from datetime import datetime, date
 
-from flask import request
+from flask import request, current_app
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
 from app import db
-from app.models import Customer
+from app.models.customer import Customer
 from app.models.prompt import Prompt, PromptFav
 from app.utils.response import APIResponse
+from app.utils.token_checker import require_valid_token
+
 
 # 获取提示语列表
 class MyPromptListResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
         """获取我的提示语列表[^1]"""
@@ -93,6 +96,7 @@ class SharedPromptListResource(Resource):
 
 # 修改提示语内容
 class EditPromptResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self, id):
         """修改提示语内容[^3]"""
@@ -118,6 +122,7 @@ class EditPromptResource(Resource):
 
 # 更新共享状态
 class SharePromptResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self, id):
         """
@@ -145,6 +150,7 @@ class SharePromptResource(Resource):
 
 # 复制到我的提示语库
 class CopyPromptResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self, id):
         """复制到我的提示语库[^5]"""
@@ -173,6 +179,7 @@ class CopyPromptResource(Resource):
 
 # 收藏/取消收藏
 class FavoritePromptResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self, id):
         """收藏/取消收藏[^6]"""
@@ -203,6 +210,7 @@ class FavoritePromptResource(Resource):
 # 创建新的提示语
 
 class CreatePromptResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
         """创建新提示语[^7]"""
@@ -234,6 +242,7 @@ class CreatePromptResource(Resource):
 
 # 删除提示语
 class DeletePromptResource(Resource):
+    @require_valid_token  # 先检查token
     @jwt_required()
     def delete(self, id):
         """删除提示语[^8]"""
