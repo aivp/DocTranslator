@@ -74,7 +74,7 @@ const handleMoreDownload = () => {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      token: token
+      Authorization: "Bearer " + token
     },
     body: JSON.stringify({ ids })
   })

@@ -85,7 +85,7 @@ function onSubmit(settingForm: FormInstance | null) {
           <el-input v-model="setting.email_limit" placeholder="多个用逗号隔开,完全匹配域名" />
         </el-form-item>
         <el-form-item class="setting-btns">
-          <el-button style="width: 88px" type="primary" @click="onSubmit(settingForm)">保存</el-button>
+          <el-button style="width: 88px" type="primary" @click="onSubmit(settingForm)">保存其他设置</el-button>
         </el-form-item>
       </el-form>
     </el-card>

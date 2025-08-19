@@ -34,7 +34,7 @@ const service = axios.create({
 service.interceptors.request.use(
   config => {
     const userStore = useUserStore()
-    config.headers['token'] = userStore.token;
+    config.headers['Authorization'] = 'Bearer ' + userStore.token;
     config.headers['credentials']='include'
     config.headers['withCredentials']=true  // 携带凭据（如 Cookies）
       // config.headers['language'] = localStorage.getItem('language')||'zh';
@@ -51,10 +51,12 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   response => {
     const res = response.data
-    // if (res?.code === 401) {
-    //   router.push('/login')
-    //   return Promise.reject(new Error('Unauthorized'))
-    // }
+    // 检查业务状态码
+    if (res?.code === 401) {
+      ElMessage.error('身份过期，请重新登录')
+      router.push('/login')
+      return Promise.reject(new Error('Unauthorized'))
+    }
     return res
   },
   error => {

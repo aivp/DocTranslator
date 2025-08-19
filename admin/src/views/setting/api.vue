@@ -1,28 +1,28 @@
 <script lang="ts" setup>
-import { ref, onMounted } from "vue"
-import { type FormInstance, ElMessage } from "element-plus"
-import { getApiSettingData, setApiSettingData } from "@/api/setting"
+import { ref, onMounted } from 'vue'
+import { type FormInstance, ElMessage } from 'element-plus'
+import { getApiSettingData, setApiSettingData } from '@/api/setting'
 
 defineOptions({
   // 命名当前组件
-  name: "接口配置"
+  name: '接口配置',
 })
 const loading = ref(false)
 const setting = ref({
-  api_url: "",
-  api_key: "",
-  models: "",
-  default_model: "",
-  default_backup: ""
+  api_url: '',
+  api_key: '',
+  models: '',
+  default_model: '',
+  default_backup: '',
 })
 
 const models = ref<string[]>([])
 const settingForm = ref<FormInstance | null>(null)
 
 const rules = {
-  api_url: [{ required: true, message: "请填写接口配置", trigger: "blur" }],
-  api_key: [{ required: true, message: "请填写API秘钥", trigger: "blur" }],
-  models: [{ required: true, message: "请填写模型配置", trigger: "blur" }]
+  api_url: [{ required: true, message: '请填写接口配置', trigger: 'blur' }],
+  api_key: [{ required: true, message: '请填写API秘钥', trigger: 'blur' }],
+  models: [{ required: true, message: '请填写模型配置', trigger: 'blur' }],
 }
 
 onMounted(async () => {
@@ -30,8 +30,8 @@ onMounted(async () => {
   await getApiSettingData().then((data) => {
     if (data.data) {
       setting.value = data.data
-      const arr: string[] = data.data.models.split(",")
-      models.value = arr.filter((item) => item != "")
+      const arr: string[] = data.data.models.split(',')
+      models.value = arr.filter((item) => item != '')
     }
   })
   loading.value = false
@@ -39,13 +39,13 @@ onMounted(async () => {
 
 function changeModel() {
   if (!setting.value.models) return
-  const arr: string[] = setting.value.models.split(",")
-  models.value = arr.filter((item) => item != "")
+  const arr: string[] = setting.value.models.split(',')
+  models.value = arr.filter((item) => item != '')
   if (arr.indexOf(setting.value.default_model) == -1) {
-    setting.value.default_model = ""
+    setting.value.default_model = ''
   }
   if (arr.indexOf(setting.value.default_backup) == -1) {
-    setting.value.default_backup = ""
+    setting.value.default_backup = ''
   }
 }
 
@@ -61,11 +61,11 @@ function onSubmit(settingForm: FormInstance | null) {
         api_key: setting.value.api_key,
         models: setting.value.models,
         default_model: setting.value.default_model,
-        default_backup: setting.value.default_backup
+        default_backup: setting.value.default_backup,
       })
         .then((data) => {
           if (data.code == 200) {
-            ElMessage.success("保存成功")
+            ElMessage.success('保存成功')
           } else {
             ElMessage.error(data.message)
           }
@@ -77,8 +77,8 @@ function onSubmit(settingForm: FormInstance | null) {
       for (const field in messages) {
         messages[field].forEach((message) => {
           ElMessage({
-            message: message["message"],
-            type: "error"
+            message: message['message'],
+            type: 'error',
           })
         })
         break
@@ -105,8 +105,7 @@ function onSubmit(settingForm: FormInstance | null) {
             :rows="3"
             v-model="setting.models"
             @blur="changeModel"
-            placeholder="请至少输入1个模型，多个模型用,隔开"
-          />
+            placeholder="请至少输入1个模型，多个模型用,隔开" />
         </el-form-item>
         <el-form-item label="默认模型">
           <el-select v-model="setting.default_model" placeholder="未选择默认模型将采用配置中的第1个" clearable>
@@ -120,12 +119,11 @@ function onSubmit(settingForm: FormInstance | null) {
               :key="model"
               :disabled="setting.default_model == model ? true : false"
               :label="model"
-              :value="model"
-            />
+              :value="model" />
           </el-select>
         </el-form-item>
         <el-form-item class="setting-btns">
-          <el-button style="width: 88px" type="primary" @click="onSubmit(settingForm)">保存</el-button>
+          <el-button type="primary" @click="onSubmit(settingForm)">保存API设置</el-button>
         </el-form-item>
       </el-form>
     </el-card>

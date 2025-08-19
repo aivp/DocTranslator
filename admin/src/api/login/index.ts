@@ -26,7 +26,7 @@ export function getUserInfoApi() {
   })
 }
 // 修改密码
-export function updatePasswordApi(data) {
+export function updatePasswordApi(data: any) {
   return request({
     url: "/changepwd",
     method: "post",

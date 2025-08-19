@@ -39,7 +39,7 @@
                 name="file"
                 :before-upload="upload_before"
                 :action="uploadUrl"
-                :headers="{ token: userStore.token }"
+                :headers="{ Authorization: 'Bearer ' + userStore.token }"
                 :show-file-list="false"
                 :on-success="(response, file, fileList) => upload_success(response)"
                 :on-error="(err, file, fileList) => upload_error(err)"
@@ -410,7 +410,7 @@ async function export_terms(item) {
       `${import.meta.env.VITE_API_URL}/api/comparison/export/${item.id}`,
       {
         headers: {
-          token: `${userStore.token}`
+          Authorization: `Bearer ${userStore.token}`
         }
       }
     )
@@ -444,7 +444,7 @@ async function export_terms_all() {
   try {
     const response = await fetch(import.meta.env.VITE_API_URL + '/api/comparison/export/all', {
       headers: {
-        token: `${userStore.token}`
+        Authorization: `Bearer ${userStore.token}`
       }
     })
 

@@ -21,10 +21,10 @@ migrate = Migrate()
 def init_extensions(app):
     """初始化所有扩展"""
     db.init_app(app)
-    api.init_app(app)
     jwt.init_app(app)
-    # 拦截jwt
+    # 拦截jwt - 必须在jwt.init_app之后立即配置
     configure_jwt_callbacks(jwt)
+    print("✅ JWT回调函数已配置")  # 添加调试输出
     mail.init_app(app)
     migrate.init_app(app, db)
     # 延迟初始化API（避免循环导入）

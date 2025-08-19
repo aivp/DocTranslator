@@ -1,52 +1,56 @@
-<script lang="ts" setup>
-import { reactive, ref } from "vue"
-import { useRouter } from "vue-router"
-import { useUserStore } from "@/store/modules/user"
-import { type FormInstance, type FormRules } from "element-plus"
+<script setup>
+import { reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/store/modules/user'
+
 //import { getLoginCodeApi } from "@/api/login"
-import { type LoginRequestData } from "@/api/login/types/login"
+// import { type LoginRequestData } from '@/api/login/types/login'
 
 const router = useRouter()
 /** 登录表单元素的引用 */
-const loginFormRef = ref<FormInstance | null>(null)
+const loginFormRef = ref(null)
 
 /** 登录按钮 Loading */
 const loading = ref(false)
 /** 验证码图片 URL */
 //const codeUrl = ref("")
 /** 登录表单数据 */
-const loginFormData: LoginRequestData = reactive({
-  email: "",
-  password: ""
+const loginFormData = reactive({
+  email: '',
+  password: '',
   // code: ""
 })
 /** 登录表单校验规则 */
-const loginFormRules: FormRules = {
-  email: [{ required: true, message: "请输入登录邮箱", trigger: "blur" }],
+const loginFormRules = {
+  email: [{ required: true, message: '请输入登录邮箱', trigger: 'blur' }],
   password: [
-    { required: true, message: "请输入密码", trigger: "blur" },
-    { min: 6, max: 16, message: "长度在 6 到 16 个字符", trigger: "blur" }
-  ]
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 6, max: 16, message: '长度在 6 到 16 个字符', trigger: 'blur' },
+  ],
   // code: [{ required: true, message: "请输入验证码", trigger: "blur" }]
 }
+
 /** 登录逻辑 */
 const handleLogin = () => {
-  loginFormRef.value?.validate((valid: boolean, fields) => {
+  loginFormRef.value?.validate((valid, fields) => {
     if (valid) {
       loading.value = true
       useUserStore()
         .login(loginFormData)
         .then(() => {
-          router.push({ path: "/" })
+          // 登录成功
+          ElMessage.success('登录成功')
+          router.push({ path: '/' })
         })
         .catch(() => {
-          loginFormData.password = ""
+          loginFormData.password = ''
         })
         .finally(() => {
           loading.value = false
         })
     } else {
-      console.error("表单校验不通过", fields)
+      console.error('表单校验不通过', fields)
     }
   })
 }
@@ -72,6 +76,7 @@ const handleLogin = () => {
     <div class="login-card">
       <div class="title">
         <img src="@/assets/login/login_title.png" />
+        <!-- <h2>管理系统</h2> -->
       </div>
       <div class="content">
         <el-form
@@ -80,16 +85,14 @@ const handleLogin = () => {
           :hide-required-asterisk="true"
           :model="loginFormData"
           :rules="loginFormRules"
-          @keyup.enter="handleLogin"
-        >
+          @keyup.enter="handleLogin">
           <el-form-item label="用户名" prop="email">
             <el-input
               v-model.trim="loginFormData.email"
               placeholder="请输入登录邮箱"
               type="text"
               tabindex="1"
-              size="large"
-            />
+              size="large" />
           </el-form-item>
           <el-form-item label="密码" prop="password">
             <el-input
@@ -98,8 +101,7 @@ const handleLogin = () => {
               type="password"
               tabindex="2"
               size="large"
-              show-password
-            />
+              show-password />
           </el-form-item>
           <!-- <el-form-item prop="code">
             <el-input

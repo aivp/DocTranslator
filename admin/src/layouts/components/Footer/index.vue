@@ -8,7 +8,7 @@ const openWebsite = () => {
 
 <template>
   <footer class="layout-footer">
-    <span class="copyright-link" @click="openWebsite"> DocTranslator 1.3.4 ©Powerd by MingChen </span>
+    <span class="copyright-link" @click="openWebsite"> DocTranslator 1.4.0 ©Powerd by MingChen </span>
   </footer>
 </template>
 

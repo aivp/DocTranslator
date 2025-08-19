@@ -11,11 +11,14 @@ load_dotenv(BASE_DIR / '.env')  # 显式指定.env文件位置
 class Config:
     # JWT配置
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'fallback-secret-key')
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=20)  # 20天
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=30)  # 1分钟（测试用）
     # JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)  # 刷新令牌7天
     JWT_TOKEN_LOCATION = ['headers']  # 只从请求头获取
-    JWT_HEADER_NAME = 'token'  # 匹配原项目可能的头部名称
-    JWT_HEADER_TYPE = ''  # 不使用Bearer前缀
+    JWT_HEADER_NAME = 'Authorization'  # 使用标准的Authorization header
+    JWT_HEADER_TYPE = 'Bearer'  # 使用标准的Bearer前缀
+    JWT_ERROR_MESSAGE_KEY = 'message'  # 错误消息的键名
+    JWT_BLACKLIST_ENABLED = False  # 禁用黑名单功能
+    JWT_BLACKLIST_TOKEN_CHECKS = ['access']  # 黑名单检查类型
     # 通用基础配置
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key')
     SQLALCHEMY_TRACK_MODIFICATIONS = False

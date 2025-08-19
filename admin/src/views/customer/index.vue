@@ -22,9 +22,9 @@ const DEFAULT_FORM_DATA: CreateOrUpdateCustomerRequestData = {
   email: "",
   password: "",
   level: "common",
-  add_storage: 0
+  add_storage: 0,
+  storage: 0
   // status: true
-  // storage: 0
 }
 
 const dialogVisible = ref<boolean>(false)
@@ -36,7 +36,7 @@ const formRules: FormRules<CreateOrUpdateCustomerRequestData> = {
   level: [{ required: true, trigger: "blur", message: "请选择用户等级" }]
 }
 const handleCreateOrUpdate = () => {
-  formRef.value?.validate((valid: boolean, fields) => {
+  formRef.value?.validate((valid: boolean, fields?: any) => {
     if (!valid) return console.error("表单校验不通过", fields)
     loading.value = true
     // const api = formData.value.id === undefined ? createTableDataApi : updateTableDataApi
@@ -71,7 +71,11 @@ const handleStatus = (id: number, status: string) => {
 const handleUpdate = (row: GetCustomerData) => {
   dialogVisible.value = true
   // formData.value = cloneDeep(row)
-  formData.value = Object.assign(cloneDeep(row), { password: "" })
+  formData.value = Object.assign(cloneDeep(row), { 
+    password: "",
+    add_storage: 0,
+    storage: 0
+  })
 }
 //#endregion
 

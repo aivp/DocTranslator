@@ -13,7 +13,8 @@
           :limit="5"
           :on-success="uploadSuccess"
           :on-error="uploadError"
-          :headers="{ token: userStore.token }"
+          :on-exceed="handleExceed"
+          :headers="{ Authorization: 'Bearer ' + userStore.token }"
           :before-upload="beforeUpload"
           :before-remove="delUploadFile"
           :on-change="(file, fileList) => flhandleFileListChange(file, fileList)">
@@ -33,6 +34,14 @@
             </button>
             <div class="title phone_show">点击按钮选择添加文档</div>
             <div class="tips">支持格式{{ accpet_tip }}，建议文件≤500MB</div>
+            <div class="file-count-tip" 
+                 v-if="form.files.length > 0"
+                 :class="{
+                   'warning': form.files.length >= 4,
+                   'error': form.files.length >= 5
+                 }">
+              已选择 {{ form.files.length }}/5 个文件
+            </div>
           </div>
         </el-upload>
       </div>
@@ -926,6 +935,10 @@ function uploadError(data) {
   })
 }
 
+function handleExceed(files, uploadFiles) {
+  ElMessage.warning(`最多只能上传 5 个文件，当前已有 ${uploadFiles.length} 个文件，请删除一些文件后再上传！`)
+}
+
 function delUploadFile(file, files) {
   let filepath = ''
   let uuid = '' // 初始化 uuid 变量
@@ -1107,7 +1120,7 @@ async function downAllTransFile() {
     // 直接使用fetch下载文件，不使用request工具
     const response = await fetch('/api/api/translate/download/all', {
       headers: {
-        'token': userStore.token
+        'Authorization': 'Bearer ' + userStore.token
       }
     })
     
@@ -1596,5 +1609,23 @@ onMounted(() => {
 .icon_handle {
   margin-right: 10px;
   cursor: pointer; /* 鼠标悬停时显示手型 */
+}
+
+/* 文件数量提示样式 */
+.file-count-tip {
+  font-size: 12px;
+  color: #666;
+  margin-top: 8px;
+  text-align: center;
+}
+
+/* 当接近限制时显示警告色 */
+.file-count-tip.warning {
+  color: #e6a23c;
+}
+
+/* 当达到限制时显示错误色 */
+.file-count-tip.error {
+  color: #f56c6c;
 }
 </style>

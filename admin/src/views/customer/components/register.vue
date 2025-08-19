@@ -13,7 +13,17 @@
       <el-input type="password" v-model="user.password" placeholder="请输入" autocomplete="new-password" />
     </el-form-item>
     <el-form-item label="" class="center">
-      <el-button type="primary" size="large" color="#055CF9" @click="doRegister()" style="width: 100%">提交</el-button>
+      <el-button 
+        type="primary" 
+        size="large" 
+        color="#055CF9" 
+        @click="doRegister()" 
+        :loading="loading"
+        :disabled="loading"
+        style="width: 100%"
+      >
+        {{ loading ? '提交中...' : '提交' }}
+      </el-button>
     </el-form-item>
   </el-form>
 </template>
@@ -29,27 +39,38 @@ const emit = defineEmits(["success"])
 const DEFAULT_FORM_DATA: CreateOrUpdateCustomerRequestData = {
   email: "",
   password: "",
-  level: "common"
+  level: "common",
+  add_storage: 0,
+  storage: 0
 }
 
 const user = ref<CreateOrUpdateCustomerRequestData>(cloneDeep(DEFAULT_FORM_DATA))
 
 const userform = ref<FormInstance | null>(null)
+const loading = ref<boolean>(false)
 const rules = reactive({
   email: [{ required: true, message: "请填写邮箱地址", trigger: "blur" }],
   level: [{ required: true, message: "请填写用户等级" }],
   password: [{ required: true, message: "请填写密码", trigger: "blur" }]
 })
 const doRegister = () => {
-  userform.value?.validate((valid: boolean, fields: any) => {
+  userform.value?.validate((valid: boolean, fields?: any) => {
     if (!valid) return console.error("表单校验不通过", fields)
+    
+    loading.value = true
     registerCustomer(user.value)
       .then(() => {
         ElMessage.success("操作成功")
         emit("success")
         user.value = cloneDeep(DEFAULT_FORM_DATA)
       })
-      .finally(() => {})
+      .catch((error) => {
+        console.error("注册失败:", error)
+        ElMessage.error("注册失败，请重试")
+      })
+      .finally(() => {
+        loading.value = false
+      })
   })
 }
 </script>

@@ -106,7 +106,7 @@ def main():
             #mredis.decr(api_url,threading_num-before_active_count)
             # print(item_count + ";" + spend_time)
         else:
-            #before_active_count=threading.activeCount()
+            #before_active_count=threading.active_count()
             #mredis.decr(api_url,threading_num-before_active_count)
             print("翻译出错了")
     except Exception as e:

@@ -1,8 +1,8 @@
-import { type RouteRecordRaw, createRouter } from "vue-router"
-import { history, flatMultiLevelRoutes } from "./helper"
-import routeSettings from "@/config/route"
+import { type RouteRecordRaw, createRouter } from 'vue-router'
+import { history, flatMultiLevelRoutes } from './helper'
+import routeSettings from '@/config/route'
 
-const Layouts = () => import("@/layouts/index.vue")
+const Layouts = () => import('@/layouts/index.vue')
 
 /**
  * 常驻路由
@@ -10,151 +10,151 @@ const Layouts = () => import("@/layouts/index.vue")
  */
 export const constantRoutes: RouteRecordRaw[] = [
   {
-    path: "/redirect",
+    path: '/redirect',
     component: Layouts,
     meta: {
-      hidden: true
+      hidden: true,
     },
     children: [
       {
-        path: ":path(.*)",
-        component: () => import("@/views/redirect/index.vue")
-      }
-    ]
+        path: ':path(.*)',
+        component: () => import('@/views/redirect/index.vue'),
+      },
+    ],
   },
   {
-    path: "/403",
-    component: () => import("@/views/error-page/403.vue"),
+    path: '/403',
+    component: () => import('@/views/error-page/403.vue'),
     meta: {
-      hidden: true
-    }
-  },
-  {
-    path: "/404",
-    component: () => import("@/views/error-page/404.vue"),
-    meta: {
-      hidden: true
+      hidden: true,
     },
-    alias: "/:pathMatch(.*)*"
   },
   {
-    path: "/login",
-    component: () => import("@/views/login/index.vue"),
+    path: '/404',
+    component: () => import('@/views/error-page/404.vue'),
     meta: {
-      hidden: true
-    }
+      hidden: true,
+    },
+    alias: '/:pathMatch(.*)*',
+  },
+  {
+    path: '/login',
+    component: () => import('@/views/login/index.vue'),
+    meta: {
+      hidden: true,
+    },
   },
 
   {
-    path: "/",
+    path: '/',
     component: Layouts,
-    redirect: "/dashboard",
+    redirect: '/dashboard',
     children: [
       {
-        path: "dashboard",
-        component: () => import("@/views/dashboard/index.vue"),
-        name: "Dashboard",
+        path: 'dashboard',
+        component: () => import('@/views/dashboard/index.vue'),
+        name: 'Dashboard',
         meta: {
-          title: "首页",
-          svgIcon: "dashboard",
-          affix: true
-        }
-      }
-    ]
+          title: '首页',
+          svgIcon: 'dashboard',
+          affix: true,
+        },
+      },
+    ],
   },
   {
-    path: "/customer",
-    component: Layouts,
-    children: [
-      {
-        path: "",
-        component: () => import("@/views/customer/index.vue"),
-        name: "customer",
-        meta: {
-          title: "用户管理",
-          elIcon: "user",
-          affix: true
-        }
-      }
-    ]
-  },
-  {
-    path: "/translate",
+    path: '/customer',
     component: Layouts,
     children: [
       {
-        path: "",
-        component: () => import("@/views/translate/index.vue"),
-        name: "translate_list",
+        path: '',
+        component: () => import('@/views/customer/index.vue'),
+        name: 'customer',
         meta: {
-          title: "翻译任务",
-          elIcon: "tickets",
-          affix: true
-        }
-      }
-    ]
+          title: '用户管理',
+          elIcon: 'user',
+          affix: true,
+        },
+      },
+    ],
   },
   {
-    path: "/setting",
+    path: '/translate',
+    component: Layouts,
+    children: [
+      {
+        path: '',
+        component: () => import('@/views/translate/index.vue'),
+        name: 'translate_list',
+        meta: {
+          title: '翻译任务',
+          elIcon: 'tickets',
+          affix: true,
+        },
+      },
+    ],
+  },
+  {
+    path: '/setting',
     component: Layouts,
     meta: {
-      title: "系统设置",
-      elIcon: "setting",
-      affix: true
+      title: '系统设置',
+      elIcon: 'setting',
+      affix: true,
     },
     children: [
       {
-        path: "api",
-        component: () => import("@/views/setting/api.vue"),
-        name: "setting_api",
+        path: 'api',
+        component: () => import('@/views/setting/api.vue'),
+        name: 'setting_api',
         meta: {
-          title: "API设置",
-          elIcon: "key",
-          affix: true
-        }
+          title: 'API设置',
+          elIcon: 'key',
+          affix: true,
+        },
       },
       {
-        path: "other",
-        component: () => import("@/views/setting/other.vue"),
-        name: "setting_other",
+        path: 'other',
+        component: () => import('@/views/setting/other.vue'),
+        name: 'setting_other',
         meta: {
-          title: "其他设置",
-          elIcon: "tools",
-          affix: true
-        }
+          title: '其他设置',
+          elIcon: 'tools',
+          affix: true,
+        },
       },
       {
-        path: "site",
-        component: () => import("@/views/setting/site.vue"),
-        name: "setting_site",
+        path: 'site',
+        component: () => import('@/views/setting/site.vue'),
+        name: 'setting_site',
         meta: {
-          title: "站点设置",
-          elIcon: "tools",
-          affix: true
-        }
+          title: '站点设置',
+          elIcon: 'tools',
+          affix: true,
+        },
       },
       {
-        path: "password",
-        component: () => import("@/views/password/index.vue"),
-        name: "ChangePassword",
+        path: 'password',
+        component: () => import('@/views/password/index.vue'),
+        name: 'ChangePassword',
         meta: {
-          title: "修改密码",
-          elIcon: "lock",
-          affix: true
-        }
+          title: '修改密码',
+          elIcon: 'lock',
+          affix: true,
+        },
       },
       {
-        path: "file-storage",
-        component: () => import("@/views/setting/file.vue"),
-        name: "FileStorage",
+        path: 'file-storage',
+        component: () => import('@/views/setting/file.vue'),
+        name: 'FileStorage',
         meta: {
-          title: "文件存储管理",
-          elIcon: "files",
-          affix: true
-        }
-      }
-    ]
-  }
+          title: '文件存储管理',
+          elIcon: 'files',
+          affix: true,
+        },
+      },
+    ],
+  },
 ]
 
 /**
@@ -166,7 +166,7 @@ export const dynamicRoutes: RouteRecordRaw[] = []
 
 const router = createRouter({
   history,
-  routes: routeSettings.thirdLevelRouteCache ? flatMultiLevelRoutes(constantRoutes) : constantRoutes
+  routes: routeSettings.thirdLevelRouteCache ? flatMultiLevelRoutes(constantRoutes) : constantRoutes,
 })
 console.log(routeSettings.thirdLevelRouteCache ? flatMultiLevelRoutes(constantRoutes) : constantRoutes)
 /** 重置路由 */

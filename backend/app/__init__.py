@@ -7,6 +7,7 @@ from .resources.task.translate_service import TranslateEngine
 from .script.init_db import safe_init_mysql
 from .script.insert_init_db import insert_initial_data, set_auto_increment, insert_initial_settings
 from .utils.response import APIResponse
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError, DecodeError
 
 
 def create_app(config_class=None):
@@ -23,19 +24,43 @@ def create_app(config_class=None):
     init_extensions(app)
     register_routes(api)
 
+    # 首先注册JWT相关异常处理器（优先级最高）
+    from flask_jwt_extended.exceptions import JWTExtendedException
+    
+    @app.errorhandler(ExpiredSignatureError)
+    def handle_expired_token(e):
+        return {"message": "Token has expired", "code": 401}, 401
+    
+    @app.errorhandler(InvalidTokenError)
+    def handle_invalid_token(e):
+        return {"message": "Invalid token", "code": 401}, 401
+    
+    @app.errorhandler(DecodeError)
+    def handle_decode_error(e):
+        return {"message": "Token decode error", "code": 401}, 401
+    
+    @app.errorhandler(JWTExtendedException)
+    def handle_jwt_extended_error(e):
+        return {"message": str(e), "code": 401}, 401
+
+    # 然后注册其他HTTP状态码处理器
     @app.errorhandler(404)
     def handle_404(e):
         return APIResponse.not_found()
 
-    from jwt.exceptions import ExpiredSignatureError
-
-    @app.errorhandler(ExpiredSignatureError)
-    def handle_expired_token_error(e):
-        return jsonify({"message": "身份验证信息已过期，请重新登录"}), 401
-
     @app.errorhandler(500)
     def handle_500(e):
         return APIResponse.error(message='服务器错误', code=500)
+
+    # 最后注册通用异常处理器（优先级最低）
+    @app.errorhandler(Exception)
+    def handle_generic_error(e):
+        import traceback
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unhandled exception: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {"message": "Internal server error", "code": 500}, 500
 
     # 初始化数据库
     with app.app_context():
