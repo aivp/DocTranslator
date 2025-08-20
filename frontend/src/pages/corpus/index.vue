@@ -69,6 +69,9 @@
                   <div class="t" :title="item.title">{{ item.title }}</div>
                   <div class="des">{{ item.origin_lang }}-{{ item.target_lang }}</div>
                 </div>
+                <div class="term_count">
+                  <span class="count_text">共 {{ item.term_count || 0 }} 条术语</span>
+                </div>
                 <div class="btn_box flex_box flex-between">
                   <div class="left">
                     <el-button type="text" @click="openTerms(item)">编辑</el-button>
@@ -86,9 +89,9 @@
                     />
                   </div>
                 </div>
-                <div class="table_box" v-if="item.content.length > 0">
+                <div class="table_box" v-if="item.sample_terms && item.sample_terms.length > 0">
                   <el-table
-                    :data="item.content"
+                    :data="item.sample_terms"
                     style="width: 100%"
                     max-height="340"
                     border
@@ -96,16 +99,22 @@
                     tooltip-effect="light"
                   >
                     <el-table-column
-                      prop="origin"
+                      prop="original"
                       :label="item.origin_lang"
                       show-overflow-tooltip
                     />
                     <el-table-column
-                      prop="target"
+                      prop="comparison_text"
                       :label="item.target_lang"
                       show-overflow-tooltip
                     />
                   </el-table>
+                  <!-- <div class="more_terms" v-if="item.term_count > 5">
+                    <el-button type="text" size="small">查看更多术语...</el-button>
+                  </div> -->
+                </div>
+                <div class="no_terms" v-else>
+                  <div class="text">暂无术语数据</div>
                 </div>
               </div>
             </el-col>
@@ -337,16 +346,14 @@ const handleTermConfirm = (val) => {
 
 //打开术语弹窗-编辑
 function openTerms(item) {
-  termEditRef.value.open() // 打开子组件弹窗
   if (item) {
-    termEditRef.value.updateForm(JSON.parse(JSON.stringify(item))) // 更新数据给子组件
+    termEditRef.value.open(item) // 传递完整的术语表数据
   } else {
-    termEditRef.value.updateForm({
+    termEditRef.value.open({
       title: '', // 标题
       share_flag: 'N',
       origin_lang: '',
-      target_lang: '',
-      content: [{ origin: '', target: '' }]
+      target_lang: ''
     })
   }
 }
@@ -648,13 +655,56 @@ onMounted(() => {
         color: #111111;
       }
     }
+    .term_count {
+      padding: 0 20px;
+      height: 30px;
+      line-height: 30px;
+      font-size: 14px;
+      color: #8b8c9f;
+      border-bottom: 1px solid #f0f0f0;
+      .count_text {
+        font-weight: bold;
+        color: #055cf9;
+      }
+    }
     .btn_box {
       padding: 0 20px;
       height: 50px;
+      border-bottom: 1px solid #f0f0f0;
+      .left {
+        display: flex;
+        align-items: center;
+      }
+      .right {
+        display: flex;
+        align-items: center;
+      }
     }
     .table_box {
-      height: 364px;
       padding: 0 20px;
+      padding-top: 20px;
+      padding-bottom: 20px;
+    }
+    .more_terms {
+      padding: 0 20px;
+      padding-top: 10px;
+      text-align: center;
+      border-top: 1px solid #f0f0f0;
+      .el-button {
+        color: #055cf9;
+        font-size: 12px;
+      }
+    }
+    .no_terms {
+      padding: 0 20px;
+      padding-top: 20px;
+      padding-bottom: 20px;
+      text-align: center;
+      .text {
+        font-size: 14px;
+        color: #8b8c9f;
+        font-style: italic;
+      }
     }
     .text_box {
       padding: 0 20px;

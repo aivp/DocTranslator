@@ -352,25 +352,26 @@ const prompt_id_focus = async () => {
 }
 
 const rules = {
-  server: [{ required: true, message: '请选择翻译服务', trigger: 'blur' }],
-  model: [{ required: true, message: '请选择模型', trigger: 'blur' }],
-  backup_model: [{ required: false }],
-  prompt: [{ required: true, message: '请输入提示语', trigger: 'blur' }],
+  model: [{ required: true, message: '请先确认翻译设置', trigger: 'blur' }],
+  // server: [{ required: true, message: '请选择翻译服务', trigger: 'blur' }],
+  // model: [{ required: true, message: '请选择模型', trigger: 'blur' }],
+  // backup_model: [{ required: false }],
+  // prompt: [{ required: true, message: '请输入提示语', trigger: 'blur' }],
   prompt_id: [{ required: false }],
-  project_id: [
-    {
-      required: settingsForm.value.currentService === 'google',
-      message: '请输入谷歌翻译项目ID',
-      trigger: 'blur',
-    },
-  ],
-  from_lang: [
-    {
-      required: settingsForm.value.currentService !== 'ai',
-      message: '请选择源语言',
-      trigger: 'blur',
-    },
-  ],
+  // project_id: [
+  //   {
+  //     required: settingsForm.value.currentService === 'google',
+  //     message: '请输入谷歌翻译项目ID',
+  //     trigger: 'blur',
+  //   },
+  // ],
+  // from_lang: [
+  //   {
+  //     required: settingsForm.value.currentService !== 'ai',
+  //     message: '请选择源语言',
+  //     trigger: 'blur',
+  //   },
+  // ],
   to_lang: [
     {
       required: settingsForm.value.currentService !== 'ai',
@@ -378,21 +379,21 @@ const rules = {
       trigger: 'blur',
     },
   ],
-  comparison_id: [{ required: false }],
-  threads: [
-    {
-      required: true,
-      message: '请设置线程数',
-      trigger: 'blur'
-    },
-    {
-      type: 'number',
-      min: 1,
-      max: 40,
-      message: '线程数必须在1到40之间',
-      trigger: 'blur'
-    }
-  ]
+  // comparison_id: [{ required: false }],
+  // threads: [
+  //   {
+  //     required: true,
+  //     message: '请设置线程数',
+  //     trigger: 'blur'
+  //   },
+  //   {
+  //     type: 'number',
+  //     min: 1,
+  //     max: 40,
+  //     message: '线程数必须在1到40之间',
+  //     trigger: 'blur'
+  //   }
+  // ]
 }
 
 // 提示语选择变化
