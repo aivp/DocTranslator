@@ -106,6 +106,30 @@
               min-width="200"
               show-overflow-tooltip
             />
+            <el-table-column
+              label="操作"
+              width="120"
+              fixed="right"
+            >
+              <template #default="{ row }">
+                <el-button
+                  type="primary"
+                  size="small"
+                  @click="editTerm(row)"
+                  text
+                >
+                  编辑
+                </el-button>
+                <el-button
+                  type="danger"
+                  size="small"
+                  @click="deleteTerm(row)"
+                  text
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
           
           <!-- 分页 -->
@@ -138,11 +162,56 @@
       </div>
     </template>
   </el-dialog>
+  
+  <!-- 编辑术语弹窗 -->
+  <el-dialog
+    v-model="editTermVisible"
+    title="编辑术语"
+    width="600px"
+    destroy-on-close
+  >
+    <el-form
+      ref="editTermFormRef"
+      :model="editTermForm"
+      :rules="editTermRules"
+      label-width="80px"
+    >
+      <el-form-item label="原文" prop="original">
+        <el-input
+          v-model="editTermForm.original"
+          type="textarea"
+          :rows="3"
+          placeholder="请输入原文"
+        />
+      </el-form-item>
+      <el-form-item label="对应术语" prop="comparison_text">
+        <el-input
+          v-model="editTermForm.comparison_text"
+          type="textarea"
+          :rows="3"
+          placeholder="请输入对应术语"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <div class="btn_box">
+        <el-button @click="editTermVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          color="#055CF9"
+          :loading="editTermLoading"
+          @click="confirmEditTerm"
+        >
+          确认
+        </el-button>
+      </div>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 
@@ -155,6 +224,26 @@ const searchKeyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+// 编辑术语相关
+const editTermVisible = ref(false)
+const editTermLoading = ref(false)
+const editTermFormRef = ref(null)
+const editTermForm = ref({
+  id: '',
+  original: '',
+  comparison_text: ''
+})
+
+// 编辑术语验证规则
+const editTermRules = {
+  original: [
+    { required: true, message: '请输入原文', trigger: 'blur' }
+  ],
+  comparison_text: [
+    { required: true, message: '请输入对应术语', trigger: 'blur' }
+  ]
+}
 
 // 搜索防抖
 let searchTimer = null
@@ -203,7 +292,7 @@ const fetchTermsList = async () => {
     console.log('请求URL:', url)
     
     const response = await request({
-      url: `/comparison/${localForm.value.id}/terms`,
+      url: `/api/comparison/${localForm.value.id}/terms`,
       method: 'get',
       params: params
     })
@@ -314,6 +403,81 @@ const confirm = async () => {
 defineExpose({
   open
 })
+
+// 编辑术语
+const editTerm = (row) => {
+  editTermForm.value = {
+    id: row.id,
+    original: row.original,
+    comparison_text: row.comparison_text
+  }
+  editTermVisible.value = true
+}
+
+// 确认编辑术语
+const confirmEditTerm = async () => {
+  try {
+    await editTermFormRef.value.validate()
+    editTermLoading.value = true
+    
+    const response = await request({
+      url: `/api/comparison/term/${editTermForm.value.id}`,
+      method: 'put',
+      data: {
+        original: editTermForm.value.original,
+        comparison_text: editTermForm.value.comparison_text
+      }
+    })
+    
+    if (response.code === 200) {
+      ElMessage.success('编辑成功')
+      editTermVisible.value = false
+      // 重新获取当前页数据
+      fetchTermsList()
+    } else {
+      ElMessage.error(response.message || '编辑失败')
+    }
+  } catch (error) {
+    console.error('编辑术语失败:', error)
+    ElMessage.error('编辑术语失败')
+  } finally {
+    editTermLoading.value = false
+  }
+}
+
+// 删除术语
+const deleteTerm = (row) => {
+  ElMessageBox.confirm(
+    `确定要删除这条术语记录吗？\n原文：${row.original}\n对应术语：${row.comparison_text}`,
+    '确认删除',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+      dangerouslyUseHTMLString: false
+    }
+  ).then(async () => {
+    try {
+      const response = await request({
+        url: `/api/comparison/term/${row.id}`,
+        method: 'delete'
+      })
+      
+      if (response.code === 200) {
+        ElMessage.success('删除成功')
+        // 重新获取当前页数据
+        fetchTermsList()
+      } else {
+        ElMessage.error(response.message || '删除失败')
+      }
+    } catch (error) {
+      console.error('删除术语失败:', error)
+      ElMessage.error('删除术语失败')
+    }
+  }).catch(() => {
+    // 用户取消删除
+  })
+}
 </script>
 
 <style lang="scss" scoped>
