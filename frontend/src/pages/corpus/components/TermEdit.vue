@@ -1,10 +1,13 @@
 <template>
   <el-dialog
     v-model="visible"
-    destroy-on-close
     title="术语编辑器"
-    width="90%"
-    modal-class="term_dialog"
+    width="75%"
+    :fullscreen="false"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+    destroy-on-close
+    class="term_dialog"
   >
     <template #header="{ close, titleId, titleClass }">
       <span class="title">术语编辑器</span>
@@ -83,6 +86,13 @@
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
+            <el-button
+              type="primary"
+              @click="addTerm"
+              style="margin-left: 12px"
+            >
+              新增术语
+            </el-button>
           </div>
         </div>
         
@@ -110,24 +120,27 @@
               label="操作"
               width="120"
               fixed="right"
+              align="center"
             >
               <template #default="{ row }">
-                <el-button
-                  type="primary"
-                  size="small"
-                  @click="editTerm(row)"
-                  text
-                >
-                  编辑
-                </el-button>
-                <el-button
-                  type="danger"
-                  size="small"
-                  @click="deleteTerm(row)"
-                  text
-                >
-                  删除
-                </el-button>
+                <div class="action-buttons">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    @click="editTerm(row)"
+                    text
+                  >
+                    编辑
+                  </el-button>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click="deleteTerm(row)"
+                    text
+                  >
+                    删除
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -149,7 +162,6 @@
     </el-form>
     <template #footer>
       <div class="btn_box">
-        <el-button :disabled="props.loading" @click="close">取消</el-button>
         <el-button
           type="primary"
           color="#055CF9"
@@ -159,14 +171,15 @@
         >
           保存
         </el-button>
+        <el-button @click="close">关闭</el-button>
       </div>
     </template>
   </el-dialog>
   
-  <!-- 编辑术语弹窗 -->
+  <!-- 编辑/新增术语弹窗 -->
   <el-dialog
     v-model="editTermVisible"
-    title="编辑术语"
+    :title="editTermForm.id ? '编辑术语' : '新增术语'"
     width="600px"
     destroy-on-close
   >
@@ -202,7 +215,7 @@
           :loading="editTermLoading"
           @click="confirmEditTerm"
         >
-          确认
+          {{ editTermForm.id ? '确认' : '保存' }}
         </el-button>
       </div>
     </template>
@@ -368,7 +381,7 @@ watch(visible, (newVal) => {
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'confirm'])
+const emit = defineEmits(['update:modelValue', 'confirm', 'refresh'])
 
 // 打开编辑弹窗
 const open = (data) => {
@@ -386,6 +399,8 @@ const close = () => {
   searchKeyword.value = ''
   currentPage.value = 1
   total.value = 0
+  // 通知父组件刷新数据
+  emit('refresh')
 }
 
 // 确认保存
@@ -414,32 +429,68 @@ const editTerm = (row) => {
   editTermVisible.value = true
 }
 
-// 确认编辑术语
+// 新增术语
+const addTerm = () => {
+  editTermForm.value = {
+    id: '', // 新增时ID为空
+    original: '',
+    comparison_text: ''
+  }
+  editTermVisible.value = true
+}
+
+// 确认编辑/新增术语
 const confirmEditTerm = async () => {
   try {
     await editTermFormRef.value.validate()
     editTermLoading.value = true
     
-    const response = await request({
-      url: `/api/comparison/term/${editTermForm.value.id}`,
-      method: 'put',
-      data: {
-        original: editTermForm.value.original,
-        comparison_text: editTermForm.value.comparison_text
+    if (editTermForm.value.id) {
+      // 编辑操作
+      const response = await request({
+        url: `/api/comparison/term/${editTermForm.value.id}`,
+        method: 'put',
+        data: {
+          original: editTermForm.value.original,
+          comparison_text: editTermForm.value.comparison_text
+        }
+      })
+      
+      if (response.code === 200) {
+        ElMessage.success('编辑成功')
+        editTermVisible.value = false
+        // 重新获取当前页数据
+        fetchTermsList()
+        // 通知父组件刷新数据
+        emit('refresh')
+      } else {
+        ElMessage.error(response.message || '编辑失败')
       }
-    })
-    
-    if (response.code === 200) {
-      ElMessage.success('编辑成功')
-      editTermVisible.value = false
-      // 重新获取当前页数据
-      fetchTermsList()
     } else {
-      ElMessage.error(response.message || '编辑失败')
+      // 新增操作
+      const response = await request({
+        url: `/api/comparison/${localForm.value.id}/terms`,
+        method: 'post',
+        data: {
+          original: editTermForm.value.original,
+          comparison_text: editTermForm.value.comparison_text
+        }
+      })
+      
+      if (response.code === 200) {
+        ElMessage.success('新增成功')
+        editTermVisible.value = false
+        // 重新获取当前页数据
+        fetchTermsList()
+        // 通知父组件刷新数据
+        emit('refresh')
+      } else {
+        ElMessage.error(response.message || '新增失败')
+      }
     }
   } catch (error) {
-    console.error('编辑术语失败:', error)
-    ElMessage.error('编辑术语失败')
+    console.error('操作术语失败:', error)
+    ElMessage.error('操作术语失败')
   } finally {
     editTermLoading.value = false
   }
@@ -467,6 +518,8 @@ const deleteTerm = (row) => {
         ElMessage.success('删除成功')
         // 重新获取当前页数据
         fetchTermsList()
+        // 通知父组件刷新数据
+        emit('refresh')
       } else {
         ElMessage.error(response.message || '删除失败')
       }
@@ -484,11 +537,127 @@ const deleteTerm = (row) => {
 .term_dialog {
   .el-dialog {
     max-width: 1200px;
-    margin: 5vh auto !important;
+    margin: 3vh auto !important;
+    
+    .el-dialog__body {
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    
+    .el-dialog__footer {
+      padding: 15px 20px;
+      border-top: 1px solid #e4e7ed;
+    }
   }
-  .el-dialog__body {
-    max-height: 70vh;
-    overflow-y: auto;
+  
+  .terms_section {
+    margin-top: 20px;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    overflow: hidden;
+    
+    .terms_header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 20px;
+      background-color: #f5f7fa;
+      border-bottom: 1px solid #e4e7ed;
+      
+      h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #303133;
+      }
+      
+      .search_box {
+        display: flex;
+        align-items: center;
+      }
+    }
+    
+    .terms_table {
+      padding: 0;
+      
+      .el-table {
+        .el-table__header-wrapper {
+          .el-table__header {
+            th {
+              background-color: #f5f7fa;
+              color: #606266;
+              font-weight: 600;
+            }
+          }
+        }
+        
+        .el-table__body-wrapper {
+          max-height: 400px;
+          overflow-y: auto;
+        }
+      }
+      
+      .action-buttons {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        
+        .el-button {
+          margin: 0;
+          padding: 4px 8px;
+          min-width: 40px;
+          height: 28px;
+          font-size: 12px;
+          
+          &.el-button--primary {
+            color: #409eff;
+            &:hover {
+              color: #66b1ff;
+              background-color: #ecf5ff;
+            }
+          }
+          
+          &.el-button--danger {
+            color: #f56c6c;
+            &:hover {
+              color: #f78989;
+              background-color: #fef0f0;
+            }
+          }
+        }
+      }
+    }
+    
+    .pagination_box {
+      padding: 15px 20px;
+      background-color: #f5f7fa;
+      border-top: 1px solid #e4e7ed;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      
+      .el-pagination {
+        .el-pagination__total {
+          margin-right: 15px;
+        }
+        
+        .el-pagination__sizes {
+          margin-right: 15px;
+        }
+        
+        .el-pager {
+          .el-pager__item {
+            margin: 0 2px;
+          }
+        }
+        
+        .el-pagination__jump {
+          margin-left: 15px;
+        }
+      }
+    }
   }
 }
 
@@ -502,62 +671,6 @@ const deleteTerm = (row) => {
   font-size: 12px;
   color: #8b8c9f;
   margin-top: 5px;
-}
-
-.terms_section {
-  margin-top: 20px;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  overflow: hidden;
-  
-  .terms_header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #e4e7ed;
-    
-    h3 {
-      margin: 0;
-      font-size: 16px;
-      font-weight: 600;
-      color: #111111;
-    }
-    
-    .search_box {
-      .el-input {
-        .el-input__wrapper {
-          border-radius: 20px;
-        }
-      }
-    }
-  }
-  
-  .terms_table {
-    padding: 20px;
-    
-    .el-table {
-      border-radius: 8px;
-      overflow: hidden;
-      
-      .el-table__header {
-        background: #f8f9fa;
-      }
-      
-      .el-table__row {
-        &:hover {
-          background: #f5f7fa;
-        }
-      }
-    }
-    
-    .pagination_box {
-      margin-top: 20px;
-      display: flex;
-      justify-content: center;
-    }
-  }
 }
 
 .btn_box {

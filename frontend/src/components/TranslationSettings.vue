@@ -15,6 +15,19 @@
       </el-tag>
     </div>
 
+    <!-- 重要提醒 -->
+    <div class="important-notice" v-if="!hasValidSettings">
+      <el-alert
+        title="重要提醒"
+        type="warning"
+        :closable="false"
+        show-icon>
+        <template #default>
+          <p>请先选择目标语言，这是翻译的必要设置。术语库为可选设置，可根据需要选择。</p>
+        </template>
+      </el-alert>
+    </div>
+
     <el-form ref="transformRef" :model="settingsForm" label-width="120px" class="translation-form">
       <el-form-item v-if="!isVIP" label="翻译服务" required width="100%" v-show="false">
         <el-select v-model="settingsForm.currentService" placeholder="请选择翻译服务">
@@ -26,52 +39,17 @@
 
       <!-- AI翻译设置 -->
       <template v-if="settingsForm.currentService === 'ai'">
-        <el-form-item label="模型" required width="100%">
-          <el-select
-            v-model="settingsForm.aiServer.model"
-            placeholder="模型固定为 qwen-mt-plus"
-            :disabled="true">
-                          <el-option label="qwen-mt-plus" value="qwen-mt-plus" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="备用模型" width="100%" v-show="false">
-          <el-select
-            v-model="settingsForm.aiServer.backup_model"
-            placeholder="备用模型固定为 claude-sonnet-4"
-            :disabled="true">
-            <el-option label="us.anthropic.claude-sonnet-4-20250514-v1:0" value="us.anthropic.claude-sonnet-4-20250514-v1:0" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="目标语言" required width="100%">
-          <el-select v-model="settingsForm.aiServer.lang" placeholder="请选择目标语言">
+          <el-select v-model="settingsForm.aiServer.lang" placeholder="请选择目标语言" clearable>
             <el-option v-for="lang in languageOptions" :key="lang.value" :label="lang.label" :value="lang.value" />
           </el-select>
         </el-form-item>
 
-        <!-- 提示语选择 -->
-        <el-form-item label="选择提示语" required width="100%" v-show="false">
-          <el-select
-            v-model="settingsForm.aiServer.prompt_id"
-            placeholder="请选择提示语"
-            filterable
-            @change="prompt_id_change"
-            @focus="prompt_id_focus">
-            <el-option v-for="item in promptData" :key="item.id" :value="item.id" :label="item.title" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="提示语内容" width="100%" v-show="false">
-          <el-input
-            v-model="settingsForm.aiServer.prompt"
-            type="textarea"
-            :rows="4"
-            resize="none"
-            placeholder="请输入系统翻译提示词" />
-        </el-form-item>
         <el-form-item label="术语库" width="100%">
           <el-select
             v-model="settingsForm.aiServer.comparison_id"
-            placeholder="请选择术语"
+            placeholder="请选择术语（可选，可多选）"
+            multiple
             clearable
             filterable
             @focus="comparison_id_focus">
@@ -79,107 +57,10 @@
           </el-select>
         </el-form-item>
       </template>
-
-      <!-- 百度翻译设置 -->
-      <template v-else-if="settingsForm.currentService === 'baidu'" v-show="false">
-        <el-form-item label="源语言" required width="100%">
-          <el-select v-model="settingsForm.baidu.from_lang" placeholder="请选择源语言">
-            <el-option
-              v-for="lang in translateStore.langOptions"
-              :key="lang.value"
-              :label="lang.label"
-              :value="lang.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="目标语言" required width="100%">
-          <el-select v-model="settingsForm.baidu.to_lang" placeholder="请选择目标语言">
-            <el-option
-              v-for="lang in translateStore.langOptions.filter((l) => l.value !== 'auto')"
-              :key="lang.value"
-              :label="lang.label"
-              :value="lang.value" />
-          </el-select>
-        </el-form-item>
-        <!-- 是否使用术语库 -->
-        <el-form-item label="是否使用术语库">
-          <el-switch v-model="settingsForm.baidu.needIntervene" inline-prompt active-text="是" inactive-text="否" />
-        </el-form-item>
-      </template>
-
-      <!-- 谷歌翻译设置 -->
-      <template v-else-if="settingsForm.currentService === 'google'" v-show="false">
-        <el-form-item label="项目ID" required width="100%">
-          <el-input v-model="settingsForm.google.project_id" placeholder="请输入谷歌翻译项目ID" />
-        </el-form-item>
-        <el-form-item label="源语言" required width="100%">
-          <el-select v-model="settingsForm.google.from_lang" placeholder="请选择源语言">
-            <el-option
-              v-for="lang in translateStore.langOptions"
-              :key="lang.value"
-              :label="lang.label"
-              :value="lang.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="目标语言" required width="100%">
-          <el-select v-model="settingsForm.google.to_lang" placeholder="请选择目标语言">
-            <el-option
-              v-for="lang in translateStore.langOptions.filter((l) => l.value !== 'auto')"
-              :key="lang.value"
-              :label="lang.label"
-              :value="lang.value" />
-          </el-select>
-        </el-form-item>
-      </template>
-
-      <!-- 通用设置 -->
-      <el-divider v-show="false" />
-      <!-- 译文形式 -->
-      <el-form-item label="译文形式" required v-show="false">
-        <el-cascader
-          v-model="settingsForm.common.type"
-          :options="typeOptions"
-          placeholder="选择译文形式"
-          style="width: 100%"
-          :props="{ expandTrigger: 'hover' }"
-          clearable />
-      </el-form-item>
-      <el-form-item label="线程数" required width="100%" v-show="false">
-        <el-input-number
-          v-model="settingsForm.aiServer.threads"
-          :min="1"
-          :max="40"
-          :controls="true"
-          style="width: 50%" />
-      </el-form-item>
-      <!-- doc2x -->
-      <h4 v-show="false">是否使用Doc2x翻译PDF文件:</h4>
-      <el-alert
-        type="warning"
-        description="启用后，所有pdf将使用doc2x进行处理。doc2x目前是进行pdf解析,将pdf转换成word、md等文件"
-        show-icon
-        :closable="false"
-        v-show="false" />
-
-      <el-form-item>
-        <el-radio-group v-model="settingsForm.common.doc2x_flag" @change="handleDoc2xToggle" v-show="false">
-          <!-- <el-radio label="N">禁用</el-radio> -->
-          <!-- <el-radio label="Y">启用</el-radio> -->
-          <el-radio-button label="禁用" value="N" />
-          <el-radio-button label="启用" value="Y" />
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item v-if="settingsForm.common.doc2x_flag === 'Y'" label="Doc2x密钥:" prop="doc2x_secret_key" v-show="false">
-        <el-input
-          v-model="settingsForm.common.doc2x_secret_key"
-          placeholder="输入Doc2x API Key"
-          clearable
-          style="width: 300px; margin-right: 10px" />
-      </el-form-item>
     </el-form>
 
           <template #footer>
         <div class="btn_box">
-          <el-button @click="formReset" size="large">重置设置</el-button>
           <el-button type="primary" color="#055CF9" @click="formConfim(transformRef)" size="large">确认</el-button>
         </div>
       </template>
@@ -310,6 +191,15 @@ watch(
   }
 )
 
+// 检查翻译设置是否完整
+const hasValidSettings = computed(() => {
+  if (settingsForm.value.currentService === 'ai') {
+    return settingsForm.value.aiServer.lang && settingsForm.value.aiServer.lang.trim() !== ''
+  }
+  // 其他翻译服务已隐藏，默认返回true
+  return true
+})
+
 // 服务名称映射
 const getServiceName = (service) => {
   const names = {
@@ -352,26 +242,11 @@ const prompt_id_focus = async () => {
 }
 
 const rules = {
-  model: [{ required: true, message: '请先确认翻译设置', trigger: 'blur' }],
-  // server: [{ required: true, message: '请选择翻译服务', trigger: 'blur' }],
-  // model: [{ required: true, message: '请选择模型', trigger: 'blur' }],
-  // backup_model: [{ required: false }],
-  // prompt: [{ required: true, message: '请输入提示语', trigger: 'blur' }],
-  prompt_id: [{ required: false }],
-  // project_id: [
-  //   {
-  //     required: settingsForm.value.currentService === 'google',
-  //     message: '请输入谷歌翻译项目ID',
-  //     trigger: 'blur',
-  //   },
-  // ],
-  // from_lang: [
-  //   {
-  //     required: settingsForm.value.currentService !== 'ai',
-  //     message: '请选择源语言',
-  //     trigger: 'blur',
-  //   },
-  // ],
+  // 目标语言验证 - AI翻译必选
+  'aiServer.lang': [
+    { required: true, message: '请选择目标语言', trigger: 'blur' }
+  ],
+  // 其他翻译服务的验证规则（已隐藏，保留以防需要）
   to_lang: [
     {
       required: settingsForm.value.currentService !== 'ai',
@@ -379,21 +254,6 @@ const rules = {
       trigger: 'blur',
     },
   ],
-  // comparison_id: [{ required: false }],
-  // threads: [
-  //   {
-  //     required: true,
-  //     message: '请设置线程数',
-  //     trigger: 'blur'
-  //   },
-  //   {
-  //     type: 'number',
-  //     min: 1,
-  //     max: 40,
-  //     message: '线程数必须在1到40之间',
-  //     trigger: 'blur'
-  //   }
-  // ]
 }
 
 // 提示语选择变化
@@ -499,34 +359,12 @@ const formReset = () => {
     currentService: 'ai',  // 默认AI翻译
     aiServer: { 
       ...translateStore.aiServer, 
-      model: 'qwen-mt-plus', 
-      backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0', 
-      threads: 20,
-      lang: translateStore.aiServer.lang || '',  // 使用store中的值，如果没有则为空
-      prompt_id: 0,  // 默认提示语
-      prompt: settingsStore.system_settings.prompt_template || '请将以下中文文本翻译成英文，保持专业性和准确性。'
+      lang: '英语',  // 设置默认目标语言为英语
+      comparison_id: [],  // 术语库多选，默认为空数组
     },
-    baidu: { 
-      ...translateStore.baidu,
-      from_lang: '',  // 默认中文
-      to_lang: 'eng',    // 默认英文
-      needIntervene: false  // 默认不使用术语库
-    },
-    google: { 
-      ...translateStore.google,
-      from_lang: '',  // 默认中文
-      to_lang: 'eng',    // 默认英文
-      project_id: ''    // 默认空项目ID
-    },
-    common: { 
-      ...translateStore.common,
-      // 设置默认的doc2x启用状态和密钥
-      doc2x_flag: 'Y',  // 默认启用
-      doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0',  // 默认密钥
-      // 设置默认的译文形式
-      type: 'trans_text_only_inherit'  // 继承原版面
-    },
-    comparison_id: '',
+    baidu: { ...translateStore.baidu },
+    google: { ...translateStore.google },
+    common: { ...translateStore.common },
   }
   check_text.value = ''
 }
@@ -536,11 +374,25 @@ const formConfim = (formEl) => {
   if (!formEl) return
   formEl.validate((valid) => {
     if (valid) {
+      // 清理comparison_id数据，确保没有空值
+      if (Array.isArray(settingsForm.value.aiServer.comparison_id)) {
+        settingsForm.value.aiServer.comparison_id = settingsForm.value.aiServer.comparison_id.filter(
+          id => id && id !== '' && id !== null && id !== undefined
+        )
+      }
+      
+      // 添加调试信息
+      console.log('保存前的表单数据:', settingsForm.value)
+      console.log('术语库选择:', settingsForm.value.aiServer.comparison_id)
+      
       // 更新store中的数据
       translateStore.updateCurrentService(settingsForm.value.currentService)
 
       if (settingsForm.value.currentService === 'ai') {
         translateStore.updateAIServerSettings(settingsForm.value.aiServer)
+        // 添加调试信息
+        console.log('保存后的store数据:', translateStore.aiServer)
+        console.log('保存后的术语库:', translateStore.aiServer.comparison_id)
       } else if (settingsForm.value.currentService === 'baidu') {
         translateStore.updateBaiduSettings(settingsForm.value.baidu)
       } else if (settingsForm.value.currentService === 'google') {
@@ -565,34 +417,24 @@ const open = () => {
     currentService: 'ai',  // 默认AI翻译
     aiServer: { 
       ...translateStore.aiServer, 
-      model: 'qwen-mt-plus', 
-      backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0', 
-      threads: 20,
-      lang: translateStore.aiServer.lang || '',  // 使用store中的值，如果没有则为空
-      prompt_id: 0,  // 默认提示语
-      prompt: settingsStore.system_settings.prompt_template || '请将以下中文文本翻译成英文，保持专业性和准确性。'
+      lang: translateStore.aiServer.lang || '英语',  // 使用store中的值，如果没有则默认为英语
+      comparison_id: (() => {
+        // 清理数据，确保没有空值或无效值
+        const storedValue = translateStore.aiServer.comparison_id
+        if (Array.isArray(storedValue)) {
+          // 过滤掉空值、null、undefined等无效值
+          return storedValue.filter(id => id && id !== '' && id !== null && id !== undefined)
+        }
+        return []
+      })(),  // 术语库多选，使用store中的值或默认为空数组
     },
-    baidu: { 
-      ...translateStore.baidu,
-      from_lang: '',  // 默认中文
-      to_lang: 'eng',    // 默认英文
-      needIntervene: false  // 默认不使用术语库
-    },
-    google: { 
-      ...translateStore.google,
-      from_lang: '',  // 默认中文
-      to_lang: 'eng',    // 默认英文
-      project_id: ''    // 默认空项目ID
-    },
-    common: { 
-      ...translateStore.common,
-      // 设置默认的doc2x启用状态和密钥
-      doc2x_flag: 'Y',  // 默认启用
-      doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0',  // 默认密钥
-      // 设置默认的译文形式
-      type: 'trans_text_only_inherit'  // 继承原版面
-    },
+    baidu: { ...translateStore.baidu },
+    google: { ...translateStore.google },
+    common: { ...translateStore.common },
   }
+  
+  // 添加调试信息
+  console.log('打开设置时的数据:', settingsForm.value.aiServer.comparison_id)
 }
 
 function docx2_check() {
@@ -731,6 +573,25 @@ h4:contains("Doc2x"),
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
+}
+
+.important-notice {
+  margin-bottom: 20px;
+  
+  .el-alert {
+    border-radius: 8px;
+    
+    .el-alert__title {
+      font-weight: 600;
+      color: #e6a23c;
+    }
+    
+    p {
+      margin: 8px 0 0 0;
+      color: #606266;
+      line-height: 1.5;
+    }
+  }
 }
 
 .no_label {

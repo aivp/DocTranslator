@@ -51,7 +51,31 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   response => {
     const res = response.data
-    // 检查业务状态码
+    console.log('API响应数据:', res) // 添加调试信息
+    
+    // 检查业务状态码 - 后端返回的是元组格式 (data, code)
+    // 如果 res 是数组且第二个元素是状态码，说明是元组格式
+    if (Array.isArray(res) && res.length === 2) {
+      const [data, statusCode] = res
+      // 检查 HTTP 状态码
+      if (statusCode === 401) {
+        ElMessage.error('身份过期，请重新登录')
+        router.push('/login')
+        return Promise.reject(new Error('Unauthorized'))
+      }
+      // 返回数据部分，但保持原有的业务状态码结构
+      if (data && typeof data === 'object' && 'code' in data) {
+        return data // 如果数据部分包含业务状态码，直接返回
+      }
+      // 如果数据部分不包含业务状态码，构造一个标准响应
+      return {
+        code: 200,
+        message: '操作成功',
+        data: data
+      }
+    }
+    
+    // 如果不是元组格式，按原来的逻辑处理
     if (res?.code === 401) {
       ElMessage.error('身份过期，请重新登录')
       router.push('/login')

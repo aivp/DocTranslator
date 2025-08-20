@@ -685,6 +685,22 @@ const doc2xStatusQuery = async (data) => {
 async function handleTranslate(transform) {
   // 首先再次赋值，防止没有更新
   form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
+  
+  // 添加调试信息
+  console.log('翻译设置中的术语库:', translateStore.aiServer.comparison_id)
+  console.log('翻译设置中的目标语言:', translateStore.aiServer.lang)
+  console.log('当前表单数据:', form.value)
+  console.log('当前服务类型:', currentServiceType.value)
+  
+  // 确保语言字段正确设置
+  if (currentServiceType.value === 'ai' && translateStore.aiServer.lang) {
+    form.value.lang = translateStore.aiServer.lang
+    // 如果langs数组为空，则使用lang设置
+    if (!form.value.langs || form.value.langs.length === 0) {
+      form.value.langs = [translateStore.aiServer.lang]
+    }
+  }
+  
   // 1.判断是否上传文件
   // if (form.value.files.length <= 0) {
   //   ElMessage({
@@ -1151,6 +1167,12 @@ onMounted(() => {
   if (userStore.token) {
     getTranslatesData(1)
     form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
+    
+    // 添加调试信息
+    console.log('页面初始化 - 翻译设置:', translateStore.aiServer)
+    console.log('页面初始化 - 术语库:', translateStore.aiServer.comparison_id)
+    console.log('页面初始化 - 目标语言:', translateStore.aiServer.lang)
+    console.log('页面初始化 - 表单数据:', form.value)
   }
 })
 </script>

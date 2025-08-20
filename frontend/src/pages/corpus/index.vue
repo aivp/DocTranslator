@@ -34,26 +34,36 @@
 
           <div class="btn_box" v-if="tab_active == 'terms'">
             <el-button type="primary" color="#055CF9" @click="openTerms">新建</el-button>
-            <el-dropdown split-button type="" style="margin: 0 12px" @command="command_terms">
-              <el-upload
-                name="file"
-                :before-upload="upload_before"
-                :action="uploadUrl"
-                :headers="{ Authorization: 'Bearer ' + userStore.token }"
-                :show-file-list="false"
-                :on-success="(response, file, fileList) => upload_success(response)"
-                :on-error="(err, file, fileList) => upload_error(err)"
-                class="blue_color"
+            <el-button type="primary" style="margin: 0 8px" @click="command_terms('down')">
+              模板下载
+            </el-button>
+            <el-upload
+              name="file"
+              :before-upload="upload_before"
+              :action="uploadUrl"
+              :headers="{ Authorization: 'Bearer ' + userStore.token }"
+              :show-file-list="false"
+              :on-success="(response, file, fileList) => upload_success(response)"
+              :on-error="(err, file, fileList) => upload_error(err)"
+              :disabled="importLoading"
+              style="display: inline-block;"
+            >
+              <el-button 
+                type="primary" 
+                :loading="importLoading"
+                :disabled="importLoading"
               >
-                导入
-              </el-upload>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="down">模板下载</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-            <el-button type="" @click="export_terms_all">全部导出</el-button>
+                {{ importLoading ? '导入中...' : '导入文件' }}
+              </el-button>
+            </el-upload>
+            <el-button 
+              type="" 
+              @click="export_terms_all"
+              :loading="exportAllLoading"
+              :disabled="exportAllLoading"
+            >
+              {{ exportAllLoading ? '导出中...' : '全部导出' }}
+            </el-button>
           </div>
 
           <div class="btn_box" v-if="tab_active == 'prompt'">
@@ -78,7 +88,14 @@
                     <el-button type="text" style="color: red" @click="delTerms(item)"
                       >删除</el-button
                     >
-                    <el-button type="text" @click="export_terms(item)">导出</el-button>
+                    <el-button 
+                      type="text" 
+                      @click="export_terms(item)"
+                      :loading="exportLoading"
+                      :disabled="exportLoading"
+                    >
+                      {{ exportLoading ? '导出中...' : '导出' }}
+                    </el-button>
                   </div>
                   <div class="right">
                     <el-switch
@@ -167,7 +184,7 @@
     </div>
 
     <!-- 术语弹窗 -->
-    <TermEdit ref="termEditRef" :langs="langs" :loading="btnLoad" @confirm="handleTermConfirm" />
+    <TermEdit ref="termEditRef" :langs="langs" :loading="btnLoad" @confirm="handleTermConfirm" @refresh="getTermList" />
 
     <!-- 提示语弹窗 -->
     <PromptEdit ref="promptEditRef" :loading="btnLoad" @confirm="handlePromptConfirm" />
@@ -182,6 +199,7 @@ import TermEdit from './components/TermEdit.vue'
 import PromptEdit from './components/PromptEdit.vue'
 import { ref, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useUserStore } from '@/store/user'
 import {
   comparison_my,
   comparison,
@@ -194,7 +212,6 @@ import {
   prompt_share,
   prompt_del
 } from '@/api/corpus'
-import { useUserStore } from '@/store/user'
 const userStore = useUserStore()
 const uploadUrl = ref(import.meta.env.VITE_API_URL + '/api/comparison/import')
 const pageLoad = ref(false)
@@ -204,6 +221,9 @@ const termEditRef = ref(null)
 const btnLoad = ref(false)
 const promptEditRef = ref(null)
 const tab_active = ref('terms')
+const importLoading = ref(false) // 导入loading状态
+const exportLoading = ref(false) // 导出loading状态
+const exportAllLoading = ref(false) // 批量导出loading状态
 // const token = localStorage.getItem('token')
 // const prompt_id = ref(0)
 // watch(
@@ -306,42 +326,65 @@ const handlePromptConfirm = (val) => {
 //处理术语表单弹窗保存逻辑
 const handleTermConfirm = (val) => {
   const formData = val
+  console.log('保存术语表数据:', formData) // 添加调试信息
   btnLoad.value = true
   if (formData.id) {
     // 编辑操作
+    console.log('执行编辑操作，ID:', formData.id) // 添加调试信息
     comparison_edit(formData.id, formData)
       .then((data) => {
+        console.log('编辑成功响应:', data) // 添加调试信息
+        console.log('响应数据类型:', typeof data) // 添加类型信息
+        console.log('响应数据键:', Object.keys(data || {})) // 添加键信息
         btnLoad.value = false
         if (data.code == 200) {
           ElMessage({ message: '保存成功', type: 'success' })
-          termEditRef.value.close() // 关闭子组件弹窗
+          // 先刷新数据，再关闭弹窗
           getTermList()
+          // 延迟关闭弹窗，确保数据刷新完成
+          setTimeout(() => {
+            if (termEditRef.value) {
+              termEditRef.value.close()
+            }
+          }, 100)
         } else {
-          ElMessage({ message: data.message, type: 'error' })
+          ElMessage({ message: data.message || '保存失败', type: 'error' })
         }
       })
       .catch((err) => {
+        btnLoad.value = false
+        console.error('编辑术语表失败:', err) // 详细的错误信息
         ElMessage({ message: '接口异常', type: 'error' })
       })
   } else {
     // 新建操作
+    console.log('执行新建操作') // 添加调试信息
     comparison(formData)
       .then((data) => {
+        console.log('新建成功响应:', data) // 添加调试信息
+        console.log('响应数据类型:', typeof data) // 添加类型信息
+        console.log('响应数据键:', Object.keys(data || {})) // 添加键信息
         btnLoad.value = false
         if (data.code == 200) {
           ElMessage({ message: '保存成功', type: 'success' })
-          termEditRef.value.close() // 关闭子组件弹窗
+          // 先刷新数据，再关闭弹窗
           getTermList()
+          // 延迟关闭弹窗，确保数据刷新完成
+          setTimeout(() => {
+            if (termEditRef.value) {
+              termEditRef.value.close()
+            }
+          }, 100)
         } else {
-          ElMessage({ message: data.message, type: 'error' })
+          ElMessage({ message: data.message || '保存失败', type: 'error' })
         }
       })
       .catch((err) => {
+        btnLoad.value = false
+        console.error('新建术语表失败:', err) // 详细的错误信息
         ElMessage({ message: '接口异常', type: 'error' })
       })
   }
-  termEditRef.value.close()
-  btnLoad.value = false
 }
 
 //打开术语弹窗-编辑
@@ -412,6 +455,9 @@ function share_change(item) {
 //导出单个术语表
 async function export_terms(item) {
   try {
+    // 设置loading状态
+    exportLoading.value = true
+    
     // 发起 fetch 请求
     const response = await fetch(
       `${import.meta.env.VITE_API_URL}/api/comparison/export/${item.id}`,
@@ -440,15 +486,23 @@ async function export_terms(item) {
     // 清理资源
     document.body.removeChild(a)
     window.URL.revokeObjectURL(url) // 释放 URL 对象
+    
+    ElMessage({ message: '导出成功', type: 'success' })
   } catch (error) {
     console.error('下载失败:', error)
     ElMessage.error('文件下载失败，请稍后重试')
+  } finally {
+    // 清除loading状态
+    exportLoading.value = false
   }
 }
 
 // 导出所有术语表
 async function export_terms_all() {
   try {
+    // 设置loading状态
+    exportAllLoading.value = true
+    
     const response = await fetch(import.meta.env.VITE_API_URL + '/api/comparison/export/all', {
       headers: {
         Authorization: `Bearer ${userStore.token}`
@@ -471,9 +525,14 @@ async function export_terms_all() {
     a.click()
     document.body.removeChild(a)
     window.URL.revokeObjectURL(url) // 释放 URL 对象
+    
+    ElMessage({ message: '批量导出成功', type: 'success' })
   } catch (error) {
     console.error('导出失败:', error)
     ElMessage.error('术语表导出失败，请稍后重试')
+  } finally {
+    // 清除loading状态
+    exportAllLoading.value = false
   }
 }
 
@@ -488,6 +547,10 @@ function command_terms(type) {
 function upload_success(response) {
   console.log("上传成功")
   console.log(response)
+  
+  // 清除loading状态
+  importLoading.value = false
+  
   if (response.code == 200) {
     ElMessage({ message: '导入成功', type: 'success' })
     getTermList()
@@ -495,9 +558,13 @@ function upload_success(response) {
     ElMessage({ message: response.message, type: 'error' })
   }
 }
+
 function upload_error(error) {
   console.log("上传失败")
   console.log(error)
+  
+  // 清除loading状态
+  importLoading.value = false
   
   let errorMessage = '导入失败'
   
@@ -528,7 +595,10 @@ function upload_before(file) {
     ElMessage({ message: '请上传模板格式的文件', type: 'error' })
     return false
   }
-  console.log("isXlsx",isXlsx)
+  
+  // 文件验证通过，设置loading状态
+  importLoading.value = true
+  console.log("isXlsx", isXlsx)
   return isXlsx
 }
 
@@ -885,6 +955,33 @@ onMounted(() => {
 
   .el-popper {
     max-width: 300px;
+  }
+}
+.btn_box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  
+  .el-button {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    
+    &:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+  }
+  
+  .el-upload {
+    .el-button {
+      padding: 8px 16px;
+    }
   }
 }
 @media screen and (max-width: 767px) {

@@ -17,8 +17,8 @@ export const useTranslateStore = defineStore('translate-settings', () => {
     prompt: settingsStore.system_settings.prompt_template,
     prompt_id: null,
     threads: settingsStore.system_settings.max_threads,
-    comparison_id: null,
-    lang: '',
+    comparison_id: [], // 改为数组类型，支持多选术语库，默认为空数组
+    lang: '英语', // 设置默认目标语言为英语
     doc2x_flag: '',
     doc2x_secret_key: ''
   })
