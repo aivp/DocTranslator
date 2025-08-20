@@ -4,18 +4,22 @@ import zipfile
 from io import BytesIO
 import pandas as pd
 import pytz
+import logging
 from flask import request, current_app, send_file
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app import db
 from app.models import Customer
-from app.models.comparison import Comparison, ComparisonFav
+from app.models.comparison import Comparison, ComparisonFav, ComparisonSub
 from app.utils.response import APIResponse
 from sqlalchemy import func
 from datetime import datetime
 from app.utils.token_checker import require_valid_token
+from app.utils.validators import validate_pagination_params
 
+# 获取logger
+logger = logging.getLogger(__name__)
 
 
 class MyComparisonListResource(Resource):
@@ -23,45 +27,61 @@ class MyComparisonListResource(Resource):
     @jwt_required()
     def get(self):
         """获取我的术语表列表[^1]"""
-        # 直接查询所有数据（不解析查询参数）
-        query = Comparison.query.filter_by(customer_id=get_jwt_identity())
-        comparisons = [self._format_comparison(comparison) for comparison in query.all()]
+        # 连表查询：comparison 表 + comparison_sub 表
+        query = db.session.query(
+            Comparison,
+            func.count(ComparisonSub.id).label('term_count')  # 统计术语数量
+        ).outerjoin(
+            ComparisonSub, Comparison.id == ComparisonSub.comparison_sub_id
+        ).filter(
+            Comparison.customer_id == get_jwt_identity(),
+            Comparison.deleted_flag == 'N'
+        ).group_by(
+            Comparison.id
+        ).order_by(
+            Comparison.created_at.desc()  # 按创建时间倒序
+        )
+        
+        comparisons = []
+        for comparison, term_count in query.all():
+            # 获取该术语表的前5条术语数据
+            sample_terms = db.session.query(ComparisonSub).filter(
+                ComparisonSub.comparison_sub_id == comparison.id
+            ).order_by(ComparisonSub.id.desc()).limit(5).all()
+            
+            # 格式化术语数据
+            terms_list = []
+            for term in sample_terms:
+                terms_list.append({
+                    'id': term.id,
+                    'original': term.original,
+                    'comparison_text': term.comparison_text
+                })
+            
+            # 格式化术语表数据
+            comparison_data = {
+                'id': comparison.id,
+                'title': comparison.title,
+                'origin_lang': comparison.origin_lang,
+                'target_lang': comparison.target_lang,
+                'share_flag': comparison.share_flag,
+                'added_count': comparison.added_count,
+                'term_count': term_count,  # 总术语数量
+                'sample_terms': terms_list,  # 前5条术语数据
+                'customer_id': comparison.customer_id,
+                'created_at': comparison.created_at.strftime(
+                    '%Y-%m-%d %H:%M') if comparison.created_at else None,
+                'updated_at': comparison.updated_at.strftime(
+                    '%Y-%m-%d %H:%M') if comparison.updated_at else None,
+                'deleted_flag': comparison.deleted_flag
+            }
+            comparisons.append(comparison_data)
 
         # 返回结果
         return APIResponse.success({
             'data': comparisons,
             'total': len(comparisons)
         })
-
-    def _format_comparison(self, comparison):
-        """格式化术语表数据"""
-        # 解析 content 字段
-        content_list = []
-        if comparison.content:
-            for item in comparison.content.split('; '):
-                if ':' in item:
-                    origin, target = item.split(':', 1)
-                    content_list.append({
-                        'origin': origin.strip(),
-                        'target': target.strip()
-                    })
-
-        # 返回格式化后的数据
-        return {
-            'id': comparison.id,
-            'title': comparison.title,
-            'origin_lang': comparison.origin_lang,
-            'target_lang': comparison.target_lang,
-            'share_flag': comparison.share_flag,
-            'added_count': comparison.added_count,
-            'content': content_list,  # 返回解析后的数组
-            'customer_id': comparison.customer_id,
-            'created_at': comparison.created_at.strftime(
-                '%Y-%m-%d %H:%M') if comparison.created_at else None,  # 格式化时间
-            'updated_at': comparison.updated_at.strftime(
-                '%Y-%m-%d %H:%M') if comparison.updated_at else None,  # 格式化时间
-            'deleted_flag': comparison.deleted_flag
-        }
 
 
 # 获取共享术语表列表
@@ -388,21 +408,33 @@ class DeleteComparisonResource(Resource):
     @jwt_required()
     def delete(self, id):
         """删除术语表[^2]"""
-        comparison = Comparison.query.filter_by(
-            id=id,
-            customer_id=get_jwt_identity()
-        ).first_or_404()
+        try:
+            # 查找术语表
+            comparison = Comparison.query.filter_by(
+                id=id,
+                customer_id=get_jwt_identity()
+            ).first_or_404()
 
-        db.session.delete(comparison)
-        db.session.commit()
-        return APIResponse.success(message='删除成功')
+            # 先删除所有相关的术语记录
+            ComparisonSub.query.filter_by(comparison_sub_id=id).delete()
+            
+            # 再删除术语表
+            db.session.delete(comparison)
+            db.session.commit()
+            
+            logger.info(f"术语表删除成功：ID {id}")
+            return APIResponse.success(message='删除成功')
+            
+        except Exception as e:
+            logger.error(f"删除术语表失败：{str(e)}")
+            db.session.rollback()
+            return APIResponse.error(f"删除术语表失败：{str(e)}", 500)
 
 
 # 下载模板文件
 class DownloadTemplateResource(Resource):
     def get(self):
         """下载模板文件[^3]"""
-        from flask import send_file
         import os
 
         # 静态模板文件路径
@@ -428,13 +460,13 @@ class ImportComparisonResource(Resource):
         """
         导入 Excel 文件
         """
-        print("开始导入文件")
+        logger.info("开始导入文件")
         # 检查是否上传了文件
         if 'file' not in request.files:
-            print("未找到文件")
+            logger.info("未找到文件")
             return APIResponse.error('未选择文件', 400)
         file = request.files['file']
-        print(f"文件信息: {file.filename}, 文件大小: {len(file.read()) if hasattr(file, 'read') else 'unknown'}")
+        logger.info(f"文件信息: {file.filename}, 文件大小: {len(file.read()) if hasattr(file, 'read') else 'unknown'}")
         file.seek(0)  # 重置文件指针
 
         try:
@@ -443,39 +475,52 @@ class ImportComparisonResource(Resource):
             df = pd.read_excel(file, header=None)  # 不指定header，按行读取
             
             # 添加调试信息
-            print(f"文件行数: {len(df)}")
-            print(f"文件列数: {len(df.columns) if len(df) > 0 else 0}")
+            logger.info(f"文件行数: {len(df)}")
+            logger.info(f"文件列数: {len(df.columns) if len(df) > 0 else 0}")
             if len(df) >= 6:
-                print(f"第6行内容: {df.iloc[5].tolist()}")
+                logger.info(f"第6行内容: {df.iloc[5].tolist()}")
             if len(df) >= 2:
-                print(f"第2行内容: {df.iloc[1].tolist()}")
+                logger.info(f"第2行内容: {df.iloc[1].tolist()}")
             if len(df) >= 4:
-                print(f"第4行内容: {df.iloc[3].tolist()}")
+                logger.info(f"第4行内容: {df.iloc[3].tolist()}")
 
             # 检查文件是否包含所需的列（验证逻辑不变）
             # 从第6行开始查找列标题
             if len(df) < 6:
+                logger.info(f"文件行数不足6行，实际行数：{len(df)}")
                 return APIResponse.error(f'请正确填写语义对照表后再上传', 406)
+            
+            # 检查第1行是否包含"术语表标题"
             row = df.iloc[0]
+            logger.info(f"第1行内容：{row.tolist()}")
             if '术语表标题' not in row.values:
+                logger.info(f"第1行未找到'术语表标题'，实际内容：{row.values}")
                 return APIResponse.error(f'请获取正确的导入模板并按格式填写上传', 406)
+            
+            # 检查第3行是否包含"源语种"和"对照语种"
             row = df.iloc[2]
+            logger.info(f"第3行内容：{row.tolist()}")
             if '源语种' not in row.values or '对照语种' not in row.values:
+                logger.info(f"第3行未找到'源语种'或'对照语种'，实际内容：{row.values}")
                 return APIResponse.error(f'请获取正确的导入模板并按格式填写上传', 406)
+            
+            # 检查第5行是否包含"源术语"和"目标术语"
             row = df.iloc[4]
+            logger.info(f"第5行内容：{row.tolist()}")
             if '源术语' not in row.values or '目标术语' not in row.values:
+                logger.info(f"第5行未找到'源术语'或'目标术语'，实际内容：{row.values}")
                 return APIResponse.error(f'请获取正确的导入模板并按格式填写上传', 406)
             
             # 检查第6行是否有数据（不是列标题行）
             row_6 = df.iloc[5]  # 第6行（索引5）
-            print(f"第6行内容: {row_6.tolist()}")
+            logger.info(f"第6行内容: {row_6.tolist()}")
             
             # 直接使用A列和B列作为源术语和目标术语
             source_col = 0  # A列
             target_col = 1  # B列
             
             # 从第6行开始解析术语数据
-            content_list = []
+            terms_list = []
             for i in range(5, len(df)):  # 从第6行开始（索引5）
                 row = df.iloc[i]
                 source_term = row[source_col]
@@ -483,9 +528,10 @@ class ImportComparisonResource(Resource):
                 
                 # 检查是否为空值
                 if pd.notna(source_term) and pd.notna(target_term) and str(source_term).strip() and str(target_term).strip():
-                    content_list.append(f"{str(source_term).strip()}: {str(target_term).strip()}")
-            
-            content = '; '.join(content_list)
+                    terms_list.append({
+                        'original': str(source_term).strip(),
+                        'comparison': str(target_term).strip()
+                    })
             
             # 尝试从模板中获取额外信息，如果缺少则使用默认值
             title = '导入的术语表'
@@ -506,24 +552,52 @@ class ImportComparisonResource(Resource):
                 if pd.notna(df.iloc[3, 1]):  # B4单元格
                     target_lang = str(df.iloc[3, 1]).strip()
             
-            # 创建术语表
-            comparison = Comparison(
-                title=title,
-                origin_lang=origin_lang,
-                target_lang=target_lang,
-                content=content,
-                customer_id=get_jwt_identity(),
-                share_flag='N'
-            )
-            db.session.add(comparison)
-            db.session.commit()
-
-            # 返回成功响应
-            return APIResponse.success({
-                'id': comparison.id
-            })
+            # 开始事务处理
+            try:
+                # 1. 先创建主表记录
+                comparison = Comparison(
+                    title=title,
+                    origin_lang=origin_lang,
+                    target_lang=target_lang,
+                    content='',  # 设置为空字符串而不是 None，保持主表其他字段正常使用
+                    customer_id=get_jwt_identity(),
+                    share_flag='N'
+                )
+                db.session.add(comparison)
+                db.session.flush()  # 获取主键ID
+                
+                # 2. 批量插入子表记录
+                for i, term_data in enumerate(terms_list):
+                    term = ComparisonSub(
+                        comparison_sub_id=comparison.id,
+                        original=term_data['original'],
+                        comparison_text=term_data['comparison']
+                    )
+                    db.session.add(term)
+                
+                # 3. 更新主表的术语数量
+                comparison.added_count = len(terms_list)
+                
+                # 4. 提交事务
+                db.session.commit()
+                
+                logger.info(f"导入成功：创建术语表 {comparison.id}，包含 {len(terms_list)} 个术语")
+                
+                # 返回成功响应
+                return APIResponse.success({
+                    'id': comparison.id,
+                    'term_count': len(terms_list)
+                })
+                
+            except Exception as e:
+                # 回滚事务
+                db.session.rollback()
+                logger.error(f"数据库操作失败：{str(e)}")
+                return APIResponse.error(f"数据库操作失败：{str(e)}", 500)
+                
         except Exception as e:
             # 捕获并返回错误信息
+            logger.error(f"文件导入失败：{str(e)}")
             return APIResponse.error(f"文件导入失败：{str(e)}", 500)
 
 
@@ -540,13 +614,23 @@ class ExportComparisonResource(Resource):
 
         # 查询术语表
         comparison = Comparison.query.get_or_404(id)
-        print(comparison.customer_id, current_user_id)
+        logger.info(f"Comparison customer_id: {comparison.customer_id}, current_user_id: {current_user_id}")
         # 检查术语表是否共享或属于当前用户
         if comparison.share_flag == 'Y' or comparison.customer_id != int(current_user_id):
             return {'message': '术语表未共享或无权限访问', 'code': 403}, 403
 
-        # 解析术语内容
-        terms = [term.split(': ') for term in comparison.content.split(';')]  # 按 ': ' 分割
+        # 从comparison_sub表获取术语数据
+        terms_data = ComparisonSub.query.filter_by(comparison_sub_id=id).order_by(ComparisonSub.id.desc()).all()
+        
+        if not terms_data:
+            return {'message': '该术语表没有术语数据', 'code': 404}, 404
+
+        # 构建术语列表
+        terms = []
+        for term in terms_data:
+            terms.append([term.original or '', term.comparison_text or ''])
+        
+        # 创建DataFrame
         df = pd.DataFrame(terms, columns=['源术语', '目标术语'])
 
         # 创建 Excel 文件
@@ -556,35 +640,6 @@ class ExportComparisonResource(Resource):
         output.seek(0)
 
         # 返回文件下载响应
-        return send_file(
-            output,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=f'{comparison.title}.xlsx'
-        )
-
-
-class ExportComparisonResource6666(Resource):
-    def get(self, id):
-        """导出单个术语表[^5]"""
-        comparison = Comparison.query.get_or_404(id)
-        if comparison.share_flag != 'Y':
-            return APIResponse.error('术语表未共享', 403)
-
-        from flask import send_file
-        from io import BytesIO
-        import pandas as pd
-
-        # 解析术语内容
-        terms = [term.split(',') for term in comparison.content.split(';')]
-        df = pd.DataFrame(terms, columns=['源术语', '目标术语'])
-
-        # 创建 Excel 文件
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False)
-        output.seek(0)
-
         return send_file(
             output,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -611,18 +666,34 @@ class ExportAllComparisonsResource(Resource):
         memory_file = BytesIO()
         with zipfile.ZipFile(memory_file, 'w') as zf:
             for comparison in comparisons:
-                # 解析术语内容
-                terms = [term.split(': ') for term in comparison.content.split(';')]  # 按 ': ' 分割
-                df = pd.DataFrame(terms, columns=['源术语', '目标术语'])
+                # 从comparison_sub表获取术语数据
+                terms_data = ComparisonSub.query.filter_by(comparison_sub_id=comparison.id).order_by(ComparisonSub.id.desc()).all()
+                
+                if terms_data:
+                    # 构建术语列表
+                    terms = []
+                    for term in terms_data:
+                        terms.append([term.original or '', term.comparison_text or ''])
+                    
+                    # 创建DataFrame
+                    df = pd.DataFrame(terms, columns=['源术语', '目标术语'])
 
-                # 创建 Excel 文件
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False)
-                output.seek(0)
+                    # 创建 Excel 文件
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df.to_excel(writer, index=False)
+                    output.seek(0)
 
-                # 将 Excel 文件添加到 ZIP 中
-                zf.writestr(f"{comparison.title}.xlsx", output.getvalue())
+                    # 将 Excel 文件添加到 ZIP 中
+                    zf.writestr(f"{comparison.title}.xlsx", output.getvalue())
+                else:
+                    # 如果没有术语数据，创建一个空的Excel文件
+                    df = pd.DataFrame(columns=['源术语', '目标术语'])
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df.to_excel(writer, index=False)
+                    output.seek(0)
+                    zf.writestr(f"{comparison.title}.xlsx", output.getvalue())
 
         memory_file.seek(0)
 
@@ -631,5 +702,186 @@ class ExportAllComparisonsResource(Resource):
             memory_file,
             mimetype='application/zip',
             as_attachment=True,
-            download_name=f'术语表_{datetime.now().strftime("%Y%m%d")}.zip'
+            download_name='术语表导出.zip'
         )
+
+
+class ComparisonTermsResource(Resource):
+    @require_valid_token
+    @jwt_required()
+    def get(self, comparison_id):
+        """获取术语列表（分页+搜索）"""
+        try:
+            # 验证分页参数
+            page, limit = validate_pagination_params(request)
+            
+            # 获取搜索关键词
+            search = request.args.get('search', '').strip()
+            
+            # 构建查询
+            query = ComparisonSub.query.filter_by(comparison_sub_id=comparison_id)
+            
+            # 如果有搜索关键词，添加搜索条件
+            if search:
+                query = query.filter(
+                    db.or_(
+                        ComparisonSub.original.like(f'%{search}%'),
+                        ComparisonSub.comparison_text.like(f'%{search}%')
+                    )
+                )
+            
+            # 执行分页查询
+            pagination = query.order_by(ComparisonSub.id.desc()).paginate(
+                page=page, 
+                per_page=limit, 
+                error_out=False
+            )
+            
+            # 格式化返回数据
+            terms = []
+            for term in pagination.items:
+                terms.append({
+                    'id': term.id,
+                    'original': term.original,
+                    'comparison_text': term.comparison_text
+                })
+            
+            return APIResponse.success({
+                'data': terms,
+                'total': pagination.total,
+                'page': pagination.page,
+                'per_page': pagination.per_page,
+                'pages': pagination.pages
+            })
+            
+        except Exception as e:
+            logger.error(f"获取术语列表失败：{str(e)}")
+            return APIResponse.error(f"获取术语列表失败：{str(e)}", 500)
+
+    @require_valid_token
+    @jwt_required()
+    def post(self, comparison_id):
+        """新增术语"""
+        try:
+            # 获取请求数据
+            data = request.get_json() if request.is_json else request.form
+            
+            original = data.get('original', '').strip()
+            comparison_text = data.get('comparison_text', '').strip()
+            
+            if not original or not comparison_text:
+                return APIResponse.error('原文和对应术语不能为空', 400)
+            
+            # 检查术语表是否存在且用户有权限
+            comparison = Comparison.query.filter_by(
+                id=comparison_id,
+                customer_id=get_jwt_identity(),
+                deleted_flag='N'
+            ).first()
+            
+            if not comparison:
+                return APIResponse.error('无权限在此术语表中添加术语', 403)
+            
+            # 创建新术语
+            new_term = ComparisonSub(
+                comparison_sub_id=comparison_id,
+                original=original,
+                comparison_text=comparison_text
+            )
+            
+            db.session.add(new_term)
+            db.session.commit()
+            
+            # 更新术语表的术语数量
+            comparison.update_term_count()
+            
+            logger.info(f"新增术语成功：术语表ID {comparison_id}，术语ID {new_term.id}")
+            return APIResponse.success('新增成功')
+            
+        except Exception as e:
+            logger.error(f"新增术语失败：{str(e)}")
+            return APIResponse.error(f"新增术语失败：{str(e)}", 500)
+
+
+class ComparisonTermEditResource(Resource):
+    @require_valid_token
+    @jwt_required()
+    def put(self, term_id):
+        """编辑单个术语"""
+        try:
+            # 获取请求数据，支持form和JSON两种格式
+            if request.is_json:
+                data = request.get_json()
+            else:
+                data = request.form
+            
+            original = data.get('original', '').strip()
+            comparison_text = data.get('comparison_text', '').strip()
+            
+            if not original or not comparison_text:
+                return APIResponse.error('原文和对应术语不能为空', 400)
+            
+            # 查找术语记录
+            term = ComparisonSub.query.get_or_404(term_id)
+            
+            # 检查权限（通过关联的术语表检查用户权限）
+            comparison = Comparison.query.filter_by(
+                id=term.comparison_sub_id,
+                customer_id=get_jwt_identity(),
+                deleted_flag='N'
+            ).first()
+            
+            if not comparison:
+                return APIResponse.error('无权限编辑此术语', 403)
+            
+            # 更新术语
+            term.original = original
+            term.comparison_text = comparison_text
+            db.session.commit()
+            
+            logger.info(f"术语编辑成功：ID {term_id}")
+            return APIResponse.success('编辑成功')
+            
+        except Exception as e:
+            logger.error(f"编辑术语失败：{str(e)}")
+            return APIResponse.error(f"编辑术语失败：{str(e)}", 500)
+
+
+class ComparisonTermDeleteResource(Resource):
+    @require_valid_token
+    @jwt_required()
+    def delete(self, term_id):
+        """删除单个术语"""
+        try:
+            # 查找术语记录
+            term = ComparisonSub.query.get_or_404(term_id)
+            
+            # 检查权限（通过关联的术语表检查用户权限）
+            comparison = Comparison.query.filter_by(
+                id=term.comparison_sub_id,
+                customer_id=get_jwt_identity(),
+                deleted_flag='N'
+            ).first()
+            
+            if not comparison:
+                return APIResponse.error('无权限删除此术语', 403)
+            
+            # 删除术语
+            db.session.delete(term)
+            db.session.commit()
+            
+            # 更新术语表的术语数量
+            try:
+                comparison.update_term_count()
+            except Exception as count_error:
+                logger.warning(f"更新术语表计数失败：{str(count_error)}")
+                # 计数更新失败不影响删除操作
+            
+            logger.info(f"术语删除成功：ID {term_id}")
+            return APIResponse.success('删除成功')
+            
+        except Exception as e:
+            logger.error(f"删除术语失败：{str(e)}")
+            # 回滚事务
+            db.session.rollback()
+            return APIResponse.error(f"删除术语失败：{str(e)}", 500)

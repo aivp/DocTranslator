@@ -12,6 +12,7 @@ dashscope_key = os.environ.get('DASH_SCOPE_KEY', '')
 # 请求频率控制 - 线程安全版本
 import threading
 
+# 暂时降为600，最大840
 class QwenRateLimiter:
     def __init__(self):
         self.request_times = []  # 记录最近840次请求的时间戳
@@ -27,10 +28,12 @@ class QwenRateLimiter:
             self.request_times = [t for t in self.request_times if current_time - t < 60]
             
             # 计算理论上的最小间隔（60秒/840次 = 0.071秒/次）
-            min_interval = 0.071
+            # min_interval = 0.071
+            min_interval = 0.1
+
             
             # 如果最近60秒内已经有840次请求，需要等待
-            if len(self.request_times) >= 840:
+            if len(self.request_times) >= 600:
                 # 等待到最早请求过期
                 wait_time = self.request_times[0] + 60 - current_time
                 if wait_time > 0:
@@ -45,7 +48,7 @@ class QwenRateLimiter:
                 # 计算当前窗口的剩余时间
                 window_start = self.request_times[0]
                 remaining_time = 60 - (current_time - window_start)
-                remaining_requests = 840 - len(self.request_times)
+                remaining_requests = 600 - len(self.request_times)
                 
                 if remaining_requests > 0 and remaining_time > 0:
                     # 计算理论间隔
@@ -74,11 +77,11 @@ class QwenRateLimiter:
                 elapsed = current_time - self.request_times[0]
                 if elapsed > 0:
                     current_rate = len(self.request_times) / (elapsed / 60)
-                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/840, 当前速率: {current_rate:.1f}次/分钟")
+                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/600, 当前速率: {current_rate:.1f}次/分钟")
                 else:
-                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/840")
+                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/600")
             else:
-                logging.debug(f"Qwen请求计数: {len(self.request_times)}/840")
+                logging.debug(f"Qwen请求计数: {len(self.request_times)}/600")
     
     def get_current_rate(self):
         """获取当前请求速率（次/分钟）"""

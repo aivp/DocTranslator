@@ -20,7 +20,8 @@ from app.resources.api.comparison import MyComparisonListResource, SharedCompari
     EditComparisonResource, ShareComparisonResource, CopyComparisonResource, \
     FavoriteComparisonResource, CreateComparisonResource, DeleteComparisonResource, \
     DownloadTemplateResource, ImportComparisonResource, ExportComparisonResource, \
-    ExportAllComparisonsResource
+    ExportAllComparisonsResource, ComparisonTermsResource, ComparisonTermEditResource, \
+    ComparisonTermDeleteResource
 from app.resources.api.customer import GuestIdResource, CustomerDetailResource
 from app.resources.api.doc2x import Doc2XTranslateStartResource, Doc2XTranslateStatusResource
 from app.resources.api.files import FileUploadResource, FileDeleteResource
@@ -88,6 +89,9 @@ def register_routes(api):
     api.add_resource(ImportComparisonResource, '/api/comparison/import')
     api.add_resource(ExportComparisonResource, '/api/comparison/export/<int:id>')
     api.add_resource(ExportAllComparisonsResource, '/api/comparison/export/all')
+    api.add_resource(ComparisonTermsResource, '/api/comparison/<int:comparison_id>/terms')
+    api.add_resource(ComparisonTermEditResource, '/api/comparison/term/<int:term_id>')
+    api.add_resource(ComparisonTermDeleteResource, '/api/comparison/term/<int:term_id>')
 
     api.add_resource(SystemVersionResource, '/api/common/version')
     api.add_resource(SystemSettingsResource, '/api/common/all_settings')

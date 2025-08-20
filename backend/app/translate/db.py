@@ -94,3 +94,19 @@ def get(sql, *params):
     except:
         lock.release()
         return []
+
+def get_all(sql, *params):
+    conn=get_conn()
+    lock=Lock()
+    lock.acquire()
+    try:
+        cursor=conn.cursor(cursor=pymysql.cursors.DictCursor)        
+        cursor.execute(sql, params)
+        result=cursor.fetchall()
+        lock.release()
+        cursor.close()
+        conn.close()
+        return result
+    except:
+        lock.release()
+        return []

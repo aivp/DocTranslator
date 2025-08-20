@@ -12,7 +12,7 @@ class Config:
     # JWT配置
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'fallback-secret-key')
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=180)  # 令牌有效期180天
-    # JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=1)  # 刷新令牌1天
+    # JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=1)  # 刷新令牌1分钟
     JWT_TOKEN_LOCATION = ['headers']  # 只从请求头获取
     JWT_HEADER_NAME = 'Authorization'  # 使用标准的Authorization header
     JWT_HEADER_TYPE = 'Bearer'  # 使用标准的Bearer前缀

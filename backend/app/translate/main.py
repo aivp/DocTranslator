@@ -18,6 +18,7 @@ from . import db
 from . import common
 import traceback
 from . import rediscon
+import logging
 
 # 当前正在执行的线程
 run_threads=0
@@ -108,15 +109,14 @@ def main():
         else:
             #before_active_count=threading.active_count()
             #mredis.decr(api_url,threading_num-before_active_count)
-            print("翻译出错了")
+            logging.error("翻译出错了")
     except Exception as e:
-        to_translate.error(translate_id, str(e))
+        #before_active_count=threading.active_count()
+        #mredis.decr(api_url,threading_num-before_active_count)
         exc_type, exc_value, exc_traceback = sys.exc_info()
         line_number = exc_traceback.tb_lineno  # 异常抛出的具体行号
-        print(f"Error occurred on line: {line_number}")
-        #before_active_count=threading.activeCount()
-        #mredis.set(api_url,threading_num-before_active_count)
-        print(e)
+        logging.error(f"Error occurred on line: {line_number}")
+        logging.error(f"Error details: {e}")
 
 def get_prompt(prompt_id, comparison):
     # 确保prompt_id不为None，如果是None则设为0
@@ -134,16 +134,60 @@ def get_prompt(prompt_id, comparison):
     return prompt['value']
 
 def get_comparison(comparison_id):
-    # 确保comparison_id不为None，如果是None则设为0
+    # 确保comparison_id不为None，如果是None则设为空字符串
     if comparison_id is None:
-        comparison_id = 0
+        comparison_id = ''
     else:
-        comparison_id = int(comparison_id)
+        comparison_id = str(comparison_id)
     
-    if comparison_id > 0:
-        comparison=db.get("select content from comparison where id=%s and deleted_flag='N'", comparison_id)
-        if comparison and len(comparison['content'])>0:
-            return comparison['content'].replace(',',':').replace(';','\n');
+    if comparison_id and comparison_id.strip():
+        # 支持多个术语库ID，逗号分隔
+        comparison_ids = [int(id.strip()) for id in comparison_id.split(',') if id.strip().isdigit()]
+        if comparison_ids:
+            all_terms = {}  # 用于去重的字典
+            
+            for comp_id in comparison_ids:
+                try:
+                    # 从 comparison_sub 表获取术语数据 - 使用正确的查询方法
+                    terms = db.get_all("select original, comparison_text from comparison_sub where comparison_sub_id=%s", comp_id)
+                    
+                    # 检查terms是否为有效结果
+                    if terms and isinstance(terms, list) and len(terms) > 0:
+                        logging.info(f"术语库 {comp_id} 找到 {len(terms)} 条术语")
+                        
+                        for term in terms:
+                            if term and isinstance(term, dict) and term.get('original') and term.get('comparison_text'):
+                                # 去重：如果原文已存在，跳过（以第一个为准）
+                                if term['original'] not in all_terms:
+                                    all_terms[term['original']] = term['comparison_text']
+                                    logging.info(f"添加术语: {term['original']} -> {term['comparison_text']}")
+                    else:
+                        logging.warning(f"术语库 {comp_id} 未找到术语数据或查询结果为空")
+                        
+                except Exception as e:
+                    logging.error(f"查询术语库 {comp_id} 时发生异常: {str(e)}")
+                    continue
+            
+            # 拼接所有术语
+            if all_terms:
+                combined_terms = []
+                for source, target in all_terms.items():
+                    combined_terms.append(f"{source}: {target}")
+                result = '\n'.join(combined_terms)
+                # 添加日志，显示最终传入模型的术语表
+                logging.info(f"任务使用术语表ID: {comparison_id}")
+                logging.info(f"术语表内容: {list(all_terms.items())}")
+                logging.info(f"总共合并了 {len(all_terms)} 条术语")
+                return result
+            else:
+                logging.warning(f"任务术语表ID {comparison_id} 未找到内容")
+                return None
+        else:
+            logging.warning(f"任务术语表ID格式无效: {comparison_id}")
+            return None
+    else:
+        logging.info("任务未使用术语库")
+        return None
 
 if __name__ == '__main__':
     main()

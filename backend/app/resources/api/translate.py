@@ -9,6 +9,7 @@ from datetime import datetime
 from io import BytesIO
 import zipfile
 import os
+import pytz
 
 from app import db, Setting
 from app.models import Customer
@@ -151,9 +152,47 @@ class TranslateStartResource(Resource):
             translate.backup_model = data.get('backup_model', '')
             translate.origin_lang = data.get('origin_lang', '')
             translate.size = data.get('size', 0)  # 更新文件大小
-            # 获取 comparison_id 并转换为整数
-            comparison_id = data.get('comparison_id', 0)  # 默认值为 '0'
-            translate.comparison_id = int(comparison_id) if comparison_id else None
+            # 获取 comparison_id 并转换为字符串（支持多个ID，逗号分隔）
+            # 处理数组格式的字段名：comparison_id[0], comparison_id[1], ...
+            comparison_id = []
+            i = 0
+            while f'comparison_id[{i}]' in data:
+                value = data.get(f'comparison_id[{i}]', '')
+                if value and value.strip():
+                    comparison_id.append(value.strip())
+                i += 1
+            
+            # 如果没有找到数组格式，尝试直接获取 comparison_id
+            if not comparison_id:
+                comparison_id = data.get('comparison_id', '')
+            
+            # 添加详细日志
+            current_app.logger.info(f"=== 翻译任务启动 - 术语库调试信息 ===")
+            current_app.logger.info(f"原始请求数据: {data}")
+            current_app.logger.info(f"comparison_id 原始值: {comparison_id}")
+            current_app.logger.info(f"comparison_id 类型: {type(comparison_id)}")
+            
+            if comparison_id:
+                # 如果是数组，转换为逗号分隔的字符串
+                if isinstance(comparison_id, list):
+                    current_app.logger.info(f"comparison_id 是数组，内容: {comparison_id}")
+                    comparison_id = ','.join(map(str, comparison_id))
+                    current_app.logger.info(f"转换后的字符串: {comparison_id}")
+                # 如果是单个ID，转换为字符串
+                elif isinstance(comparison_id, (int, str)):
+                    current_app.logger.info(f"comparison_id 是单个值: {comparison_id}")
+                    comparison_id = str(comparison_id)
+                    current_app.logger.info(f"转换后的字符串: {comparison_id}")
+                else:
+                    current_app.logger.info(f"comparison_id 是其他类型: {type(comparison_id)}")
+                    comparison_id = ''
+            else:
+                current_app.logger.info("comparison_id 为空或None")
+            
+            current_app.logger.info(f"最终设置的 comparison_id: {comparison_id}")
+            current_app.logger.info(f"=== 术语库调试信息结束 ===")
+            
+            translate.comparison_id = comparison_id if comparison_id else None
             prompt_id = data.get('prompt_id', '0')
             translate.prompt_id = int(prompt_id) if prompt_id else None
             translate.doc2x_flag = data.get('doc2x_flag', 'N')
@@ -276,15 +315,41 @@ class TranslateListResource(Resource):
         try:
             # 优先使用 start_at 和 end_at
             if translate_record.start_at and translate_record.end_at:
-                spend_time = translate_record.end_at - translate_record.start_at
+                # 确保时间都是时区感知的
+                start_time = translate_record.start_at
+                end_time = translate_record.end_at
+                
+                # 如果时间不是时区感知的，添加UTC时区
+                if start_time.tzinfo is None:
+                    start_time = pytz.UTC.localize(start_time)
+                if end_time.tzinfo is None:
+                    end_time = pytz.UTC.localize(end_time)
+                
+                spend_time = end_time - start_time
                 total_seconds = spend_time.total_seconds()
                 
                 # 防护措施：避免负数时间
                 if total_seconds < 0:
                     current_app.logger.warning(
                         f"任务 {translate_record.id} 时间计算异常: "
-                        f"start_at: {translate_record.start_at}, end_at: {translate_record.end_at}"
+                        f"start_at: {translate_record.start_at} (tz: {getattr(translate_record.start_at, 'tzinfo', 'None')}), "
+                        f"end_at: {translate_record.end_at} (tz: {getattr(translate_record.end_at, 'tzinfo', 'None')})"
                     )
+                    # 尝试使用 created_at 作为备选
+                    if translate_record.created_at and translate_record.end_at:
+                        created_time = translate_record.created_at
+                        if created_time.tzinfo is None:
+                            created_time = pytz.UTC.localize(created_time)
+                        
+                        spend_time = end_time - created_time
+                        total_seconds = spend_time.total_seconds()
+                        
+                        if total_seconds < 0:
+                            return "--"
+                        
+                        minutes = int(total_seconds // 60)
+                        seconds = int(total_seconds % 60)
+                        return f"{minutes}分{seconds}秒"
                     return "--"
                 
                 # 强制分秒格式（即使不足1分钟也显示0分xx秒）
@@ -294,7 +359,16 @@ class TranslateListResource(Resource):
             
             # 如果没有 start_at，尝试使用 created_at 和 end_at
             elif translate_record.created_at and translate_record.end_at:
-                spend_time = translate_record.end_at - translate_record.created_at
+                created_time = translate_record.created_at
+                end_time = translate_record.end_at
+                
+                # 确保时间都是时区感知的
+                if created_time.tzinfo is None:
+                    created_time = pytz.UTC.localize(created_time)
+                if end_time.tzinfo is None:
+                    end_time = pytz.UTC.localize(end_time)
+                
+                spend_time = end_time - created_time
                 total_seconds = spend_time.total_seconds()
                 
                 if total_seconds < 0:

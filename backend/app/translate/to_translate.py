@@ -44,11 +44,11 @@ def get(trans, event, texts, index):
             # 检查Qwen服务可用性
             if model == 'qwen-mt-plus':
                 qwen_available, qwen_message = check_qwen_availability()
-                print(f"Qwen服务检查: {qwen_message}")
+                logging.info(f"Qwen服务检查: {qwen_message}")
                 if not qwen_available:
-                    print("警告: Qwen服务不可用，将使用备用方案")
+                    logging.warning("警告: Qwen服务不可用，将使用备用方案")
                 else:
-                    print("Qwen翻译服务已启用")
+                    logging.info("Qwen翻译服务已启用")
         except:
             pass
     # ==========================================
@@ -64,8 +64,7 @@ def get(trans, event, texts, index):
     # 确保comparison_id不为None，如果是None则设为0
     if comparison_id is None:
         comparison_id = 0
-    else:
-        comparison_id = int(comparison_id)
+    # 不要强制转换为int，保持原始字符串格式以支持多个ID
     server = trans.get('server', 'openai')
     old_text = text['text']
     md5_key = md5_encryption(
@@ -100,14 +99,13 @@ def get(trans, event, texts, index):
                                    str(content), str(md5_key))
                 text['complete'] = True
         except Exception as e:
-            # 报错重试
-            print(f"百度翻译错误: {str(e)}")
+            logging.error(f"百度翻译错误: {str(e)}")
             if "retry" not in text:
                 text["retry"] = 0
             text["retry"] += 1
             if text["retry"] <= 3:
                 time.sleep(5)
-                print('百度翻译出错，正在重试！')
+                logging.info('百度翻译出错，正在重试！')
                 return get(trans, event, texts, index)  # 重新尝试
             text['complete'] = True
 
@@ -153,21 +151,58 @@ def get(trans, event, texts, index):
 
             # 获取术语库内容并转换为tm_list格式（仅当使用千问模型且有术语库时）
             tm_list = None
-            if model == 'qwen-mt-plus' and comparison_id > 0:
-                comparison = db.get("select content from comparison where id=%s and deleted_flag='N'", comparison_id)
-                if comparison and len(comparison['content']) > 0:
-                    # 解析术语库内容，格式：源术语:目标术语;源术语2:目标术语2
-                    terms_content = comparison['content']
-                    tm_list = []
-                    for term_pair in terms_content.split(';'):
-                        if ':' in term_pair:
-                            source, target = term_pair.split(':', 1)
+            if model == 'qwen-mt-plus' and comparison_id:
+                # 支持多个术语库ID，逗号分隔
+                comparison_ids = [int(id.strip()) for id in str(comparison_id).split(',') if id.strip().isdigit()]
+                
+                if comparison_ids:
+                    all_terms = {}  # 用于去重的字典
+                    
+                    for comp_id in comparison_ids:
+                        try:
+                            # 从 comparison_sub 表获取术语数据，使用get_all而不是execute
+                            terms = db.get_all("select original, comparison_text from comparison_sub where comparison_sub_id=%s", comp_id)
+                            
+                            if terms and isinstance(terms, list) and len(terms) > 0:
+                                # 解析术语库内容
+                                for term in terms:
+                                    if term and isinstance(term, dict) and term.get('original') and term.get('comparison_text'):
+                                        source = term['original'].strip()
+                                        target = term['comparison_text'].strip()
+                                        # 去重：如果原文已存在，跳过（以第一个为准）
+                                        if source not in all_terms:
+                                            all_terms[source] = target
+                            else:
+                                logging.warning(f"术语库 {comp_id} 未找到术语数据")
+                                
+                        except Exception as e:
+                            logging.error(f"查询术语库 {comp_id} 时发生异常: {str(e)}")
+                            continue
+                    
+                    # 转换为tm_list格式
+                    if all_terms:
+                        tm_list = []
+                        for source, target in all_terms.items():
                             tm_list.append({
-                                "source": source.strip(),
-                                "target": target.strip()
+                                "source": source,
+                                "target": target
                             })
-                print("千问的术语库")
-                print("tm_list", tm_list)
+                
+                    logging.info("千问的术语库")
+                    # 只打印前10条，避免日志过长
+                    if tm_list and len(tm_list) > 10:
+                        logging.info(f"tm_list(前10条): {tm_list[:10]} ... 共{len(tm_list)}条")
+                    else:
+                        logging.info(f"tm_list: {tm_list}")
+                    # 添加日志，显示最终传入模型的术语表
+                    if all_terms:
+                        logging.info(f"任务使用术语表ID: {comparison_id}")
+                    else:
+                        logging.warning(f"任务 {translate_id} 术语表ID {comparison_id} 未找到内容")
+                else:
+                    logging.warning(f"任务 {translate_id} 术语表ID格式无效: {comparison_id}")
+            else:
+                logging.info(f"任务 {translate_id} 未使用术语库，model: {model}, comparison_id: {comparison_id}")
 
             if text['complete'] == False:
                 content = ''
@@ -252,7 +287,7 @@ def get(trans, event, texts, index):
                 trans['model'] = backup_model
                 trans['backup_model'] = model
                 time.sleep(1)
-                print("访问速率达到限制,交换备用模型与模型重新重试")
+                logging.warning("访问速率达到限制,交换备用模型与模型重新重试")
                 get(trans, event, texts, index)
             else:
                 return use_backup_model(trans, event, texts, index,
@@ -263,7 +298,7 @@ def get(trans, event, texts, index):
                 trans['model'] = backup_model
                 trans['backup_model'] = model
                 time.sleep(1)
-                print("当前分组上游负载已饱和，交换备用模型与模型重新重试")
+                logging.warning("当前分组上游负载已饱和，交换备用模型与模型重新重试")
                 get(trans, event, texts, index)
             else:
                 return use_backup_model(trans, event, texts, index,
@@ -275,15 +310,15 @@ def get(trans, event, texts, index):
             # set_threading_num(mredis)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             line_number = exc_traceback.tb_lineno  # 异常抛出的具体行号
-            print(f"Error occurred on line: {line_number}")
-            print(e)
+            logging.error(f"Error occurred on line: {line_number}")
+            logging.error(f"Error details: {e}")
             if "retry" not in text:
                 text["retry"] = 0
             text["retry"] += 1
             if text["retry"] <= 3:
                 trans['model'] = backup_model
                 trans['backup_model'] = model
-                print("当前模型执行异常，交换备用模型与模型重新重试")
+                logging.warning("当前模型执行异常，交换备用模型与模型重新重试")
                 time.sleep(1)
                 get(trans, event, texts, index)
                 return
@@ -380,7 +415,7 @@ def get11(trans, event, texts, index):
             trans['model'] = backup_model
             trans['backup_model'] = model
             time.sleep(1)
-            print("访问速率达到限制,交换备用模型与模型重新重试")
+            logging.warning("访问速率达到限制,交换备用模型与模型重新重试")
             get(trans, event, texts, index)
         else:
             return use_backup_model(trans, event, texts, index,
@@ -391,7 +426,7 @@ def get11(trans, event, texts, index):
             trans['model'] = backup_model
             trans['backup_model'] = model
             time.sleep(1)
-            print("当前分组上游负载已饱和，交换备用模型与模型重新重试")
+            logging.warning("当前分组上游负载已饱和，交换备用模型与模型重新重试")
             get(trans, event, texts, index)
         else:
             return use_backup_model(trans, event, texts, index,
@@ -403,15 +438,15 @@ def get11(trans, event, texts, index):
         # set_threading_num(mredis)
         exc_type, exc_value, exc_traceback = sys.exc_info()
         line_number = exc_traceback.tb_lineno  # 异常抛出的具体行号
-        print(f"Error occurred on line: {line_number}")
-        print(e)
+        logging.error(f"Error occurred on line: {line_number}")
+        logging.error(f"Error details: {e}")
         if "retry" not in text:
             text["retry"] = 0
         text["retry"] += 1
         if text["retry"] <= 3:
             trans['model'] = backup_model
             trans['backup_model'] = model
-            print("当前模型执行异常，交换备用模型与模型重新重试")
+            logging.warning("当前模型执行异常，交换备用模型与模型重新重试")
             time.sleep(1)
             get(trans, event, texts, index)
             return
@@ -500,7 +535,7 @@ def req(text, target_lang, model, prompt, ext):
         {"role": "user", "content": text}
     ]
     # print(openai.base_url)
-    print(message)
+    logging.info(message)
     # 禁用 OpenAI 的日志输出
     logging.getLogger("openai").setLevel(logging.WARNING)
     # 禁用 httpx 的日志输出
@@ -611,15 +646,25 @@ def process(texts, translate_id):
 
 def complete(trans, text_count, spend_time):
     target_filesize = 1 #os.stat(trans['target_file']).st_size
+    # 使用Python时区时间，与start_at保持一致
+    from datetime import datetime
+    import pytz
+    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))  # 使用东八区时区，与translate_service.py保持一致
+    
     db.execute(
-        "update translate set status='done',end_at=now(),process=100,target_filesize=%s,word_count=%s where id=%s",
-        target_filesize, text_count, trans['id'])
+        "update translate set status='done',end_at=%s,process=100,target_filesize=%s,word_count=%s where id=%s",
+        end_time, target_filesize, text_count, trans['id'])
 
 
 def error(translate_id, message):
+    # 使用Python时区时间，与start_at保持一致
+    from datetime import datetime
+    import pytz
+    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))  # 使用东八区时区，与translate_service.py保持一致
+    
     db.execute(
-        "update translate set failed_count=failed_count+1,status='failed',end_at=now(),failed_reason=%s where id=%s",
-        message, translate_id)
+        "update translate set failed_count=failed_count+1,status='failed',end_at=%s,failed_reason=%s where id=%s",
+        end_time, message, translate_id)
 
 
 def count_text(text):

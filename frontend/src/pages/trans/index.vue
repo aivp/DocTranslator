@@ -370,6 +370,14 @@ function process(uuid) {
           })
           // 更新翻译任务列表
           getTranslatesData(1)
+          
+          // 任务失败时，从form.files中移除失败的文件
+          const failedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
+          if (failedFileIndex !== -1) {
+            form.value.files.splice(failedFileIndex, 1)
+            console.log('已从文件列表中移除翻译失败的文件:', uuid)
+          }
+          
           // 任务失败后，尝试启动下一个
           setTimeout(() => startNextTranslation(), 2000)
           return // 直接返回，不再继续查询
@@ -397,6 +405,13 @@ function process(uuid) {
           })
           getTranslatesData(1)
           
+          // 翻译完成后，从form.files中移除已完成的文件
+          const completedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
+          if (completedFileIndex !== -1) {
+            form.value.files.splice(completedFileIndex, 1)
+            console.log('已从文件列表中移除翻译完成的文件:', uuid)
+          }
+          
           // 翻译完成后，自动启动下一个待翻译的文件
           setTimeout(() => startNextTranslation(), 2000)
         } else {
@@ -412,6 +427,14 @@ function process(uuid) {
         })
         // 任务失败时，更新翻译任务列表
         getTranslatesData(1)
+        
+        // 任务失败时，从form.files中移除失败的文件
+        const failedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
+        if (failedFileIndex !== -1) {
+          form.value.files.splice(failedFileIndex, 1)
+          console.log('已从文件列表中移除查询失败的文件:', uuid)
+        }
+        
         // 任务失败后，尝试启动下一个
         setTimeout(() => startNextTranslation(), 2000)
       }
@@ -425,6 +448,14 @@ function process(uuid) {
       })
       // 任务失败时，更新翻译任务列表
       getTranslatesData(1)
+      
+      // 网络错误时，从form.files中移除失败的文件
+      const failedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
+      if (failedFileIndex !== -1) {
+        form.value.files.splice(failedFileIndex, 1)
+        console.log('已从文件列表中移除网络错误的文件:', uuid)
+      }
+      
       // 任务失败后，尝试启动下一个
       setTimeout(() => startNextTranslation(), 2000)
     })
@@ -659,6 +690,14 @@ const doc2xStatusQuery = async (data) => {
       })
       // 更新翻译任务列表
       getTranslatesData(1)
+      
+      // doc2x翻译失败时，从form.files中移除失败的文件
+      const failedFileIndex = form.value.files.findIndex(file => file.uuid === data.uuid)
+      if (failedFileIndex !== -1) {
+        form.value.files.splice(failedFileIndex, 1)
+        console.log('已从文件列表中移除doc2x翻译失败的文件:', data.uuid)
+      }
+      
       return // 直接返回，不再继续查询
     } else if (res.data.status == 'done') {
       // 任务完成时，更新翻译任务列表
@@ -666,6 +705,13 @@ const doc2xStatusQuery = async (data) => {
         message: '文件翻译成功！',
       })
       getTranslatesData(1)
+      
+      // doc2x翻译完成后，从form.files中移除已完成的文件
+      const completedFileIndex = form.value.files.findIndex(file => file.uuid === data.uuid)
+      if (completedFileIndex !== -1) {
+        form.value.files.splice(completedFileIndex, 1)
+        console.log('已从文件列表中移除doc2x翻译完成的文件:', data.uuid)
+      }
     } else {
       // 如果未完成，继续调用 process 函数
       setTimeout(() => doc2xStatusQuery(data), 10000)
@@ -679,6 +725,13 @@ const doc2xStatusQuery = async (data) => {
     })
     // 任务失败时，更新翻译任务列表
     getTranslatesData(1)
+    
+    // doc2x查询失败时，从form.files中移除失败的文件
+    const failedFileIndex = form.value.files.findIndex(file => file.uuid === data.uuid)
+    if (failedFileIndex !== -1) {
+      form.value.files.splice(failedFileIndex, 1)
+      console.log('已从文件列表中移除doc2x查询失败的文件:', data.uuid)
+    }
   }
 }
 // 启动翻译-----立即翻译-------

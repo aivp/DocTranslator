@@ -2,11 +2,11 @@ import os
 from datetime import datetime
 from threading import Thread
 from flask import current_app
+from app import db
 from app.models.translate import Translate
-from app.extensions import db
+from app.models.comparison import Comparison, ComparisonSub
+from app.models.prompt import Prompt
 from .main import main_wrapper
-from ...models.comparison import Comparison
-from ...models.prompt import Prompt
 import pytz
 
 # 时间修复
@@ -80,7 +80,7 @@ class TranslateEngine:
 
         # 更新任务状态
         task.status = 'process'
-        task.start_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的时区
+        task.start_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
         db.session.commit()
         return task
 
@@ -112,15 +112,34 @@ class TranslateEngine:
             'extension': os.path.splitext(task.origin_filepath)[1]  # 动态获取文件扩展名
         }
 
-        # 加载术语对照表
-        if task.comparison_id and task.comparison_id != 0:
-            comparison = self.get_comparison(task.comparison_id)
-            config['prompt'] = f"""
-                术语对照表如下:
-                {comparison}
-                ---------------------
-                {config['prompt']}
-                """
+        # 加载术语对照表（支持多个术语库，逗号分隔）
+        if task.comparison_id and task.comparison_id != '':
+            try:
+                # 解析多个术语库ID
+                comparison_ids = [int(id.strip()) for id in str(task.comparison_id).split(',') if id.strip().isdigit()]
+                
+                if comparison_ids:
+                    # 获取所有术语库内容并拼接
+                    combined_comparison = self.get_multiple_comparisons(comparison_ids)
+                    if combined_comparison:
+                        config['prompt'] = f"""
+                            术语对照表如下:
+                            {combined_comparison}
+                            ---------------------
+                            {config['prompt']}
+                            """
+                        # 添加日志，显示最终传入模型的术语表
+                        self.app.logger.info(f"任务 {task.id} 使用术语表: {task.comparison_id}")
+                    else:
+                        self.app.logger.warning(f"任务 {task.id} 术语表ID {task.comparison_id} 未找到内容，跳过术语库")
+                else:
+                    self.app.logger.warning(f"任务 {task.id} 术语表ID格式无效: {task.comparison_id}，跳过术语库")
+                
+            except Exception as e:
+                self.app.logger.error(f"任务 {task.id} 术语库处理异常: {str(e)}，跳过术语库")
+                self.app.logger.info(f"任务 {task.id} 未使用术语表（异常跳过）")
+        else:
+            self.app.logger.info(f"任务 {task.id} 未使用术语表")
 
 
         return config
@@ -138,7 +157,7 @@ class TranslateEngine:
             task = db.session.query(Translate).get(self.task_id)
             if task:
                 task.status = 'done' if success else 'failed'
-                task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的时区
+                task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
                 task.process = 100.00 if success else 0.00
                 db.session.commit()
         except Exception as e:
@@ -146,9 +165,9 @@ class TranslateEngine:
             self.app.logger.error(f"状态更新失败: {str(e)}", exc_info=True)
 
 
-    def get_comparison(self,comparison_id):
+    def get_comparison(self, comparison_id):
         """
-        加载术语对照表
+        加载术语对照表（单个ID，保持向后兼容）
         :param comparison_id: 术语对照表ID
         :return: 术语对照表内容
         """
@@ -156,6 +175,54 @@ class TranslateEngine:
         if comparison and comparison.content:
             return comparison.content.replace(',', ':').replace(';', '\n')
         return
+
+    def get_multiple_comparisons(self, comparison_ids):
+        """
+        加载多个术语对照表并拼接（去重，以第一个为准）
+        确保返回格式与 Qwen 模型的 tm_list 格式一致
+        :param comparison_ids: 术语对照表ID列表
+        :return: 拼接后的术语对照表内容
+        """
+        if not comparison_ids:
+            return None
+            
+        all_terms = {}  # 用于去重的字典，key为原文，value为译文
+        
+        for comparison_id in comparison_ids:
+            try:
+                # 从 comparison_sub 表获取术语数据
+                terms = db.session.query(ComparisonSub).filter_by(
+                    comparison_sub_id=comparison_id
+                ).order_by(ComparisonSub.id.desc()).all()
+                
+                if terms:
+                    for term in terms:
+                        if term.original and term.comparison_text:
+                            # 去重：如果原文已存在，跳过（以第一个为准）
+                            if term.original not in all_terms:
+                                all_terms[term.original] = term.comparison_text
+                else:
+                    self.app.logger.warning(f"术语库 {comparison_id} 未找到术语数据")
+                    
+            except Exception as e:
+                self.app.logger.error(f"查询术语库 {comparison_id} 时发生异常: {str(e)}")
+                continue
+        
+        # 拼接所有术语 - 确保格式与 Qwen 模型的 tm_list 期望格式一致
+        if all_terms:
+            # Qwen 模型期望的格式是: "源术语:目标术语\n源术语2:目标术语2"
+            # 这与单个术语库的 get_comparison 函数返回格式一致
+            combined_terms = []
+            for source, target in all_terms.items():
+                # 使用与单个术语库完全相同的格式：source: target
+                combined_terms.append(f"{source}: {target}")
+            
+            # 使用换行符连接，与单个术语库格式一致
+            result = '\n'.join(combined_terms)
+            
+            return result
+        
+        return None
 
 
     def get_prompt(self,prompt_id):

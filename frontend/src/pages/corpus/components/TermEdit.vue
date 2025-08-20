@@ -88,10 +88,12 @@
             </el-input>
             <el-button
               type="primary"
+              :loading="addTermLoading"
+              :disabled="addTermLoading"
               @click="addTerm"
               style="margin-left: 12px"
             >
-              新增术语
+              {{ addTermLoading ? '处理中...' : '新增术语' }}
             </el-button>
           </div>
         </div>
@@ -106,13 +108,13 @@
           >
             <el-table-column
               prop="original"
-              :label="localForm.origin_lang || '源语种'"
+              :label="localForm.value?.origin_lang || '源语种'"
               min-width="200"
               show-overflow-tooltip
             />
             <el-table-column
               prop="comparison_text"
-              :label="localForm.target_lang || '对照语种'"
+              :label="localForm.value?.target_lang || '对照语种'"
               min-width="200"
               show-overflow-tooltip
             />
@@ -165,11 +167,11 @@
         <el-button
           type="primary"
           color="#055CF9"
-          :disabled="props.loading"
-          :loading="props.loading"
+          :disabled="props.loading || saveComparisonLoading"
+          :loading="props.loading || saveComparisonLoading"
           @click="confirm"
         >
-          保存
+          {{ (props.loading || saveComparisonLoading) ? '保存术语库中...' : '保存' }}
         </el-button>
         <el-button @click="close">关闭</el-button>
       </div>
@@ -247,6 +249,12 @@ const editTermForm = ref({
   original: '',
   comparison_text: ''
 })
+
+// 术语库保存loading状态
+const saveComparisonLoading = ref(false)
+
+// 新增术语按钮loading状态
+const addTermLoading = ref(false)
 
 // 编辑术语验证规则
 const editTermRules = {
@@ -376,8 +384,10 @@ watch(visible, (newVal) => {
     nextTick(() => {
       fetchTermsList()
     })
+  } else if (newVal && !localForm.value.id) {
+    console.log('新建术语库模式，不获取术语列表')
   } else {
-    console.log('不满足获取术语列表的条件')
+    console.log('弹窗关闭')
   }
 })
 
@@ -386,7 +396,16 @@ const emit = defineEmits(['update:modelValue', 'confirm', 'refresh'])
 // 打开编辑弹窗
 const open = (data) => {
   console.log('TermEdit open 被调用，接收到的数据:', data)
-  localForm.value = { ...data }
+  // 确保data不为undefined，并提供默认值
+  const safeData = data || {}
+  localForm.value = {
+    id: '',
+    title: '',
+    origin_lang: '',
+    target_lang: '',
+    share_flag: 'N',
+    ...safeData  // 使用传入的数据覆盖默认值
+  }
   console.log('localForm 设置后的值:', localForm.value)
   visible.value = true
 }
@@ -430,13 +449,73 @@ const editTerm = (row) => {
 }
 
 // 新增术语
-const addTerm = () => {
-  editTermForm.value = {
-    id: '', // 新增时ID为空
-    original: '',
-    comparison_text: ''
+const addTerm = async () => {
+  // 防止重复点击
+  if (addTermLoading.value) {
+    return
   }
-  editTermVisible.value = true
+  
+  addTermLoading.value = true
+  
+  try {
+    // 检查术语库是否已保存（是否有ID）
+    if (!localForm.value.id) {
+      // 检查必填字段
+      if (!localForm.value.title || !localForm.value.origin_lang || !localForm.value.target_lang) {
+        ElMessage.warning('请先填写术语表标题、源语种和对照语种，然后保存术语库')
+        return
+      }
+      
+      // 先保存术语库
+      try {
+        saveComparisonLoading.value = true
+        ElMessage.info('正在保存术语库，请稍候...')
+        
+        const response = await request({
+          url: '/api/comparison',
+          method: 'post',
+          data: {
+            title: localForm.value.title,
+            origin_lang: localForm.value.origin_lang,
+            target_lang: localForm.value.target_lang,
+            share_flag: localForm.value.share_flag
+          }
+        })
+        
+        if (response.code === 200) {
+          // 保存成功，获取ID
+          localForm.value.id = response.data.id
+          ElMessage.success('术语库保存成功，现在可以新增术语了')
+          
+          // 打开新增术语弹窗
+          editTermForm.value = {
+            id: '', // 新增时ID为空
+            original: '',
+            comparison_text: ''
+          }
+          editTermVisible.value = true
+        } else {
+          ElMessage.error(response.message || '保存术语库失败')
+        }
+      } catch (error) {
+        console.error('保存术语库失败:', error)
+        ElMessage.error('保存术语库失败')
+      } finally {
+        saveComparisonLoading.value = false
+      }
+    } else {
+      // 术语库已保存，直接打开新增术语弹窗
+      editTermForm.value = {
+        id: '', // 新增时ID为空
+        original: '',
+        comparison_text: ''
+      }
+      editTermVisible.value = true
+    }
+  } finally {
+    // 无论成功还是失败，都要重置loading状态
+    addTermLoading.value = false
+  }
 }
 
 // 确认编辑/新增术语
@@ -467,7 +546,12 @@ const confirmEditTerm = async () => {
         ElMessage.error(response.message || '编辑失败')
       }
     } else {
-      // 新增操作
+      // 新增操作 - 确保有术语库ID
+      if (!localForm.value.id) {
+        ElMessage.error('术语库未保存，无法新增术语')
+        return
+      }
+      
       const response = await request({
         url: `/api/comparison/${localForm.value.id}/terms`,
         method: 'post',

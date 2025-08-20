@@ -5,6 +5,7 @@ from flask_restful import Resource
 from flask import request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from pathlib import Path
+import pytz
 
 from app import APIResponse, db
 from app.models import Customer, customer
@@ -50,7 +51,7 @@ class Doc2XTranslateStartResource(Resource):
         translate.target_filepath = ''
         translate.doc2x_flag = 'Y'
         translate.server = data.get('server', 'doc2x')
-        translate.start_at = datetime.now()
+        translate.start_at = datetime.now(pytz.timezone('Asia/Shanghai'))  # 使用东八区时区，避免时区不一致
 
         if not data['doc2x_secret_key']:
             return APIResponse.error("未设置doc2x的Key！", 400)
@@ -155,8 +156,8 @@ class Doc2XTranslateStatusResource(Resource):
                     translate.target_filepath = save_path
                     translate.status = "done"
                     translate.process = 100
-                    translate.updated_at = datetime.now()
-                    translate.end_at = datetime.now()
+                    translate.updated_at = datetime.now(pytz.timezone('Asia/Shanghai'))  # 使用东八区时区
+                    translate.end_at = datetime.now(pytz.timezone('Asia/Shanghai'))  # 使用东八区时区，避免时区不一致
                     db.session.commit()
 
                 response_data.update({
