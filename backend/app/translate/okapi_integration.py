@@ -37,16 +37,54 @@ class DockerOkapiIntegration:
             okapi_home: Okapi 安装目录
         """
         self.okapi_home = okapi_home
-        self.tikal_jar = os.path.join(okapi_home, "lib", "tikal.jar")
         
-        # 验证 Okapi 安装
-        if not os.path.exists(self.tikal_jar):
-            raise OkapiIntegrationError(f"Tikal JAR 文件不存在: {self.tikal_jar}")
-        
-        # 验证 Java 环境
-        self._verify_java_environment()
+        # 获取 Tikal 脚本
+        self.tikal_script = self._get_tikal_script()
         
         logger.info(f"Okapi 集成初始化完成: {okapi_home}")
+        # 调试：显示所有找到的文件
+        self._debug_okapi_installation()
+    
+    def _debug_okapi_installation(self):
+        """调试 Okapi 安装"""
+        import glob
+        
+        logger.info(f"=== Okapi 安装调试信息 ===")
+        logger.info(f"Okapi 目录: {self.okapi_home}")
+        logger.info(f"目录是否存在: {os.path.exists(self.okapi_home)}")
+        
+        if os.path.exists(self.okapi_home):
+            # 列出目录内容
+            try:
+                dir_contents = os.listdir(self.okapi_home)
+                logger.info(f"目录内容: {dir_contents}")
+                
+                # 查找所有 JAR 文件
+                all_jars = glob.glob(os.path.join(self.okapi_home, "**", "*.jar"), recursive=True)
+                logger.info(f"所有 JAR 文件: {all_jars}")
+                
+                # 查找所有可执行文件
+                all_executables = glob.glob(os.path.join(self.okapi_home, "**", "*"), recursive=True)
+                executables = [f for f in all_executables if os.path.isfile(f) and os.access(f, os.X_OK)]
+                logger.info(f"可执行文件: {executables}")
+                
+            except Exception as e:
+                logger.error(f"读取目录内容失败: {e}")
+        
+        logger.info("=== 调试信息结束 ===")
+    
+    def _get_tikal_script(self) -> str:
+        """获取 Tikal 脚本路径"""
+        tikal_script = os.path.join(self.okapi_home, "tikal.sh")
+        
+        if not os.path.exists(tikal_script):
+            raise OkapiIntegrationError(f"Tikal 脚本不存在: {tikal_script}")
+        
+        if not os.access(tikal_script, os.X_OK):
+            raise OkapiIntegrationError(f"Tikal 脚本无执行权限: {tikal_script}")
+        
+        logger.info(f"使用 Tikal 脚本: {tikal_script}")
+        return tikal_script
     
     def _verify_java_environment(self) -> bool:
         """验证 Java 环境是否可用"""
@@ -83,6 +121,8 @@ class DockerOkapiIntegration:
         """
         使用 Tikal 提取 Word 文档到 XLIFF
         
+        根据 Tikal 文档，提取会生成 input_file.xlf 文件
+        
         Args:
             input_file: 输入的 Word 文档路径
             output_xliff: 输出的 XLIFF 文件路径
@@ -94,38 +134,22 @@ class DockerOkapiIntegration:
             bool: 是否成功
         """
         try:
-            # 准备 Java 命令
-            java_cmd = ["java"]
+            # 使用 Tikal 脚本
+            cmd = [self.tikal_script, "-x", input_file, "-sl", source_lang, "-tl", target_lang]
+            logger.info(f"使用 Tikal 脚本执行提取")
             
-            # 添加 Java 选项（内存设置等）
-            if java_opts:
-                java_cmd.extend(java_opts.split())
-            elif os.getenv("JAVA_OPTS"):
-                java_cmd.extend(os.getenv("JAVA_OPTS").split())
-            else:
-                java_cmd.extend(["-Xmx1g", "-Xms256m"])
-            
-            # 添加 Tikal 命令参数
-            java_cmd.extend([
-                "-jar", self.tikal_jar,
-                "-x", input_file,           # 提取模式
-                "-sl", source_lang,         # 源语言
-                "-tl", target_lang,         # 目标语言
-                "-o", output_xliff          # 输出文件
-            ])
-            
-            logger.info(f"执行提取命令: {' '.join(java_cmd)}")
+            logger.info(f"执行提取命令: {' '.join(cmd)}")
             
             # 记录执行时间
             start_time = time.time()
             
-            # 执行 Java 进程
+            # 执行进程
             result = subprocess.run(
-                java_cmd,
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,  # 2分钟超时
-                cwd="/app"    # Docker 容器内的工作目录
+                cwd=os.path.dirname(input_file)  # 在输入文件所在目录执行
             )
             
             duration = time.time() - start_time
@@ -133,10 +157,19 @@ class DockerOkapiIntegration:
             
             # 详细的结果处理
             if result.returncode == 0:
-                logger.info(f"✅ Tikal 提取成功: {output_xliff}")
-                if result.stdout:
-                    logger.debug(f"STDOUT: {result.stdout}")
-                return True
+                # 根据 Tikal 文档，输出文件为 input_file.xlf
+                expected_xliff = f"{input_file}.xlf"
+                
+                if os.path.exists(expected_xliff):
+                    # 复制到指定位置
+                    shutil.copy2(expected_xliff, output_xliff)
+                    logger.info(f"✅ Tikal 提取成功: {output_xliff}")
+                    if result.stdout:
+                        logger.debug(f"STDOUT: {result.stdout}")
+                    return True
+                else:
+                    logger.error(f"❌ 预期的 XLIFF 文件不存在: {expected_xliff}")
+                    return False
             else:
                 logger.error(f"❌ Tikal 提取失败 (返回码: {result.returncode})")
                 logger.error(f"STDOUT: {result.stdout}")
@@ -158,6 +191,11 @@ class DockerOkapiIntegration:
         """
         将翻译后的 XLIFF 合并回 Word 文档
         
+        根据 Tikal 文档，合并时需要：
+        1. XLIFF 文件名为：original_file.xlf
+        2. 原始文件在同一目录
+        3. 输出文件为：original_file.out.docx
+        
         Args:
             original_file: 原始 Word 文档路径
             xliff_file: 翻译后的 XLIFF 文件路径
@@ -168,45 +206,51 @@ class DockerOkapiIntegration:
             bool: 是否成功
         """
         try:
-            # 构建合并命令
-            java_cmd = ["java"]
+            # 确保原始文件在 XLIFF 文件的同一目录
+            xliff_dir = os.path.dirname(xliff_file)
+            original_filename = os.path.basename(original_file)
+            original_in_xliff_dir = os.path.join(xliff_dir, original_filename)
             
-            # Java 选项
-            if java_opts:
-                java_cmd.extend(java_opts.split())
-            else:
-                java_cmd.extend(["-Xmx1g", "-Xms256m"])
+            # 复制原始文件到 XLIFF 目录（如果不在同一目录）
+            if original_file != original_in_xliff_dir:
+                shutil.copy2(original_file, original_in_xliff_dir)
+                logger.info(f"复制原始文件到 XLIFF 目录: {original_in_xliff_dir}")
             
-            # Tikal 合并命令
-            java_cmd.extend([
-                "-jar", self.tikal_jar,
-                "-m", xliff_file,           # 合并模式
-                "-from", original_file,     # 原始文档
-                "-o", output_file           # 输出文件
-            ])
+            # 使用 Tikal 脚本
+            cmd = [self.tikal_script, "-m", xliff_file]
+            logger.info(f"使用 Tikal 脚本执行合并")
             
-            logger.info(f"执行合并命令: {' '.join(java_cmd)}")
+            logger.info(f"执行合并命令: {' '.join(cmd)}")
             
             # 记录执行时间
             start_time = time.time()
             
-            # 执行 Java 进程
+            # 执行脚本
             result = subprocess.run(
-                java_cmd,
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
-                cwd="/app"
+                cwd=xliff_dir  # 在 XLIFF 文件所在目录执行
             )
             
             duration = time.time() - start_time
             logger.info(f"Tikal 合并完成，用时: {duration:.2f}秒")
             
             if result.returncode == 0:
-                logger.info(f"✅ XLIFF 合并成功: {output_file}")
-                if result.stdout:
-                    logger.debug(f"STDOUT: {result.stdout}")
-                return True
+                # 根据 Tikal 文档，输出文件为 original_file.out.docx
+                expected_output = os.path.join(xliff_dir, f"{original_filename}.out.docx")
+                
+                if os.path.exists(expected_output):
+                    # 复制到指定位置
+                    shutil.copy2(expected_output, output_file)
+                    logger.info(f"✅ XLIFF 合并成功: {output_file}")
+                    if result.stdout:
+                        logger.debug(f"STDOUT: {result.stdout}")
+                    return True
+                else:
+                    logger.error(f"❌ 预期的输出文件不存在: {expected_output}")
+                    return False
             else:
                 logger.error(f"❌ XLIFF 合并失败: {result.stderr}")
                 logger.error(f"STDOUT: {result.stdout}")
@@ -459,6 +503,12 @@ def create_okapi_translator(okapi_home: str = "/opt/okapi") -> OkapiWordTranslat
 def verify_okapi_installation(okapi_home: str = "/opt/okapi") -> bool:
     """验证 Okapi 安装是否正确"""
     try:
+        # 检查目录是否存在
+        if not os.path.exists(okapi_home):
+            logger.error(f"❌ Okapi 目录不存在: {okapi_home}")
+            return False
+        
+        # 尝试创建集成实例（会自动查找 JAR 文件）
         integration = DockerOkapiIntegration(okapi_home)
         logger.info("✅ Okapi 安装验证通过")
         return True

@@ -1,60 +1,48 @@
-# Okapi Framework Dockerfile                                                                                                                                                                                    
-# 基于现有的 Python 环境，添加 Okapi Framework 支持                                                                                                                                                             
+# Okapi Framework Dockerfile
+# 基于现有的 Python 环境，添加 Okapi Framework 支持
 
-FROM python:3.9-slim                                                                                                                                                                                            
+FROM python:3.9-slim
 
-# 设置环境变量                                                                                                                                                                                                  
-ENV OKAPI_VERSION="1.45.0"                                                                                                                                                                                      
-ENV OKAPI_HOME="/opt/okapi"                                                                                                                                                                                     
-ENV JAVA_OPTS="-Xmx2g -Xms512m"                                                                                                                                                                                 
-
-# 安装系统依赖                                                                                                                                                                                                  
-RUN apt-get update && apt-get install -y \                                                                                                                                                                      
-    wget \                                                                                                                                                                                                      
-    unzip \                                                                                                                                                                                                     
-    openjdk-11-jre-headless \                                                                                                                                                                                   
-    && rm -rf /var/lib/apt/lists/*                                                                                                                                                                              
-
-# 下载并安装 Okapi Framework                                                                                                                                                                                    
-RUN wget -q "https://okapiframework.org/binaries/main/${OKAPI_VERSION}/okapi-apps_${OKAPI_VERSION}.zip" -O okapi.zip && \                                                                                       
-    unzip -q okapi.zip -d /opt && \                                                                                                                                                                             
-    mv /opt/okapi-apps_${OKAPI_VERSION} ${OKAPI_HOME} && \                                                                                                                                                      
-    rm okapi.zip && \                                                                                                                                                                                           
-    chmod +x ${OKAPI_HOME}/lib/*.jar                                                                                                                                                                            
-
-# 创建符号链接，方便访问                                                                                                                                                                                        
-RUN ln -s ${OKAPI_HOME}/lib/tikal.jar /usr/local/bin/tikal.jar && \                                                                                                                                             
-    ln -s ${OKAPI_HOME}/lib/rainbow.jar /usr/local/bin/rainbow.jar                                                                                                                                              
-
-# 验证安装                                                                                                                                                                                                      
-RUN java -jar ${OKAPI_HOME}/lib/tikal.jar -h                                                                                                                                                                    
-
-# 设置工作目录                                                                                                                                                                                                  
-WORKDIR /app                                                                                                                                                                                                    
+# 设置环境变量
+ENV OKAPI_VERSION="1.47.0"
+ENV OKAPI_HOME="/opt/okapi"
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    tesseract-ocr \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libfontconfig1 \
-    && apt-get clean \
+    wget \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制backend目录下的requirements.txt
-COPY requirements.txt .
+# 下载并安装 Okapi Framework
+RUN wget -q "https://okapiframework.org/binaries/main/${OKAPI_VERSION}/okapi-apps_gtk2-linux-x86_64_${OKAPI_VERSION}.zip" -O okapi-apps.zip && \
+    unzip -q okapi-apps.zip -d /opt && \
+    mv /opt/okapi-apps_gtk2-linux-x86_64_${OKAPI_VERSION} ${OKAPI_HOME} && \
+    rm okapi-apps.zip
 
-# 安装依赖
-RUN pip install --no-cache-dir -r requirements.txt
+# 显示安装的文件
+RUN echo "=== Okapi 安装内容 ===" && \
+    ls -la ${OKAPI_HOME} && \
+    echo "=== 安装内容结束 ==="
 
-# 将整个backend目录复制到容器内的/app
-COPY . .                                                                                                                                                                      
+# 设置 Tikal 脚本权限并创建链接
+RUN chmod +x ${OKAPI_HOME}/tikal.sh && \
+    ln -sf ${OKAPI_HOME}/tikal.sh /usr/local/bin/tikal.sh && \
+    echo "Tikal script ready: ${OKAPI_HOME}/tikal.sh"
 
-# 暴露端口                                                                                                                                                                                                      
-EXPOSE 8000                                                                                                                                                                                                     
+# 验证安装
+RUN ${OKAPI_HOME}/tikal.sh -h
 
-# 启动命令                                                                                                                                                                                                      
-CMD ["python", "app.py"]
+# 设置工作目录
+WORKDIR /app
+
+# 复制应用代码
+COPY . .
+
+# 安装 Python 依赖
+RUN pip install -r requirements.txt
+
+# 暴露端口
+EXPOSE 8000
+
+# 启动命令
+CMD ["python", "main.py"] 
