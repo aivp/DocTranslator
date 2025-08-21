@@ -37,7 +37,7 @@ def cleanup_temp_file(temp_path: str):
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir, ignore_errors=True)
     except Exception as e:
-        print(f"清理临时文件失败: {str(e)}")
+        logger.error(f"清理临时文件失败: {str(e)}")
 
 # 特殊符号和数学符号的正则表达式
 SPECIAL_SYMBOLS_PATTERN = re.compile(
@@ -108,8 +108,90 @@ def start(trans):
     max_threads = 10 if not trans.get('threads') else int(trans['threads'])
     start_time = datetime.datetime.now()
 
+    # ============== 检查是否使用Okapi方案 ==============
+    use_okapi = trans.get('use_okapi', True)  # 默认使用Okapi
+    
+    if use_okapi:
+        logger.info("🔄 使用 Okapi Framework 进行翻译（解决run切割问题）")
+        return start_with_okapi(trans, start_time)
+    else:
+        logger.info("📝 使用传统方法进行翻译")
+        return start_traditional(trans, start_time, max_threads)
+
+
+def start_with_okapi(trans, start_time):
+    """使用 Okapi Framework 进行翻译"""
+    try:
+        # 导入 Okapi 集成模块
+        from .okapi_integration import OkapiWordTranslator, verify_okapi_installation
+        
+        # 验证 Okapi 安装
+        if not verify_okapi_installation():
+            logger.error("❌ Okapi 安装验证失败，回退到传统方法")
+            return start_traditional(trans, start_time, 10)
+        
+        # 创建 Okapi 翻译器
+        translator = OkapiWordTranslator()
+        
+        # 设置翻译服务
+        class OkapiTranslationService:
+            def __init__(self, trans):
+                self.trans = trans
+            
+            def batch_translate(self, texts, source_lang, target_lang):
+                """批量翻译文本"""
+                translated_texts = []
+                
+                # 使用现有的翻译服务
+                for text in texts:
+                    try:
+                        # 调用现有的翻译API
+                        translated = to_translate.translate_text(
+                            self.trans, text, source_lang, target_lang
+                        )
+                        translated_texts.append(translated)
+                    except Exception as e:
+                        logger.error(f"翻译失败: {e}")
+                        translated_texts.append(text)  # 失败时保持原文
+                
+                return translated_texts
+        
+        translator.set_translation_service(OkapiTranslationService(trans))
+        
+        # 执行翻译
+        success = translator.translate_document(
+            trans['file_path'],
+            trans['target_file'],
+            trans.get('source_lang', 'zh'),
+            trans.get('target_lang', 'en')
+        )
+        
+        if success:
+            # 完成处理
+            end_time = datetime.datetime.now()
+            spend_time = common.display_spend(start_time, end_time)
+            
+            # 统计翻译的文本数量（这里简化处理）
+            text_count = 1  # Okapi 以文档为单位处理
+            
+            if trans['run_complete']:
+                to_translate.complete(trans, text_count, spend_time)
+            
+            logger.info(f"✅ Okapi 翻译完成，用时: {spend_time}")
+            return True
+        else:
+            logger.error("❌ Okapi 翻译失败，回退到传统方法")
+            return start_traditional(trans, start_time, 10)
+            
+    except Exception as e:
+        logger.error(f"❌ Okapi 翻译出错: {e}，回退到传统方法")
+        return start_traditional(trans, start_time, 10)
+
+
+def start_traditional(trans, start_time, max_threads):
+    """传统翻译方法（原有逻辑）"""
     # ============== Word文档翻译配置 ==============
-    print(f"Word文档翻译：使用 {trans.get('model', 'unknown')} 模型")
+    logger.info(f"Word文档翻译：使用 {trans.get('model', 'unknown')} 模型")
     
     # 如果用户选择了qwen-mt-plus，检查服务可用性
     if trans.get('model') == 'qwen-mt-plus':
@@ -117,26 +199,26 @@ def start(trans):
             trans['server'] = 'qwen'
             # 建议线程数（Qwen并发已提升到840次/分钟）
             if max_threads > 20:
-                print(f"建议: 当前线程数 {max_threads}，建议设置为 10-20 以获得最佳性能")
+                logger.info(f"建议: 当前线程数 {max_threads}，建议设置为 10-20 以获得最佳性能")
             elif max_threads < 5:
-                print(f"建议: 当前线程数 {max_threads}，可以适当增加到 10-20 以提升翻译速度")
+                logger.info(f"建议: 当前线程数 {max_threads}，可以适当增加到 10-20 以提升翻译速度")
             from .qwen_translate import check_qwen_availability
             qwen_available, qwen_message = check_qwen_availability()
-            print(f"Qwen服务检查: {qwen_message}")
+            logger.info(f"Qwen服务检查: {qwen_message}")
             if not qwen_available:
-                print("警告: Qwen服务不可用，但将继续尝试使用")
+                logger.warning("警告: Qwen服务不可用，但将继续尝试使用")
         except ImportError:
-            print("警告: Qwen模块未找到，将使用默认翻译服务")
+            logger.warning("警告: Qwen模块未找到，将使用默认翻译服务")
     
 
 
     # ============== 译文形式处理 ==============
     trans_type = trans.get('type', 'trans_text_only_inherit')  # 默认继承原版面
-    print(f"译文形式: {trans_type}")
+    logger.info(f"译文形式: {trans_type}")
     # ===========================================
 
     # ============== Word文档预处理 ==============
-    print("开始Word文档预处理...")
+    logger.info("开始Word文档预处理...")
     
     # 创建临时文件路径
     temp_dir = tempfile.mkdtemp()
@@ -146,10 +228,10 @@ def start(trans):
     try:
         # 使用word-run-optimizer进行预处理
         stats = quick_optimize(trans['file_path'], optimized_path)
-        print(f"Word预处理完成: {stats.get('merged_runs', 0)} 个runs被合并")
+        logger.info(f"Word预处理完成: {stats.get('merged_runs', 0)} 个runs被合并")
         optimized_doc_path = optimized_path
     except Exception as e:
-        print(f"Word预处理失败，使用原文档: {str(e)}")
+        logger.warning(f"Word预处理失败，使用原文档: {str(e)}")
         optimized_doc_path = trans['file_path']
     # ===========================================
     # optimized_doc_path = trans['file_path'] #启用以跳过预处理
@@ -186,7 +268,7 @@ def start(trans):
             # 对于不需要翻译的内容，标记为已完成
             item['complete'] = True
             with print_lock:
-                print(f"跳过翻译: {item['text'][:30]}..." if len(
+                logger.info(f"跳过翻译: {item['text'][:30]}..." if len(
                     item['text']) > 30 else f"跳过翻译: {item['text']}")
 
     # 多线程翻译
@@ -197,10 +279,10 @@ def start(trans):
     use_adaptive_styles = trans.get('adaptive_styles', False)  # 默认不启用
     
     if use_adaptive_styles:
-        print("启用样式自适应功能：字体大小和行间距将根据翻译后文本长度自动调整")
+        logger.info("启用样式自适应功能：字体大小和行间距将根据翻译后文本长度自动调整")
         text_count = apply_translations_with_adaptive_styles(document, texts)
     else:
-        print("使用原始样式：保持原始字体大小和行间距")
+        logger.info("使用原始样式：保持原始字体大小和行间距")
         text_count = apply_translations(document, texts)
     # ===========================================
 
@@ -667,7 +749,7 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                         for hyperlink in paragraph.hyperlinks:
                             extract_hyperlink_with_merge(hyperlink, local_texts)
             except Exception as e:
-                print(f"处理内嵌形状时出错: {str(e)}")
+                logger.error(f"处理内嵌形状时出错: {str(e)}")
             
             # 线程安全地添加到主列表
             for text_item in local_texts:
@@ -681,10 +763,10 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                 try:
                     future.result()
                 except Exception as e:
-                    print(f"内嵌形状线程异常: {str(e)}")
+                    logger.error(f"内嵌形状线程异常: {str(e)}")
     
     # 按顺序执行各个部分，避免依赖问题
-    print("开始安全的多线程文本提取...")
+    logger.info("开始安全的多线程文本提取...")
     
     # 1. 并行处理段落（分组处理，保持顺序）
     process_paragraphs_parallel()
@@ -705,7 +787,7 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
     if hasattr(document, 'comments') and document.comments:
         extract_comments(file_path, texts)
     
-    print(f"文本提取完成，共提取 {len(texts)} 个文本项")
+    logger.info(f"文本提取完成，共提取 {len(texts)} 个文本项")
 
 
 # 已删除单线程版本，统一使用多线程提取
@@ -855,7 +937,7 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
     # 打印合并统计信息
     if merged_count > 0:
         with print_lock:
-            print(f"Run合并优化: 原始{original_count}个run -> 合并后{len(merged)}个，减少了{merged_count}个API调用")
+            logger.info(f"Run合并优化: 原始{original_count}个run -> 合并后{len(merged)}个，减少了{merged_count}个API调用")
     
     logger.info(f"=== conservative_run_merge 完成 ===")
     logger.info(f"合并后数量: {len(merged)}")
@@ -1089,20 +1171,20 @@ def extract_comments(file_path, texts):
                                     "original_text": t_elem.text  # 保存原始文本用于匹配
                                 })
     except Exception as e:
-        print(f"提取批注时出错: {str(e)}")
+        logger.error(f"提取批注时出错: {str(e)}")
 
 
 def run_translation(trans, texts, max_threads):
     """执行多线程翻译"""
     if not texts:
-        print("没有需要翻译的内容")
+        logger.info("没有需要翻译的内容")
         return
 
     event = threading.Event()
     
     with print_lock:
-        print(f"开始翻译 {len(texts)} 个文本片段")
-        print(f"翻译服务: {trans.get('server', 'unknown')}")  # 确认使用的翻译服务
+        logger.info(f"开始翻译 {len(texts)} 个文本片段")
+        logger.info(f"翻译服务: {trans.get('server', 'unknown')}")  # 确认使用的翻译服务
 
     # 使用线程池执行翻译任务
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
@@ -1112,7 +1194,7 @@ def run_translation(trans, texts, max_threads):
             future = executor.submit(to_translate.get, trans, event, texts, i)
             futures.append(future)
             with print_lock:
-                print(f"提交翻译任务 {i}")
+                logger.info(f"提交翻译任务 {i}")
         
         # 等待所有任务完成
         for future in as_completed(futures):
@@ -1120,12 +1202,12 @@ def run_translation(trans, texts, max_threads):
                 future.result()  # 获取结果，如果有异常会抛出
             except Exception as e:
                 with print_lock:
-                    print(f"翻译任务执行异常: {str(e)}")
+                    logger.error(f"翻译任务执行异常: {str(e)}")
                 if not event.is_set():
                     event.set()  # 设置事件，通知其他线程停止
 
     with print_lock:
-        print("所有翻译任务已完成")
+        logger.info("所有翻译任务已完成")
 
 
 def calculate_adaptive_font_size(original_text, translated_text, original_font_size):
@@ -1158,7 +1240,7 @@ def calculate_adaptive_font_size(original_text, translated_text, original_font_s
             return original_font_size
             
     except Exception as e:
-        print(f"计算自适应字体大小失败: {str(e)}")
+        logger.error(f"计算自适应字体大小失败: {str(e)}")
         return original_font_size
 
 
@@ -1189,7 +1271,7 @@ def calculate_adaptive_line_spacing(original_text, translated_text, original_lin
             return original_line_spacing
             
     except Exception as e:
-        print(f"计算自适应行间距失败: {str(e)}")
+        logger.error(f"计算自适应行间距失败: {str(e)}")
         return original_line_spacing
 
 
@@ -1213,13 +1295,13 @@ def apply_adaptive_styles(run, original_text, translated_text, context_type=None
                     adaptive_font_size = int(adaptive_font_size * 0.8)
                 from docx.shared import Pt
                 run.font.size = Pt(adaptive_font_size)
-                print(f"字体大小自适应: {original_font_size}pt -> {adaptive_font_size}pt")
+                logger.info(f"字体大小自适应: {original_font_size}pt -> {adaptive_font_size}pt")
             elif context_type == 'textbox':
                 # 对于文本框，即使长度没变，也缩小20%
                 adaptive_font_size = int(original_font_size * 0.8)
                 from docx.shared import Pt
                 run.font.size = Pt(adaptive_font_size)
-                print(f"文本框字体固定缩小: {original_font_size}pt -> {adaptive_font_size}pt")
+                logger.info(f"文本框字体固定缩小: {original_font_size}pt -> {adaptive_font_size}pt")
         
         # 获取段落对象并应用行间距自适应
         try:
@@ -1231,12 +1313,12 @@ def apply_adaptive_styles(run, original_text, translated_text, context_type=None
                     adaptive_line_spacing = calculate_adaptive_line_spacing(original_text, translated_text, original_line_spacing)
                     if adaptive_line_spacing and adaptive_line_spacing != original_line_spacing:
                         paragraph.paragraph_format.line_spacing = adaptive_line_spacing
-                        print(f"行间距自适应: {original_line_spacing} -> {adaptive_line_spacing}")
+                        logger.info(f"行间距自适应: {original_line_spacing} -> {adaptive_line_spacing}")
         except Exception as e:
-            print(f"应用行间距自适应失败: {str(e)}")
+            logger.error(f"应用行间距自适应失败: {str(e)}")
                 
     except Exception as e:
-        print(f"应用自适应样式失败: {str(e)}")
+        logger.error(f"应用自适应样式失败: {str(e)}")
 
 
 def apply_translations_with_adaptive_styles(document, texts):
@@ -1376,7 +1458,7 @@ def apply_translations_with_adaptive_styles(document, texts):
         for table in document.tables:
             adjust_table_layout_for_translation(table)
     except Exception as e:
-        print(f"最终调整表格布局时出错: {str(e)}")
+        logger.error(f"最终调整表格布局时出错: {str(e)}")
 
     # 智能run拼接已经在翻译过程中处理，这里不需要额外处理
 
@@ -1499,7 +1581,7 @@ def update_special_elements(docx_path, texts):
                             modified_xml = ET.tostring(root, encoding='utf-8', xml_declaration=True)
                             zout.writestr(item.filename, modified_xml)
                         except Exception as e:
-                            print(f"处理批注时出错: {str(e)}")
+                            logger.error(f"处理批注时出错: {str(e)}")
                             # 如果解析失败，直接复制原文件
                             file.seek(0)
                             zout.writestr(item.filename, file.read())
@@ -1511,7 +1593,7 @@ def update_special_elements(docx_path, texts):
         # 替换原始文件
         os.replace(temp_path, docx_path)
     except Exception as e:
-        print(f"更新批注时出错: {str(e)}")
+        logger.error(f"更新批注时出错: {str(e)}")
         # 确保临时文件被删除
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -1614,7 +1696,7 @@ def apply_translations(document, texts):
         for table in document.tables:
             adjust_table_layout_for_translation(table)
     except Exception as e:
-        print(f"最终调整表格布局时出错: {str(e)}")
+        logger.error(f"最终调整表格布局时出错: {str(e)}")
 
     return text_count
 
@@ -2019,7 +2101,7 @@ def adjust_table_layout_for_translation(table):
         table.style = 'Table Grid'
         
     except Exception as e:
-        print(f"调整表格布局时出错: {str(e)}")
+        logger.error(f"调整表格布局时出错: {str(e)}")
 
 
 def process_table_with_layout_adjustment(table, local_texts):

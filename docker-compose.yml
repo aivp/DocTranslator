@@ -2,52 +2,75 @@ version: '3'
 
 services:
   backend:
-    image: eggsunsky/doctranslator:latest
+    #image: docker.1ms.run/eggsunsky/doctranslator:latest
+    #image: aidong-backend.tencentcloudcr.com/aidong/doctranslator:0723
+    image: aidong-backend.tencentcloudcr.com/aidong/doctranslator:latest
     container_name: backend-container
     ports:
       - "5000:5000"
     volumes:
-      - ./backend/db:/app/db
+      - ./backend:/app
+      - ./backend/storage:/app/storage
     environment:
       - FLASK_ENV=production
-      - SECRET_KEY=your-secret-key
+      #- SECRET_KEY=your-secret-key
       # 开发环境数据库（SQLite）
       # - DEV_DATABASE_URL=sqlite:////app/db/dev.db
       # 生产环境数据库 使用mysql
-      - SQLALCHEMY_DATABASE_URI=mysql+pymysql://user:pwd@localhost/xxxx
-      - PROD_DATABASE_URL=mysql+pymysql://user:pwd@localhost/xxxx
+      - SQLALCHEMY_DATABASE_URI=mysql+pymysql://dtuser:dtpwd@dt-mysql/doctranslator
+      - PROD_DATABASE_URL=mysql+pymysql://dtuser:dtpwd@dt-mysql/doctranslator
       # JWT 配置
-      - JWT_SECRET_KEY=sxxxxxx
-      - JWT_ACCESS_TOKEN_EXPIRES=172800
+      # - JWT_SECRET_KEY=sxxxxxx
+      # - JWT_ACCESS_TOKEN_EXPIRES=172800
       # 邮箱配置
-      - MAIL_SERVER=smtp.qq.com
-      - MAIL_PORT=587
-      - MAIL_USE_TLS=true
-      - MAIL_USERNAME=xxxx@qq.com
-      - MAIL_PASSWORD=xxxxxx
-      - MAIL_DEFAULT_SENDER=ixxxx@qq.com
-      - ALLOWED_EMAIL_DOMAINS=qq.com,163.com,126.com
+      # - MAIL_SERVER=smtp.qq.com
+      # - MAIL_PORT=587
+      # - MAIL_USE_TLS=true
+      # - MAIL_USERNAME=xxxx@qq.com
+      # - MAIL_PASSWORD=xxxxxx
+      # - MAIL_DEFAULT_SENDER=ixxxx@qq.com
+      # - ALLOWED_EMAIL_DOMAINS=qq.com,163.com,126.com
       # 跨域 允许的域名
       - ALLOWED_DOMAINS=*
-    networks:
-      - my-network
+      - DASH_SCOPE_KEY=sk-887aa16319254ec8b1b9e7861279983a
+      - ENABLE_QWEN=True
+      - QWEN_MODEL=qwen-mt-plus
+      - QWEN_SOURCE_LANG=auto
+      # Okapi Framework 配置
+      - OKAPI_HOME=/opt/okapi
+      - JAVA_OPTS=-Xmx2g -Xms512m
+    depends_on:
+      - dt-mysql
 
-  # ... existing code ...
   nginx:
-    image: nginx:stable-alpine
+    image: docker.1ms.run/library/nginx:stable-alpine
     container_name: nginx-container
     ports:
       - "1475:80"
       - "8081:8081"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
-      - ./frontend/dist:/usr/share/nginx/html/frontend
-      - ./admin/dist:/usr/share/nginx/html/admin
+      - ./nginx/frontend/dist:/usr/share/nginx/html/frontend
+      - ./nginx/admin/dist:/usr/share/nginx/html/admin
     depends_on:
       - backend
-    networks:
-      - my-network
+
+  dt-mysql:
+    image: docker.1ms.run/library/mysql:8.0
+    container_name: dt-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ad2024   # 设置 root 用户密码
+      MYSQL_DATABASE: doctranslator
+      MYSQL_USER: dtuser
+      MYSQL_PASSWORD: dtpwd
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./mysql_data:/var/lib/mysql
 
 networks:
-  my-network:
+  default:
+    name: doctranslator
     driver: bridge
+    attachable: true
