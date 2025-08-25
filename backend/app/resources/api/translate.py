@@ -11,13 +11,14 @@ import zipfile
 import os
 import pytz
 
-from app import db, Setting
+from app.extensions import db
+from app.models.setting import Setting
 from app.models import Customer
 from app.models.translate import Translate
-from app.resources.task.translate_service import TranslateEngine
 from app.utils.response import APIResponse
 from app.utils.check_utils import AIChecker
 from app.utils.token_checker import require_valid_token
+from app.resources.task.translate_service import TranslateEngine
 
 # 定义翻译配置（硬编码示例）
 TRANSLATE_SETTINGS = {

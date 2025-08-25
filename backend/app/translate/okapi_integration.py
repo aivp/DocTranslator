@@ -18,9 +18,73 @@ import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from typing import Optional, Dict, Any, List
 import zipfile
+import re
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+def clean_xliff_for_translation(text: str) -> tuple[str, dict]:
+    """
+    清理 XLIFF 文本中的格式标签，为翻译做准备
+    只清理明显的格式标签，保留Okapi的标准XLIFF标签
+    
+    Args:
+        text: 包含格式标签的XLIFF文本
+        
+    Returns:
+        tuple: (清理后的文本, 代码映射字典)
+    """
+    # 需要清理的标签模式（这些是Word文档的原始格式标签）
+    format_patterns = [
+        r'<run\d+>', r'</run\d+>',  # Word运行标签
+        r'<tags\d+/>',              # Word格式标签
+        r'<lendof\d+\|>',           # 段落结束标签
+        r'<[a-z]+\d*[^>]*/>',       # 其他自闭合标签
+    ]
+    
+    # 保留的Okapi标准XLIFF标签（这些不应该被清理）
+    # <bpt>, <ept>, <ph>, <g>, <x> 等是Okapi的标准标签
+    
+    combined_pattern = '|'.join(format_patterns)
+    matches = re.findall(combined_pattern, text)
+    
+    # 创建代码映射
+    code_mapping = {}
+    clean_text = text
+    
+    for i, match in enumerate(matches):
+        placeholder = f"__FORMAT_TAG_{i}__"
+        code_mapping[placeholder] = match
+        clean_text = clean_text.replace(match, placeholder, 1)
+    
+    logger.info(f"清理格式标签: {len(matches)} 个标签")
+    logger.info(f"原文: {text[:100]}...")
+    logger.info(f"清理后: {clean_text[:100]}...")
+    
+    return clean_text, code_mapping
+
+def restore_xliff_tags(translated_text: str, code_mapping: dict) -> str:
+    """
+    恢复格式标签到翻译后的文本中
+    
+    Args:
+        translated_text: 翻译后的文本
+        code_mapping: 代码映射字典
+        
+    Returns:
+        str: 恢复格式标签后的文本
+    """
+    restored_text = translated_text
+    
+    for placeholder, original_code in code_mapping.items():
+        # 将占位符替换回原始的格式标签
+        restored_text = restored_text.replace(placeholder, original_code)
+    
+    logger.info(f"恢复格式标签: {len(code_mapping)} 个标签")
+    logger.info(f"翻译文本: {translated_text[:100]}...")
+    logger.info(f"恢复后: {restored_text[:100]}...")
+    
+    return restored_text
 
 class OkapiIntegrationError(Exception):
     """Okapi 集成错误"""
@@ -134,7 +198,7 @@ class DockerOkapiIntegration:
             bool: 是否成功
         """
         try:
-            # 使用 Tikal 脚本
+            # 使用 Tikal 脚本 - 默认生成 XLIFF 1.2，但我们会处理为 2.0
             cmd = [self.tikal_script, "-x", input_file, "-sl", source_lang, "-tl", target_lang]
             logger.info(f"使用 Tikal 脚本执行提取")
             
@@ -216,7 +280,38 @@ class DockerOkapiIntegration:
                 shutil.copy2(original_file, original_in_xliff_dir)
                 logger.info(f"复制原始文件到 XLIFF 目录: {original_in_xliff_dir}")
             
-            # 使用 Tikal 脚本
+            # 根据 Tikal 官方文档，XLIFF 文件名应该是原始文件名加上 .xlf 扩展名
+            # 例如：myFile.html -> myFile.html.xlf
+            correct_xliff_name = f"{original_filename}.xlf"
+            correct_xliff_path = os.path.join(xliff_dir, correct_xliff_name)
+            
+            # 如果当前 XLIFF 文件名不正确，重命名它
+            if os.path.basename(xliff_file) != correct_xliff_name:
+                shutil.copy2(xliff_file, correct_xliff_path)
+                logger.info(f"重命名 XLIFF 文件为: {correct_xliff_path}")
+                xliff_file = correct_xliff_path
+            else:
+                # 如果文件名已经正确，使用当前路径
+                xliff_file = correct_xliff_path
+            
+            # 确保文件确实存在且有正确的扩展名
+            if not os.path.exists(xliff_file):
+                logger.error(f"XLIFF 文件不存在: {xliff_file}")
+                return False
+            
+            # 检查文件扩展名
+            if not xliff_file.endswith('.xlf'):
+                logger.error(f"文件扩展名不正确: {xliff_file}")
+                return False
+            
+            logger.info(f"使用 XLIFF 文件进行合并: {xliff_file}")
+            
+            # 列出目录中的所有文件进行调试
+            logger.info(f"目录 {xliff_dir} 中的文件:")
+            for f in os.listdir(xliff_dir):
+                logger.info(f"  - {f}")
+            
+            # 使用 Tikal 脚本 - 根据官方文档，合并命令不需要 -f 参数
             cmd = [self.tikal_script, "-m", xliff_file]
             logger.info(f"使用 Tikal 脚本执行合并")
             
@@ -238,18 +333,34 @@ class DockerOkapiIntegration:
             logger.info(f"Tikal 合并完成，用时: {duration:.2f}秒")
             
             if result.returncode == 0:
-                # 根据 Tikal 文档，输出文件为 original_file.out.docx
-                expected_output = os.path.join(xliff_dir, f"{original_filename}.out.docx")
+                # 检查目录中生成的所有文件
+                logger.info(f"Tikal 合并成功，检查输出文件...")
+                logger.info(f"目录 {xliff_dir} 中的所有文件:")
+                for f in os.listdir(xliff_dir):
+                    logger.info(f"  - {f}")
                 
-                if os.path.exists(expected_output):
-                    # 复制到指定位置
-                    shutil.copy2(expected_output, output_file)
+                # 查找可能的输出文件
+                possible_outputs = []
+                for f in os.listdir(xliff_dir):
+                    if f.endswith('.docx') and f != original_filename:
+                        possible_outputs.append(f)
+                
+                if possible_outputs:
+                    # 使用找到的第一个输出文件
+                    output_filename = possible_outputs[0]
+                    actual_output = os.path.join(xliff_dir, output_filename)
+                    shutil.copy2(actual_output, output_file)
                     logger.info(f"✅ XLIFF 合并成功: {output_file}")
+                    logger.info(f"实际输出文件: {actual_output}")
                     if result.stdout:
                         logger.debug(f"STDOUT: {result.stdout}")
                     return True
                 else:
-                    logger.error(f"❌ 预期的输出文件不存在: {expected_output}")
+                    logger.error(f"❌ 未找到输出文件")
+                    logger.error(f"期望的文件: {original_filename}.out.docx")
+                    logger.error(f"目录中的所有文件:")
+                    for f in os.listdir(xliff_dir):
+                        logger.error(f"  - {f}")
                     return False
             else:
                 logger.error(f"❌ XLIFF 合并失败: {result.stderr}")
@@ -271,32 +382,81 @@ class DockerOkapiIntegration:
             List[Dict]: 翻译单元列表
         """
         try:
+            logger.info(f"开始解析 XLIFF 文件: {xliff_file}")
+            
+            # 检查文件是否存在
+            if not os.path.exists(xliff_file):
+                logger.error(f"XLIFF 文件不存在: {xliff_file}")
+                return []
+            
+            # 读取文件内容进行调试
+            with open(xliff_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                logger.info(f"XLIFF 文件大小: {len(content)} 字符")
+                logger.info(f"XLIFF 文件内容前1000字符: {content[:1000]}")
+                
+                # 检查是否包含 trans-unit 或 unit
+                if 'trans-unit' in content:
+                    logger.info("文件中包含 trans-unit 标签")
+                if 'unit' in content:
+                    logger.info("文件中包含 unit 标签")
+                if 'source' in content:
+                    logger.info("文件中包含 source 标签")
+                if 'target' in content:
+                    logger.info("文件中包含 target 标签")
+            
             tree = ET.parse(xliff_file)
             root = tree.getroot()
             
-            # 定义命名空间
-            namespaces = {
-                'xliff': 'urn:oasis:names:tc:xliff:document:2.0'
-            }
+            logger.info(f"XLIFF 根元素: {root.tag}")
             
+            # 支持 XLIFF 1.2 和 2.0 格式
             translation_units = []
             
-            # 查找所有翻译单元
-            for unit in root.findall('.//xliff:unit', namespaces):
+            # 检查 XLIFF 版本
+            if 'urn:oasis:names:tc:xliff:document:2.0' in root.tag:
+                logger.info("解析 XLIFF 2.0 格式")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:2.0'}
+                unit_xpath = './/xliff:unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+            else:
+                logger.info("解析 XLIFF 1.2 格式")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+                unit_xpath = './/xliff:trans-unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+            
+            units = root.findall(unit_xpath, namespaces)
+            logger.info(f"找到 {len(units)} 个翻译单元")
+            
+            for unit in units:
                 unit_id = unit.get('id', '')
                 
-                # 查找源文本和目标文本
-                source_elem = unit.find('.//xliff:source', namespaces)
-                target_elem = unit.find('.//xliff:target', namespaces)
+                source_elem = unit.find(source_xpath, namespaces)
+                target_elem = unit.find(target_xpath, namespaces)
                 
                 if source_elem is not None:
-                    source_text = ''.join(source_elem.itertext()).strip()
+                    # 只提取<bpt>和<ept>标签之间的纯文本内容
+                    # 不提取<bpt>和<ept>标签内部的格式信息
+                    text_parts = []
                     
-                    # 只处理有意义的文本
+                    # 添加source元素开头的直接文本（如果有）
+                    if source_elem.text:
+                        text_parts.append(source_elem.text)
+                    
+                    # 遍历所有子元素，只提取实际文本内容
+                    for child in source_elem:
+                        # 跳过<bpt>和<ept>标签本身，但提取它们后面的tail文本
+                        if child.tail:
+                            text_parts.append(child.tail)
+                    
+                    source_text = ''.join(text_parts).strip()
+                    
                     if source_text and len(source_text) > 0:
                         translation_units.append({
                             'id': unit_id,
-                            'source': source_text,
+                            'source': source_text,  # 纯文本用于翻译
                             'target': ''.join(target_elem.itertext()).strip() if target_elem is not None else '',
                             'unit_element': unit
                         })
@@ -307,6 +467,215 @@ class DockerOkapiIntegration:
         except Exception as e:
             logger.error(f"解析 XLIFF 文件失败: {e}")
             return []
+
+    def parse_xliff_with_placeholders(self, xliff_file: str) -> List[Dict[str, Any]]:
+        """
+        解析 XLIFF 文件内容，使用占位符标记格式边界
+        
+        Args:
+            xliff_file: XLIFF 文件路径
+            
+        Returns:
+            List[Dict]: 翻译单元列表，包含占位符信息
+        """
+        try:
+            logger.info(f"开始解析 XLIFF 文件（使用占位符）: {xliff_file}")
+            
+            if not os.path.exists(xliff_file):
+                logger.error(f"XLIFF 文件不存在: {xliff_file}")
+                return []
+            
+            tree = ET.parse(xliff_file)
+            root = tree.getroot()
+            
+            # 支持 XLIFF 1.2 和 2.0 格式
+            if 'urn:oasis:names:tc:xliff:document:2.0' in root.tag:
+                logger.info("解析 XLIFF 2.0 格式")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:2.0'}
+                unit_xpath = './/xliff:unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+            else:
+                logger.info("解析 XLIFF 1.2 格式")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+                unit_xpath = './/xliff:trans-unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+            
+            units = root.findall(unit_xpath, namespaces)
+            logger.info(f"找到 {len(units)} 个翻译单元")
+            
+            translation_units = []
+            
+            for unit in units:
+                unit_id = unit.get('id', '')
+                source_elem = unit.find(source_xpath, namespaces)
+                target_elem = unit.find(target_xpath, namespaces)
+                
+                if source_elem is not None:
+                    # 构建带占位符的文本结构
+                    placeholder_info = self._build_placeholder_text(source_elem)
+                    
+                    if placeholder_info['text_with_placeholders']:
+                        translation_units.append({
+                            'id': unit_id,
+                            'source': placeholder_info['text_with_placeholders'],
+                            'placeholder_info': placeholder_info,
+                            'target': ''.join(target_elem.itertext()).strip() if target_elem is not None else '',
+                            'unit_element': unit
+                        })
+            
+            logger.info(f"解析到 {len(translation_units)} 个翻译单元（使用占位符）")
+            return translation_units
+            
+        except Exception as e:
+            logger.error(f"解析 XLIFF 文件失败: {e}")
+            return []
+
+    def _build_placeholder_text(self, source_elem) -> Dict[str, Any]:
+        """
+        构建带占位符的文本结构
+        
+        Args:
+            source_elem: source元素
+            
+        Returns:
+            Dict: 包含占位符信息的字典
+        """
+        # 使用特殊占位符 ☼ (U+263C WHITE SUN WITH RAYS)
+        # 这个符号很少见，不太可能出现在正常文本中
+        PLACEHOLDER = "♂"
+        
+        text_parts = []
+        text_with_placeholders = ""
+        format_tags = []
+        
+        # 处理开头的直接文本
+        if source_elem.text:
+            text_parts.append(source_elem.text)
+            text_with_placeholders += source_elem.text
+        
+        # 处理所有子元素
+        for child in source_elem:
+            # 处理格式标签
+            if child.tag.endswith('}bpt') or child.tag.endswith('}ept') or child.tag.endswith('}ph'):
+                format_tags.append({
+                    'tag': child.tag,
+                    'attrib': child.attrib.copy(),
+                    'content': child.text or '',
+                    'position': len(text_parts)  # 记录在哪个文本段之后
+                })
+                # 在格式标签位置插入占位符
+                text_with_placeholders += PLACEHOLDER
+            
+            # 处理标签后的文本
+            if child.tail:
+                text_parts.append(child.tail)
+                text_with_placeholders += child.tail
+        
+        return {
+            'text_parts': text_parts,
+            'text_with_placeholders': text_with_placeholders,
+            'format_tags': format_tags,
+            'placeholder': PLACEHOLDER
+        }
+
+    def _clean_placeholder_spaces(self, translated_text: str, placeholder: str) -> str:
+        """
+        智能清理占位符前后的空格
+        
+        Args:
+            translated_text: 翻译后的文本
+            placeholder: 占位符
+            
+        Returns:
+            str: 清理后的文本
+        """
+        import re
+        
+        # 情况1：占位符前后都有空格，删除后面的一个空格
+        # 例如：♂ XCMG ♂ Personnel -> ♂ XCMG ♂Personnel
+        pattern = f"{placeholder} (.+?) {placeholder}"
+        replacement = f"{placeholder}\\1 {placeholder}"
+        cleaned_text = re.sub(pattern, replacement, translated_text)
+        
+        # 其他情况（♂前面有空格后面没有，♂后面有空格前面没有，♂前后都没有空格）
+        # 都不删除空格，保持原样
+        
+        logger.debug(f"智能清理占位符空格: '{translated_text}' -> '{cleaned_text}'")
+        return cleaned_text
+
+    def apply_translation_with_placeholders(self, target_elem, translated_text: str, placeholder_info: Dict[str, Any]) -> bool:
+        """
+        将翻译文本应用到目标元素，使用占位符恢复格式标签
+        
+        Args:
+            target_elem: 目标元素
+            translated_text: 翻译后的文本
+            placeholder_info: 占位符信息
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 清空目标元素
+            target_elem.clear()
+            
+            placeholder = placeholder_info['placeholder']
+            format_tags = placeholder_info['format_tags']
+            
+            # 清理占位符后面的多余空格
+            cleaned_text = self._clean_placeholder_spaces(translated_text, placeholder)
+            
+            if not format_tags:
+                # 没有格式标签，直接设置文本
+                target_elem.text = cleaned_text
+                return True
+            
+            # 按占位符分割翻译文本
+            translated_parts = cleaned_text.split(placeholder)
+            logger.debug(f"翻译文本按占位符分割: {len(translated_parts)} 部分")
+            
+            # 重建XML结构
+            current_part_index = 0
+            
+            for i, format_tag in enumerate(format_tags):
+                # 添加格式标签前的文本
+                if current_part_index < len(translated_parts):
+                    text_before = translated_parts[current_part_index]
+                    if target_elem.text is None:
+                        target_elem.text = text_before
+                    else:
+                        if len(target_elem) == 0:
+                            target_elem.text = (target_elem.text or "") + text_before
+                        else:
+                            last_child = target_elem[-1]
+                            last_child.tail = (last_child.tail or "") + text_before
+                    current_part_index += 1
+                
+                # 添加格式标签
+                new_tag = ET.SubElement(target_elem, format_tag['tag'], format_tag['attrib'])
+                if format_tag['content']:
+                    new_tag.text = format_tag['content']
+            
+            # 添加剩余的文本
+            if current_part_index < len(translated_parts):
+                remaining_text = translated_parts[current_part_index]
+                if target_elem.text is None:
+                    target_elem.text = remaining_text
+                else:
+                    if len(target_elem) == 0:
+                        target_elem.text = (target_elem.text or "") + remaining_text
+                    else:
+                        last_child = target_elem[-1]
+                        last_child.tail = (last_child.tail or "") + remaining_text
+            
+            logger.debug(f"占位符格式映射成功，翻译文本长度: {len(cleaned_text)}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"占位符格式映射失败: {e}")
+            return False
     
     def update_xliff_translations(self, xliff_file: str, translations: Dict[str, str]) -> bool:
         """
@@ -323,30 +692,65 @@ class DockerOkapiIntegration:
             tree = ET.parse(xliff_file)
             root = tree.getroot()
             
-            # 定义命名空间
-            namespaces = {
-                'xliff': 'urn:oasis:names:tc:xliff:document:2.0'
-            }
-            
             updated_count = 0
             
+            # 检查 XLIFF 版本并定义相应的命名空间
+            if 'urn:oasis:names:tc:xliff:document:2.0' in root.tag:
+                logger.info("更新 XLIFF 2.0 格式")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:2.0'}
+                unit_xpath = './/xliff:unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+                target_ns = f'{{{namespaces["xliff"]}}}target'
+            else:
+                logger.info("更新 XLIFF 1.2 格式")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+                unit_xpath = './/xliff:trans-unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+                target_ns = f'{{{namespaces["xliff"]}}}target'
+            
             # 更新每个翻译单元
-            for unit in root.findall('.//xliff:unit', namespaces):
+            units = root.findall(unit_xpath, namespaces)
+            logger.info(f"找到 {len(units)} 个翻译单元进行更新")
+            
+            for unit in units:
                 unit_id = unit.get('id', '')
                 
                 if unit_id in translations:
                     # 查找或创建目标元素
-                    target_elem = unit.find('.//xliff:target', namespaces)
+                    target_elem = unit.find(target_xpath, namespaces)
                     if target_elem is None:
                         # 如果没有目标元素，创建一个
-                        source_elem = unit.find('.//xliff:source', namespaces)
+                        source_elem = unit.find(source_xpath, namespaces)
                         if source_elem is not None:
-                            target_elem = ET.SubElement(unit, f'{{{namespaces["xliff"]}}}target')
+                            target_elem = ET.SubElement(unit, target_ns)
                     
                     if target_elem is not None:
-                        # 更新目标文本
-                        target_elem.text = translations[unit_id]
+                        # 保持target元素的完整结构，只替换其中的文本内容
+                        translated_text = translations[unit_id]
+                        
+                        # 方法：保持所有<bpt>和<ept>标签，只替换它们之间的文本
+                        # 首先保存所有格式标签
+                        format_tags = []
+                        for child in target_elem:
+                            if child.tag.endswith('}bpt') or child.tag.endswith('}ept'):
+                                format_tags.append((child.tag, child.attrib.copy(), child.text))
+                        
+                        # 清空target元素
+                        target_elem.clear()
+                        
+                        # 重新插入格式标签
+                        for tag, attrib, text in format_tags:
+                            new_tag = ET.SubElement(target_elem, tag, attrib)
+                            if text:
+                                new_tag.text = text
+                        
+                        # 将翻译文本作为纯文本插入（Okapi会在合并时处理）
+                        target_elem.text = translated_text
+                        
                         updated_count += 1
+                        logger.debug(f"更新翻译单元 {unit_id}: {translated_text[:50]}...")
             
             # 保存更新后的文件
             tree.write(xliff_file, encoding='utf-8', xml_declaration=True)
@@ -358,21 +762,108 @@ class DockerOkapiIntegration:
             logger.error(f"更新 XLIFF 翻译失败: {e}")
             return False
 
+    def update_xliff_translations_with_placeholders(self, xliff_file: str, translations: Dict[str, Dict]) -> bool:
+        """
+        更新 XLIFF 文件中的翻译内容，使用占位符恢复格式标签
+        
+        Args:
+            xliff_file: XLIFF 文件路径
+            translations: 翻译结果字典 {unit_id: {'text': translated_text, 'placeholder_info': placeholder_info}}
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            tree = ET.parse(xliff_file)
+            root = tree.getroot()
+            
+            updated_count = 0
+            
+            # 检查 XLIFF 版本并定义相应的命名空间
+            if 'urn:oasis:names:tc:xliff:document:2.0' in root.tag:
+                logger.info("更新 XLIFF 2.0 格式（使用占位符）")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:2.0'}
+                unit_xpath = './/xliff:unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+                target_ns = f'{{{namespaces["xliff"]}}}target'
+            else:
+                logger.info("更新 XLIFF 1.2 格式（使用占位符）")
+                namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+                unit_xpath = './/xliff:trans-unit'
+                source_xpath = './/xliff:source'
+                target_xpath = './/xliff:target'
+                target_ns = f'{{{namespaces["xliff"]}}}target'
+            
+            # 更新每个翻译单元
+            units = root.findall(unit_xpath, namespaces)
+            logger.info(f"找到 {len(units)} 个翻译单元进行更新")
+            logger.info(f"翻译结果字典包含 {len(translations)} 个条目")
+            
+            for unit in units:
+                unit_id = unit.get('id', '')
+                
+                if unit_id in translations:
+                    # 查找或创建目标元素
+                    target_elem = unit.find(target_xpath, namespaces)
+                    if target_elem is None:
+                        # 如果没有目标元素，创建一个
+                        source_elem = unit.find(source_xpath, namespaces)
+                        if source_elem is not None:
+                            target_elem = ET.SubElement(unit, target_ns)
+                    
+                    if target_elem is not None:
+                        translation_data = translations[unit_id]
+                        
+                        # 检查数据结构
+                        if isinstance(translation_data, dict) and 'text' in translation_data:
+                            # 占位符模式
+                            translated_text = translation_data['text']
+                            placeholder_info = translation_data['placeholder_info']
+                            
+                            # 使用占位符方法
+                            success = self.apply_translation_with_placeholders(
+                                target_elem, translated_text, placeholder_info
+                            )
+                        else:
+                            # 简单模式
+                            translated_text = translation_data
+                            target_elem.text = translated_text
+                            success = True
+                        
+                        if success:
+                            updated_count += 1
+                            logger.debug(f"更新翻译单元 {unit_id}: {translated_text[:50]}...")
+                        else:
+                            logger.warning(f"更新翻译单元 {unit_id} 失败")
+            
+            # 保存更新后的文件
+            tree.write(xliff_file, encoding='utf-8', xml_declaration=True)
+            
+            logger.info(f"更新了 {updated_count} 个翻译单元（使用占位符）")
+            return True
+            
+        except Exception as e:
+            logger.error(f"更新 XLIFF 翻译失败: {e}")
+            return False
+
 
 class OkapiWordTranslator:
     """使用 Okapi Framework 的 Word 文档翻译器"""
     
-    def __init__(self, okapi_home: str = "/opt/okapi"):
+    def __init__(self, okapi_home: str = "/opt/okapi", use_placeholders: bool = True):
         """
         初始化翻译器
         
         Args:
             okapi_home: Okapi 安装目录
+            use_placeholders: 是否使用占位符模式
         """
         self.okapi_integration = DockerOkapiIntegration(okapi_home)
         self.translation_service = None  # 翻译服务将在后续设置
+        self.use_placeholders = use_placeholders  # 占位符模式
         
-        logger.info("Okapi Word 翻译器初始化完成")
+        logger.info(f"Okapi Word 翻译器初始化完成，使用占位符: {use_placeholders}")
     
     def set_translation_service(self, translation_service):
         """设置翻译服务"""
@@ -412,9 +903,16 @@ class OkapiWordTranslator:
                 
                 # 步骤2：翻译 XLIFF 内容
                 logger.info("🔄 步骤2: 翻译 XLIFF 内容...")
-                success = self._translate_xliff_content(
-                    xliff_file, translated_xliff, source_lang, target_lang
-                )
+                if self.use_placeholders:
+                    logger.info("使用占位符模式")
+                    success = self._translate_xliff_content_with_placeholders(
+                        xliff_file, translated_xliff, source_lang, target_lang
+                    )
+                else:
+                    logger.info("使用简单模式")
+                    success = self._translate_xliff_content(
+                        xliff_file, translated_xliff, source_lang, target_lang
+                    )
                 if not success:
                     return False
                 
@@ -458,10 +956,13 @@ class OkapiWordTranslator:
             translations = {}
             batch_texts = []
             batch_ids = []
+            code_mappings = []
             
+            # 直接使用纯文本进行翻译
             for unit in translation_units:
                 batch_texts.append(unit['source'])
                 batch_ids.append(unit['id'])
+                code_mappings.append({})
             
             logger.info(f"开始批量翻译 {len(batch_texts)} 个文本单元...")
             
@@ -474,7 +975,7 @@ class OkapiWordTranslator:
                 logger.error("翻译结果数量不匹配")
                 return False
             
-            # 构建翻译结果字典
+            # 直接使用翻译结果，不恢复格式标签（让Okapi处理格式）
             for i, unit_id in enumerate(batch_ids):
                 translations[unit_id] = translated_texts[i]
             
@@ -493,11 +994,79 @@ class OkapiWordTranslator:
             logger.error(f"翻译 XLIFF 内容失败: {e}")
             return False
 
+    def _translate_xliff_content_with_placeholders(self, xliff_file: str, translated_xliff: str,
+                                                  source_lang: str, target_lang: str) -> bool:
+        """
+        翻译 XLIFF 文件中的内容，使用占位符保持格式标签
+        
+        Args:
+            xliff_file: 原始 XLIFF 文件
+            translated_xliff: 翻译后的 XLIFF 文件
+            source_lang: 源语言
+            target_lang: 目标语言
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 使用占位符解析方法
+            translation_units = self.okapi_integration.parse_xliff_with_placeholders(xliff_file)
+            
+            if not translation_units:
+                logger.warning("没有找到需要翻译的内容")
+                shutil.copy2(xliff_file, translated_xliff)
+                return True
+            
+            # 批量翻译
+            translations = {}
+            placeholder_infos = {}
+            batch_texts = []
+            batch_ids = []
+            
+            # 提取带占位符的文本进行翻译
+            for unit in translation_units:
+                batch_texts.append(unit['source'])
+                batch_ids.append(unit['id'])
+                placeholder_infos[unit['id']] = unit['placeholder_info']
+            
+            logger.info(f"开始批量翻译 {len(batch_texts)} 个文本单元（带占位符）...")
+            
+            # 调用翻译服务
+            translated_texts = self.translation_service.batch_translate(
+                batch_texts, source_lang, target_lang
+            )
+            
+            if len(translated_texts) != len(batch_texts):
+                logger.error("翻译结果数量不匹配")
+                return False
+            
+            # 保存翻译结果和占位符信息
+            for i, unit_id in enumerate(batch_ids):
+                translations[unit_id] = {
+                    'text': translated_texts[i],
+                    'placeholder_info': placeholder_infos[unit_id]
+                }
+            
+            # 复制原文件并更新翻译
+            shutil.copy2(xliff_file, translated_xliff)
+            success = self.okapi_integration.update_xliff_translations_with_placeholders(
+                translated_xliff, translations
+            )
+            
+            if success:
+                logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元（使用占位符）")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"翻译 XLIFF 内容失败: {e}")
+            return False
+
 
 # 便捷函数
-def create_okapi_translator(okapi_home: str = "/opt/okapi") -> OkapiWordTranslator:
+def create_okapi_translator(okapi_home: str = "/opt/okapi", use_placeholders: bool = True) -> OkapiWordTranslator:
     """创建 Okapi 翻译器实例"""
-    return OkapiWordTranslator(okapi_home)
+    return OkapiWordTranslator(okapi_home, use_placeholders)
 
 
 def verify_okapi_installation(okapi_home: str = "/opt/okapi") -> bool:

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app import db
+from app.extensions import db
 
 
 class Customer(db.Model):

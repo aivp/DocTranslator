@@ -3,7 +3,7 @@ import hashlib
 import uuid
 from werkzeug.utils import secure_filename
 import os
-from app import db
+from app.extensions import db
 from app.models.customer import Customer
 from app.models.translate import Translate
 from app.utils.response import APIResponse

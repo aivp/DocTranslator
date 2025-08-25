@@ -1,9 +1,6 @@
-from flask import Flask, jsonify
-from flask_cors import CORS
+from flask import Flask
 from .config import get_config
 from .extensions import init_extensions, db, api
-from .models.setting import Setting
-from .resources.task.translate_service import TranslateEngine
 from .script.init_db import safe_init_mysql
 from .script.insert_init_db import insert_initial_data, set_auto_increment, insert_initial_settings
 from .utils.response import APIResponse
@@ -13,16 +10,14 @@ from jwt.exceptions import ExpiredSignatureError, InvalidTokenError, DecodeError
 def create_app(config_class=None):
     app = Flask(__name__)
 
-    from .routes import register_routes
     # 加载配置
     if config_class is None:
         config_class = get_config()
     app.config.from_object(config_class)
     # 初始化数据库
     safe_init_mysql(app,'app/init.sql')
-    # 初始化扩展（此时不注册路由）
+    # 初始化扩展（扩展内部会注册路由）
     init_extensions(app)
-    register_routes(api)
 
     # 首先注册JWT相关异常处理器（优先级最高）
     from flask_jwt_extended.exceptions import JWTExtendedException

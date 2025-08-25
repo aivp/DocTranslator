@@ -104,12 +104,17 @@ def clear_image(paragraph):
 
 def start(trans):
     """主入口函数，处理Word文档翻译"""
-    # 初始化线程设置
-    max_threads = 10 if not trans.get('threads') else int(trans['threads'])
+    # 硬编码线程数为30，忽略前端传入的配置
+    max_threads = 30
     start_time = datetime.datetime.now()
 
     # ============== 检查是否使用Okapi方案 ==============
     use_okapi = trans.get('use_okapi', True)  # 默认使用Okapi
+    
+    logger.info(f"🔍 翻译方法选择调试:")
+    logger.info(f"  配置的 use_okapi: {use_okapi}")
+    logger.info(f"  配置的 threads: {trans.get('threads', '未设置')}")
+    logger.info(f"  实际使用线程数: {max_threads}")
     
     if use_okapi:
         logger.info("🔄 使用 Okapi Framework 进行翻译（解决run切割问题）")
@@ -128,10 +133,18 @@ def start_with_okapi(trans, start_time):
         # 验证 Okapi 安装
         if not verify_okapi_installation():
             logger.error("❌ Okapi 安装验证失败，回退到传统方法")
-            return start_traditional(trans, start_time, 10)
+            # 硬编码线程数为30，忽略前端传入的配置
+            max_threads = 30
+            return start_traditional(trans, start_time, max_threads)
+        
+        # 如果用户选择了qwen-mt-plus，设置server为qwen
+        if trans.get('model') == 'qwen-mt-plus':
+            trans['server'] = 'qwen'
+            logger.info("✅ 设置翻译服务为 Qwen")
         
         # 创建 Okapi 翻译器
         translator = OkapiWordTranslator()
+        logger.info("✅ Okapi 翻译器创建成功")
         
         # 设置翻译服务
         class OkapiTranslationService:
@@ -139,31 +152,201 @@ def start_with_okapi(trans, start_time):
                 self.trans = trans
             
             def batch_translate(self, texts, source_lang, target_lang):
-                """批量翻译文本"""
-                translated_texts = []
+                """批量翻译文本 - 使用多线程并行处理，支持术语库筛选"""
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                import threading
                 
-                # 使用现有的翻译服务
-                for text in texts:
+                translated_texts = [None] * len(texts)  # 预分配结果数组
+                # 从前端配置获取最大线程数，默认为10
+                # 硬编码线程数为30，忽略前端传入的配置
+                max_workers = min(30, len(texts))
+                
+                logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程（硬编码30）")
+                
+                def translate_single_text(index, text):
+                    """翻译单个文本，支持术语库筛选"""
                     try:
-                        # 调用现有的翻译API
-                        translated = to_translate.translate_text(
-                            self.trans, text, source_lang, target_lang
-                        )
-                        translated_texts.append(translated)
+                        # 检查是否有术语库配置
+                        comparison_id = self.trans.get('comparison_id')
+                        if comparison_id:
+                            logger.debug(f"文本 {index} 使用术语库筛选: {comparison_id}")
+                            # 使用术语筛选功能
+                            from .main import get_filtered_terms_for_text
+                            filtered_terms = get_filtered_terms_for_text(text, comparison_id, max_terms=50)
+                            if filtered_terms:
+                                logger.debug(f"文本 {index} 使用术语库")
+                                # 创建临时翻译配置，包含筛选后的术语库
+                                temp_trans = self.trans.copy()
+                                temp_trans['filtered_terms'] = filtered_terms
+                                translated = to_translate.translate_text(
+                                    temp_trans, text, source_lang, target_lang
+                                )
+                            else:
+                                logger.debug(f"文本 {index} 没有找到相关术语")
+                                translated = to_translate.translate_text(
+                                    self.trans, text, source_lang, target_lang
+                                )
+                        else:
+                            logger.debug(f"文本 {index} 未使用术语库")
+                            translated = to_translate.translate_text(
+                                self.trans, text, source_lang, target_lang
+                            )
+                        
+                        logger.debug(f"文本 {index} 翻译完成: {text[:50]}... -> {translated[:50]}...")
+                        return index, translated, None
                     except Exception as e:
-                        logger.error(f"翻译失败: {e}")
-                        translated_texts.append(text)  # 失败时保持原文
+                        logger.error(f"文本 {index} 翻译失败: {e}")
+                        return index, text, str(e)  # 失败时保持原文
                 
+                # 使用线程池并行翻译
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # 提交所有翻译任务
+                    future_to_index = {
+                        executor.submit(translate_single_text, i, text): i 
+                        for i, text in enumerate(texts)
+                    }
+                    
+                    # 收集结果
+                    completed_count = 0
+                    for future in as_completed(future_to_index):
+                        index, translated_text, error = future.result()
+                        translated_texts[index] = translated_text
+                        completed_count += 1
+                        
+                        if completed_count % 5 == 0:  # 每完成5个就输出进度
+                            logger.info(f"翻译进度: {completed_count}/{len(texts)} ({completed_count/len(texts)*100:.1f}%)")
+                
+                logger.info(f"并行翻译完成，共翻译 {len(texts)} 个文本")
                 return translated_texts
         
         translator.set_translation_service(OkapiTranslationService(trans))
+        logger.info("✅ 翻译服务设置成功")
+        
+        # 语言映射：将中文语言名称转换为英文全拼
+        def map_language_to_qwen_format(lang_name):
+            """将中文语言名称映射为Qwen API需要的英文全拼格式"""
+            # 处理空值和None的情况
+            if not lang_name or lang_name.strip() == '':
+                return 'auto'  # 源语言为空时返回auto
+                
+            language_mapping = {
+                # 中文名称到英文全拼
+                '中文': 'Chinese',
+                '简体中文': 'Chinese',
+                '繁体中文': 'Traditional Chinese',
+                '英语': 'English',
+                '英文': 'English',
+                '俄语': 'Russian',
+                '日语': 'Japanese',
+                '韩语': 'Korean',
+                '西班牙语': 'Spanish',
+                '法语': 'French',
+                '葡萄牙语': 'Portuguese',
+                '德语': 'German',
+                '意大利语': 'Italian',
+                '泰语': 'Thai',
+                '越南语': 'Vietnamese',
+                '印度尼西亚语': 'Indonesian',
+                '马来语': 'Malay',
+                '阿拉伯语': 'Arabic',
+                '印地语': 'Hindi',
+                '希伯来语': 'Hebrew',
+                '缅甸语': 'Burmese',
+                '泰米尔语': 'Tamil',
+                '乌尔都语': 'Urdu',
+                '孟加拉语': 'Bengali',
+                '波兰语': 'Polish',
+                '荷兰语': 'Dutch',
+                '罗马尼亚语': 'Romanian',
+                '土耳其语': 'Turkish',
+                '高棉语': 'Khmer',
+                '老挝语': 'Lao',
+                '粤语': 'Cantonese',
+                '柬埔寨语': 'Khmer',
+                '柬埔寨语（高棉语）': 'Khmer',
+                '印尼语/马来语': 'Indonesian',
+                '菲律宾语（他加禄语）': 'Tagalog',
+                '菲律宾语': 'Tagalog',
+                '他加禄语': 'Tagalog',
+                # 英文全拼到自身 (确保英文全拼映射到自身)
+                'Chinese': 'Chinese',
+                'English': 'English',
+                'Russian': 'Russian',
+                'Japanese': 'Japanese',
+                'Korean': 'Korean',
+                'Spanish': 'Spanish',
+                'French': 'French',
+                'Portuguese': 'Portuguese',
+                'German': 'German',
+                'Italian': 'Italian',
+                'Thai': 'Thai',
+                'Vietnamese': 'Vietnamese',
+                'Indonesian': 'Indonesian',
+                'Malay': 'Malay',
+                'Arabic': 'Arabic',
+                'Hindi': 'Hindi',
+                'Hebrew': 'Hebrew',
+                'Burmese': 'Burmese',
+                'Tamil': 'Tamil',
+                'Urdu': 'Urdu',
+                'Bengali': 'Bengali',
+                'Polish': 'Polish',
+                'Dutch': 'Dutch',
+                'Romanian': 'Romanian',
+                'Turkish': 'Turkish',
+                'Khmer': 'Khmer',
+                'Lao': 'Lao',
+                'Cantonese': 'Cantonese',
+                'Tagalog': 'Tagalog',
+                # 语种编码到英文全拼
+                'zh': 'Chinese',
+                'en': 'English',
+                'ja': 'Japanese',
+                'ko': 'Korean',
+                'fr': 'French',
+                'de': 'German',
+                'es': 'Spanish',
+                'ru': 'Russian',
+                'it': 'Italian',
+                'ar': 'Arabic',
+                'th': 'Thai',
+                'vi': 'Vietnamese',
+                'id': 'Indonesian',
+                'ms': 'Malay',
+                'tl': 'Tagalog',
+                'my': 'Burmese',
+                'km': 'Khmer',
+                'lo': 'Lao',
+                'pt': 'Portuguese',
+                'hi': 'Hindi',
+                'he': 'Hebrew',
+                'ta': 'Tamil',
+                'ur': 'Urdu',
+                'bn': 'Bengali',
+                'pl': 'Polish',
+                'nl': 'Dutch',
+                'ro': 'Romanian',
+                'tr': 'Turkish',
+                'yue': 'Cantonese',
+            }
+            return language_mapping.get(lang_name.strip(), lang_name.strip())
+        
+        # 获取并映射语言
+        source_lang = map_language_to_qwen_format(trans.get('source_lang', ''))
+        target_lang = map_language_to_qwen_format(trans.get('target_lang', '英语'))
+        
+        logger.info(f"🔍 语言映射调试:")
+        logger.info(f"  原始源语言: {trans.get('source_lang', 'zh')}")
+        logger.info(f"  原始目标语言: {trans.get('target_lang', 'en')}")
+        logger.info(f"  映射后源语言: {source_lang}")
+        logger.info(f"  映射后目标语言: {target_lang}")
         
         # 执行翻译
         success = translator.translate_document(
             trans['file_path'],
             trans['target_file'],
-            trans.get('source_lang', 'zh'),
-            trans.get('target_lang', 'en')
+            source_lang,
+            target_lang
         )
         
         if success:
@@ -197,11 +380,11 @@ def start_traditional(trans, start_time, max_threads):
     if trans.get('model') == 'qwen-mt-plus':
         try:
             trans['server'] = 'qwen'
-            # 建议线程数（Qwen并发已提升到840次/分钟）
-            if max_threads > 20:
-                logger.info(f"建议: 当前线程数 {max_threads}，建议设置为 10-20 以获得最佳性能")
+            # 建议线程数（Qwen并发已提升到1000次/分钟）
+            if max_threads > 30:
+                logger.info(f"建议: 当前线程数 {max_threads}，建议设置为 10-30 以获得最佳性能")
             elif max_threads < 5:
-                logger.info(f"建议: 当前线程数 {max_threads}，可以适当增加到 10-20 以提升翻译速度")
+                logger.info(f"建议: 当前线程数 {max_threads}，可以适当增加到 10-30 以提升翻译速度")
             from .qwen_translate import check_qwen_availability
             qwen_available, qwen_message = check_qwen_availability()
             logger.info(f"Qwen服务检查: {qwen_message}")
@@ -451,30 +634,9 @@ def extract_paragraph_with_merge(paragraph, texts, context_type, paragraph_index
                 'runs': [run]
             })
     
-    # 添加调试信息
-    logger.info(f"=== 段落处理开始 ===")
-    logger.info(f"段落索引: {paragraph_index}, 总段落数: {total_paragraphs}")
-    logger.info(f"上下文类型: {context_type}")
-    logger.info(f"是否为第一个段落: {is_main_title}")
-    logger.info(f"原始run数量: {len(paragraph_runs)}")
-    
-    # 详细打印每个原始run的信息
-    logger.info(f"=== 原始run详细信息 ===")
-    for i, run in enumerate(paragraph_runs):
-        try:
-            font_name = run.font.name if run.font.name else "None"
-            font_size = run.font.size.pt if run.font.size else "None"
-            bold = run.bold if run.bold is not None else "None"
-            italic = run.italic if run.italic is not None else "None"
-            logger.info(f"  原始run {i}: '{run.text}' (字体: {font_name}, 大小: {font_size}, 加粗: {bold}, 斜体: {italic})")
-        except Exception as e:
-            logger.info(f"  原始run {i}: '{run.text}' (格式获取失败: {e})")
-    
-    logger.info(f"合并后的run数量: {len(merged_runs)}")
-    
-    # 计算总的原始run数量
-    total_original_runs = sum(len(merged_item['runs']) for merged_item in merged_runs)
-    logger.info(f"合并后包含的原始run总数: {total_original_runs}")
+    # 简化日志输出，只在调试模式下显示详细信息
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"段落处理: 索引{paragraph_index}/{total_paragraphs}, 类型{context_type}, run数量{len(paragraph_runs)}")
     
     # 主标题处理已经被禁用，直接处理所有段落
     for merged_item in merged_runs:
@@ -561,7 +723,8 @@ def extract_paragraph_with_merge(paragraph, texts, context_type, paragraph_index
                 "is_main_title": is_main_title  # 添加主标题标记
             })
     
-    logger.info(f"=== 段落处理完成 ===")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"段落处理完成: 索引{paragraph_index}")
 
 
 def extract_content_for_translation(document, file_path, texts, max_threads=4):
@@ -854,15 +1017,14 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
     original_count = len([r for r in paragraph_runs if check_text(r.text)])
     merged_count = 0
     
-    # 添加调试信息
-    logger.info(f"=== conservative_run_merge 开始 ===")
-    logger.info(f"输入run数量: {len(paragraph_runs)}")
-    logger.info(f"有效run数量: {original_count}")
-    logger.info(f"是否为主标题: {is_main_title}")
+    # 简化调试信息，只在调试模式下显示
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"conservative_run_merge: 输入{len(paragraph_runs)}个run, 有效{original_count}个, 主标题{is_main_title}")
     
     # 如果是主标题，强制合并所有run
     if is_main_title and original_count > 1:
-        logger.info(f"主标题段落，强制合并所有{original_count}个run")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"主标题段落，强制合并所有{original_count}个run")
         
         # 收集所有有效run
         all_runs = [r for r in paragraph_runs if check_text(r.text)]
@@ -871,10 +1033,8 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
         merged_item = merge_compatible_runs(all_runs)
         merged.append(merged_item)
         
-        logger.info(f"=== conservative_run_merge 完成 ===")
-        logger.info(f"合并后数量: {len(merged)}")
-        for i, item in enumerate(merged):
-            logger.info(f"  合并项 {i}: '{item['text']}' (类型: {item['type']}, 包含run: {len(item['runs'])})")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"conservative_run_merge完成: 合并后{len(merged)}个项")
         
         return merged
     
@@ -882,7 +1042,8 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
     for i, run in enumerate(paragraph_runs):
         # 跳过包含图片的run
         if check_if_image(run):
-            logger.info(f"Run {i}: '{run.text}' - 包含图片，跳过")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Run {i}: '{run.text}' - 包含图片，跳过")
             # 保存当前组
             if current_group:
                 merged.append(merge_compatible_runs(current_group))
@@ -895,10 +1056,12 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
             continue
         
         if not check_text(run.text):
-            logger.info(f"Run {i}: '{run.text}' - 无效文本，跳过")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Run {i}: '{run.text}' - 无效文本，跳过")
             continue
         
-        logger.info(f"Run {i}: '{run.text}' - 长度: {len(run.text)}, 当前组长度: {current_length}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Run {i}: '{run.text}' - 长度: {len(run.text)}, 当前组长度: {current_length}")
         
         # 只合并较短的run（通常是空格、标点、短词、短语）
         if len(run.text) <= 20 and current_length < max_merge_length:
@@ -906,14 +1069,17 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
             if not current_group or are_runs_compatible(current_group[-1], run, is_main_title):
                 current_group.append(run)
                 current_length += len(run.text)
-                logger.info(f"  添加到当前组，当前组: {[r.text for r in current_group]}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"  添加到当前组，当前组: {[r.text for r in current_group]}")
                 continue
             else:
-                logger.info(f"  格式不兼容，不合并")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"  格式不兼容，不合并")
         
         # 保存当前组
         if current_group:
-            logger.info(f"保存当前组: {[r.text for r in current_group]}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"保存当前组: {[r.text for r in current_group]}")
             merged.append(merge_compatible_runs(current_group))
             if len(current_group) > 1:
                 merged_count += len(current_group) - 1  # 记录合并的run数量
@@ -921,7 +1087,8 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
             current_length = 0
         
         # 当前run单独处理
-        logger.info(f"Run {i} 单独处理: '{run.text}'")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Run {i} 单独处理: '{run.text}'")
         merged.append({
             'text': run.text,
             'runs': [run],
@@ -929,7 +1096,8 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
         })
     
     if current_group:
-        logger.info(f"保存最后的组: {[r.text for r in current_group]}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"保存最后的组: {[r.text for r in current_group]}")
         merged.append(merge_compatible_runs(current_group))
         if len(current_group) > 1:
             merged_count += len(current_group) - 1
@@ -939,10 +1107,8 @@ def conservative_run_merge(paragraph_runs, max_merge_length=1000, is_main_title=
         with print_lock:
             logger.info(f"Run合并优化: 原始{original_count}个run -> 合并后{len(merged)}个，减少了{merged_count}个API调用")
     
-    logger.info(f"=== conservative_run_merge 完成 ===")
-    logger.info(f"合并后数量: {len(merged)}")
-    for i, item in enumerate(merged):
-        logger.info(f"  合并项 {i}: '{item['text']}' (类型: {item['type']}, 包含run: {len(item['runs'])})")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"conservative_run_merge完成: 合并后{len(merged)}个项")
     
     return merged
 

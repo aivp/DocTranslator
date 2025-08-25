@@ -344,7 +344,8 @@ def start(trans):
         print(f"跳过的文本片段: {skipped_count}")
 
         # 多线程翻译
-        run_translation(docx_trans, filtered_texts, max_threads=10)
+        # 硬编码线程数为30，忽略前端传入的配置
+        run_translation(docx_trans, filtered_texts, max_threads=30)
 
         # 写入翻译结果（完全保留原始格式）
         text_count = apply_translations(document, texts)
@@ -771,7 +772,8 @@ def extract_comments(file_path, texts):
         print(f"提取批注时出错: {str(e)}")
 
 
-def run_translation(trans, texts, max_threads=10):
+def run_translation(trans, texts, max_threads=30):
+    # 硬编码线程数为30，忽略前端传入的配置
     """执行多线程翻译"""
     if not texts:
         print("没有需要翻译的内容")

@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from threading import Thread
 from flask import current_app
-from app import db
+from app.extensions import db
 from app.models.translate import Translate
 from app.models.comparison import Comparison, ComparisonSub
 from app.models.prompt import Prompt
@@ -89,6 +89,7 @@ class TranslateEngine:
         config = {
             'id': task.id,  # 任务ID
             'target_lang': task.lang,
+            'source_lang': task.origin_lang or 'zh',  # 源语言，默认为中文
             'uuid': task.uuid,
             'target_path_dir': os.path.dirname(task.target_filepath),
             'threads': task.threads,

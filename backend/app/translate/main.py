@@ -25,8 +25,8 @@ run_threads=0
 
 def main():
     global run_threads
-    # 允许的最大线程
-    max_threads=10
+    # 硬编码线程数为30，忽略前端传入的配置
+    max_threads=30
     # 当前执行的索引位置
     run_index=0
     # 是否保留原文
@@ -153,14 +153,14 @@ def get_comparison(comparison_id):
                     
                     # 检查terms是否为有效结果
                     if terms and isinstance(terms, list) and len(terms) > 0:
-                        logging.info(f"术语库 {comp_id} 找到 {len(terms)} 条术语")
+                        # logging.info(f"术语库 {comp_id} 找到 {len(terms)} 条术语")
                         
                         for term in terms:
                             if term and isinstance(term, dict) and term.get('original') and term.get('comparison_text'):
                                 # 去重：如果原文已存在，跳过（以第一个为准）
                                 if term['original'] not in all_terms:
                                     all_terms[term['original']] = term['comparison_text']
-                                    logging.info(f"添加术语: {term['original']} -> {term['comparison_text']}")
+                                    # logging.info(f"添加术语: {term['original']} -> {term['comparison_text']}")
                     else:
                         logging.warning(f"术语库 {comp_id} 未找到术语数据或查询结果为空")
                         
@@ -168,17 +168,11 @@ def get_comparison(comparison_id):
                     logging.error(f"查询术语库 {comp_id} 时发生异常: {str(e)}")
                     continue
             
-            # 拼接所有术语
+            # 返回原始术语字典，供后续筛选使用
             if all_terms:
-                combined_terms = []
-                for source, target in all_terms.items():
-                    combined_terms.append(f"{source}: {target}")
-                result = '\n'.join(combined_terms)
-                # 添加日志，显示最终传入模型的术语表
                 logging.info(f"任务使用术语表ID: {comparison_id}")
-                logging.info(f"术语表内容: {list(all_terms.items())}")
-                logging.info(f"总共合并了 {len(all_terms)} 条术语")
-                return result
+                # logging.info(f"总共合并了 {len(all_terms)} 条术语")
+                return all_terms
             else:
                 logging.warning(f"任务术语表ID {comparison_id} 未找到内容")
                 return None
@@ -188,6 +182,45 @@ def get_comparison(comparison_id):
     else:
         logging.info("任务未使用术语库")
         return None
+
+def get_filtered_terms_for_text(text, comparison_id, max_terms=50):
+    """
+    根据文本内容获取筛选后的术语库
+    
+    Args:
+        text: 要翻译的文本
+        comparison_id: 术语库ID
+        max_terms: 最大术语数量
+        
+    Returns:
+        str: 筛选后的术语库字符串，格式与原有逻辑兼容
+    """
+    # 获取原始术语库
+    all_terms = get_comparison(comparison_id)
+    
+    if not all_terms:
+        return None
+    
+    # 导入术语筛选模块
+    from .term_filter import optimize_terms_for_api
+    
+    # 筛选相关术语
+    filtered_terms = optimize_terms_for_api(text, all_terms, max_terms)
+    
+    if not filtered_terms:
+        logging.info("没有找到相关术语")
+        return None
+    
+    # 转换为原有格式（字符串）
+    combined_terms = []
+    for term in filtered_terms:
+        combined_terms.append(f"{term['source']}: {term['target']}")
+    
+    result = '\n'.join(combined_terms)
+    
+    # logging.info(f"术语筛选完成: {len(all_terms)} -> {len(filtered_terms)} 个术语")
+    
+    return result
 
 if __name__ == '__main__':
     main()

@@ -1,6 +1,6 @@
 from datetime import date
 from sqlalchemy import text, inspect
-from app import db
+from app.extensions import db
 from app.models.prompt import Prompt
 
 

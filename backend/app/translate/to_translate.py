@@ -23,14 +23,394 @@ except ImportError:
         return False, "Qwen模块未找到"
 
 
+def translate_text(trans, text, source_lang="zh", target_lang="en"):
+    """
+    翻译单个文本
+    
+    Args:
+        trans: 翻译配置字典
+        text: 要翻译的文本
+        source_lang: 源语言
+        target_lang: 目标语言
+        
+    Returns:
+        str: 翻译后的文本
+    """
+    try:
+        # 获取翻译配置
+        api_key = trans.get('api_key', '')
+        api_url = trans.get('api_url', '')
+        model = trans.get('model', 'gpt-3.5-turbo')
+        server = trans.get('server', 'openai')
+        app_id = trans.get('app_id', '')
+        app_key = trans.get('app_key', '')
+        
+        # 根据服务器类型选择翻译方法
+        if server == 'baidu':
+            return baidu_translate(
+                text=text,
+                appid=app_id,
+                app_key=app_key,
+                from_lang=source_lang,
+                to_lang=target_lang,
+                use_term_base=False
+            )
+        elif server == 'qwen':
+            # 使用官方文档的语言映射 (映射为英文全拼)
+            LANGUAGE_MAPPING = {
+                # 中文名称到英文全拼
+                '中文': 'Chinese',
+                '简体中文': 'Chinese',
+                '繁体中文': 'Traditional Chinese',
+                '英语': 'English',
+                '英文': 'English',
+                '俄语': 'Russian',
+                '日语': 'Japanese',
+                '韩语': 'Korean',
+                '西班牙语': 'Spanish',
+                '法语': 'French',
+                '葡萄牙语': 'Portuguese',
+                '德语': 'German',
+                '意大利语': 'Italian',
+                '泰语': 'Thai',
+                '越南语': 'Vietnamese',
+                '印度尼西亚语': 'Indonesian',
+                '马来语': 'Malay',
+                '阿拉伯语': 'Arabic',
+                '印地语': 'Hindi',
+                '希伯来语': 'Hebrew',
+                '缅甸语': 'Burmese',
+                '泰米尔语': 'Tamil',
+                '乌尔都语': 'Urdu',
+                '孟加拉语': 'Bengali',
+                '波兰语': 'Polish',
+                '荷兰语': 'Dutch',
+                '罗马尼亚语': 'Romanian',
+                '土耳其语': 'Turkish',
+                '高棉语': 'Khmer',
+                '老挝语': 'Lao',
+                '粤语': 'Cantonese',
+                '捷克语': 'Czech',
+                '希腊语': 'Greek',
+                '瑞典语': 'Swedish',
+                '匈牙利语': 'Hungarian',
+                '丹麦语': 'Danish',
+                '芬兰语': 'Finnish',
+                '乌克兰语': 'Ukrainian',
+                '保加利亚语': 'Bulgarian',
+                '塞尔维亚语': 'Serbian',
+                '泰卢固语': 'Telugu',
+                '南非荷兰语': 'Afrikaans',
+                '亚美尼亚语': 'Armenian',
+                '阿萨姆语': 'Assamese',
+                '阿斯图里亚斯语': 'Asturian',
+                '巴斯克语': 'Basque',
+                '白俄罗斯语': 'Belarusian',
+                '波斯尼亚语': 'Bosnian',
+                '加泰罗尼亚语': 'Catalan',
+                '宿务语': 'Cebuano',
+                '克罗地亚语': 'Croatian',
+                '埃及阿拉伯语': 'Egyptian Arabic',
+                '爱沙尼亚语': 'Estonian',
+                '加利西亚语': 'Galician',
+                '格鲁吉亚语': 'Georgian',
+                '古吉拉特语': 'Gujarati',
+                '冰岛语': 'Icelandic',
+                '爪哇语': 'Javanese',
+                '卡纳达语': 'Kannada',
+                '哈萨克语': 'Kazakh',
+                '拉脱维亚语': 'Latvian',
+                '立陶宛语': 'Lithuanian',
+                '卢森堡语': 'Luxembourgish',
+                '马其顿语': 'Macedonian',
+                '马加希语': 'Maithili',
+                '马耳他语': 'Maltese',
+                '马拉地语': 'Marathi',
+                '美索不达米亚阿拉伯语': 'Mesopotamian Arabic',
+                '摩洛哥阿拉伯语': 'Moroccan Arabic',
+                '内志阿拉伯语': 'Najdi Arabic',
+                '尼泊尔语': 'Nepali',
+                '北阿塞拜疆语': 'North Azerbaijani',
+                '北黎凡特阿拉伯语': 'North Levantine Arabic',
+                '北乌兹别克语': 'Northern Uzbek',
+                '书面语挪威语': 'Norwegian Bokmål',
+                '新挪威语': 'Norwegian Nynorsk',
+                '奥克语': 'Occitan',
+                '奥里亚语': 'Odia',
+                '邦阿西楠语': 'Pangasinan',
+                '西西里语': 'Sicilian',
+                '信德语': 'Sindhi',
+                '僧伽罗语': 'Sinhala',
+                '斯洛伐克语': 'Slovak',
+                '斯洛文尼亚语': 'Slovenian',
+                '南黎凡特阿拉伯语': 'South Levantine Arabic',
+                '斯瓦希里语': 'Swahili',
+                '他加禄语': 'Tagalog',
+                '塔伊兹-亚丁阿拉伯语': 'Ta\'izzi-Adeni Arabic',
+                '托斯克阿尔巴尼亚语': 'Tosk Albanian',
+                '突尼斯阿拉伯语': 'Tunisian Arabic',
+                '威尼斯语': 'Venetian',
+                '瓦莱语': 'Waray',
+                '威尔士语': 'Welsh',
+                '西波斯语': 'Western Persian',
+                # 英文全拼到自身 (确保英文全拼映射到自身)
+                'English': 'English',
+                'Chinese': 'Chinese',
+                'Traditional Chinese': 'Traditional Chinese',
+                'Russian': 'Russian',
+                'Japanese': 'Japanese',
+                'Korean': 'Korean',
+                'Spanish': 'Spanish',
+                'French': 'French',
+                'Portuguese': 'Portuguese',
+                'German': 'German',
+                'Italian': 'Italian',
+                'Thai': 'Thai',
+                'Vietnamese': 'Vietnamese',
+                'Indonesian': 'Indonesian',
+                'Malay': 'Malay',
+                'Arabic': 'Arabic',
+                'Hindi': 'Hindi',
+                'Hebrew': 'Hebrew',
+                'Burmese': 'Burmese',
+                'Tamil': 'Tamil',
+                'Urdu': 'Urdu',
+                'Bengali': 'Bengali',
+                'Polish': 'Polish',
+                'Dutch': 'Dutch',
+                'Romanian': 'Romanian',
+                'Turkish': 'Turkish',
+                'Khmer': 'Khmer',
+                'Lao': 'Lao',
+                'Cantonese': 'Cantonese',
+                'Czech': 'Czech',
+                'Greek': 'Greek',
+                'Swedish': 'Swedish',
+                'Hungarian': 'Hungarian',
+                'Danish': 'Danish',
+                'Finnish': 'Finnish',
+                'Ukrainian': 'Ukrainian',
+                'Bulgarian': 'Bulgarian',
+                'Serbian': 'Serbian',
+                'Telugu': 'Telugu',
+                'Afrikaans': 'Afrikaans',
+                'Armenian': 'Armenian',
+                'Assamese': 'Assamese',
+                'Asturian': 'Asturian',
+                'Basque': 'Basque',
+                'Belarusian': 'Belarusian',
+                'Bosnian': 'Bosnian',
+                'Catalan': 'Catalan',
+                'Cebuano': 'Cebuano',
+                'Croatian': 'Croatian',
+                'Egyptian Arabic': 'Egyptian Arabic',
+                'Estonian': 'Estonian',
+                'Galician': 'Galician',
+                'Georgian': 'Georgian',
+                'Gujarati': 'Gujarati',
+                'Icelandic': 'Icelandic',
+                'Javanese': 'Javanese',
+                'Kannada': 'Kannada',
+                'Kazakh': 'Kazakh',
+                'Latvian': 'Latvian',
+                'Lithuanian': 'Lithuanian',
+                'Luxembourgish': 'Luxembourgish',
+                'Macedonian': 'Macedonian',
+                'Maithili': 'Maithili',
+                'Maltese': 'Maltese',
+                'Marathi': 'Marathi',
+                'Mesopotamian Arabic': 'Mesopotamian Arabic',
+                'Moroccan Arabic': 'Moroccan Arabic',
+                'Najdi Arabic': 'Najdi Arabic',
+                'Nepali': 'Nepali',
+                'North Azerbaijani': 'North Azerbaijani',
+                'North Levantine Arabic': 'North Levantine Arabic',
+                'Northern Uzbek': 'Northern Uzbek',
+                'Norwegian Bokmål': 'Norwegian Bokmål',
+                'Norwegian Nynorsk': 'Norwegian Nynorsk',
+                'Occitan': 'Occitan',
+                'Odia': 'Odia',
+                'Pangasinan': 'Pangasinan',
+                'Sicilian': 'Sicilian',
+                'Sindhi': 'Sindhi',
+                'Sinhala': 'Sinhala',
+                'Slovak': 'Slovak',
+                'Slovenian': 'Slovenian',
+                'South Levantine Arabic': 'South Levantine Arabic',
+                'Swahili': 'Swahili',
+                'Tagalog': 'Tagalog',
+                'Ta\'izzi-Adeni Arabic': 'Ta\'izzi-Adeni Arabic',
+                'Tosk Albanian': 'Tosk Albanian',
+                'Tunisian Arabic': 'Tunisian Arabic',
+                'Venetian': 'Venetian',
+                'Waray': 'Waray',
+                'Welsh': 'Welsh',
+                'Western Persian': 'Western Persian',
+                # 语种编码到英文全拼
+                'zh': 'Chinese',
+                'en': 'English',
+                'ja': 'Japanese',
+                'ko': 'Korean',
+                'fr': 'French',
+                'de': 'German',
+                'es': 'Spanish',
+                'ru': 'Russian',
+                'it': 'Italian',
+                'ar': 'Arabic',
+                'th': 'Thai',
+                'vi': 'Vietnamese',
+                'id': 'Indonesian',
+                'ms': 'Malay',
+                'tl': 'Tagalog',
+                'my': 'Burmese',
+                'km': 'Khmer',
+                'lo': 'Lao',
+                'pt': 'Portuguese',
+                'hi': 'Hindi',
+                'he': 'Hebrew',
+                'ta': 'Tamil',
+                'ur': 'Urdu',
+                'bn': 'Bengali',
+                'pl': 'Polish',
+                'nl': 'Dutch',
+                'ro': 'Romanian',
+                'tr': 'Turkish',
+                'yue': 'Cantonese',
+                'cs': 'Czech',
+                'el': 'Greek',
+                'sv': 'Swedish',
+                'hu': 'Hungarian',
+                'da': 'Danish',
+                'fi': 'Finnish',
+                'uk': 'Ukrainian',
+                'bg': 'Bulgarian',
+                'sr': 'Serbian',
+                'te': 'Telugu',
+                'af': 'Afrikaans',
+                'hy': 'Armenian',
+                'as': 'Assamese',
+                'ast': 'Asturian',
+                'eu': 'Basque',
+                'be': 'Belarusian',
+                'bs': 'Bosnian',
+                'ca': 'Catalan',
+                'ceb': 'Cebuano',
+                'hr': 'Croatian',
+                'arz': 'Egyptian Arabic',
+                'et': 'Estonian',
+                'gl': 'Galician',
+                'ka': 'Georgian',
+                'gu': 'Gujarati',
+                'is': 'Icelandic',
+                'jv': 'Javanese',
+                'kn': 'Kannada',
+                'kk': 'Kazakh',
+                'lv': 'Latvian',
+                'lt': 'Lithuanian',
+                'lb': 'Luxembourgish',
+                'mk': 'Macedonian',
+                'mai': 'Maithili',
+                'mt': 'Maltese',
+                'mr': 'Marathi',
+                'acm': 'Mesopotamian Arabic',
+                'ary': 'Moroccan Arabic',
+                'ars': 'Najdi Arabic',
+                'ne': 'Nepali',
+                'az': 'North Azerbaijani',
+                'apc': 'North Levantine Arabic',
+                'uz': 'Northern Uzbek',
+                'nb': 'Norwegian Bokmål',
+                'nn': 'Norwegian Nynorsk',
+                'oc': 'Occitan',
+                'or': 'Odia',
+                'pag': 'Pangasinan',
+                'scn': 'Sicilian',
+                'sd': 'Sindhi',
+                'si': 'Sinhala',
+                'sk': 'Slovak',
+                'sl': 'Slovenian',
+                'ajp': 'South Levantine Arabic',
+                'sw': 'Swahili',
+                'acq': 'Ta\'izzi-Adeni Arabic',
+                'sq': 'Tosk Albanian',
+                'aeb': 'Tunisian Arabic',
+                'vec': 'Venetian',
+                'war': 'Waray',
+                'cy': 'Welsh',
+                'fa': 'Western Persian',
+            }
+            
+            # 转换语言代码
+            qwen_source_lang = LANGUAGE_MAPPING.get(source_lang, source_lang)
+            qwen_target_lang = LANGUAGE_MAPPING.get(target_lang, target_lang)
+            
+            # 添加详细的调试日志
+            logging.info(f"🔍 Qwen翻译调试信息:")
+            logging.info(f"  原始源语言: {source_lang}")
+            logging.info(f"  原始目标语言: {target_lang}")
+            logging.info(f"  映射后源语言: {qwen_source_lang}")
+            logging.info(f"  映射后目标语言: {qwen_target_lang}")
+            logging.info(f"  映射是否生效: {qwen_source_lang != source_lang or qwen_target_lang != target_lang}")
+            
+            return qwen_translate(
+                text=text,
+                target_language=qwen_target_lang,
+                source_lang=qwen_source_lang
+            )
+        else:
+            # OpenAI 翻译 (兼容新旧版本)
+            try:
+                import openai
+                
+                # 尝试新版本 API
+                if hasattr(openai, 'OpenAI'):
+                    client = openai.OpenAI(api_key=api_key, base_url=api_url if api_url else None)
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": f"请将以下{source_lang}文本翻译为{target_lang}，只返回翻译结果，不要添加任何解释或标记。"},
+                            {"role": "user", "content": text}
+                        ],
+                        temperature=0.3
+                    )
+                    return response.choices[0].message.content.strip()
+                else:
+                    # 旧版本 API
+                    openai.api_key = api_key
+                    if api_url:
+                        openai.api_base = api_url
+                    
+                    response = openai.ChatCompletion.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": f"请将以下{source_lang}文本翻译为{target_lang}，只返回翻译结果，不要添加任何解释或标记。"},
+                            {"role": "user", "content": text}
+                        ],
+                        temperature=0.3
+                    )
+                    return response.choices[0].message.content.strip()
+            except Exception as e:
+                logging.error(f"OpenAI 翻译失败: {e}")
+                # 如果 OpenAI 失败，尝试使用 Qwen 作为备用
+                try:
+                    return qwen_translate(
+                        text=text,
+                        target_language=target_lang,
+                        source_lang=source_lang
+                    )
+                except:
+                    return text  # 最后返回原文
+            
+    except Exception as e:
+        logging.error(f"翻译失败: {e}")
+        return text  # 失败时返回原文
+
+
 def get(trans, event, texts, index):
     if event.is_set():
         exit(0)
-    threads = trans['threads']
-    if threads is None or threads == "" or int(threads) < 0:
-        max_threads = 10
-    else:
-        max_threads = int(threads)
+    # 硬编码线程数为30，忽略前端传入的配置
+    max_threads = 30
     translate_id = trans['id']
     target_lang = trans['lang']
     
@@ -152,55 +532,86 @@ def get(trans, event, texts, index):
             # 获取术语库内容并转换为tm_list格式（仅当使用千问模型且有术语库时）
             tm_list = None
             if model == 'qwen-mt-plus' and comparison_id:
-                # 支持多个术语库ID，逗号分隔
-                comparison_ids = [int(id.strip()) for id in str(comparison_id).split(',') if id.strip().isdigit()]
-                
-                if comparison_ids:
-                    all_terms = {}  # 用于去重的字典
-                    
-                    for comp_id in comparison_ids:
-                        try:
-                            # 从 comparison_sub 表获取术语数据，使用get_all而不是execute
-                            terms = db.get_all("select original, comparison_text from comparison_sub where comparison_sub_id=%s", comp_id)
-                            
-                            if terms and isinstance(terms, list) and len(terms) > 0:
-                                # 解析术语库内容
-                                for term in terms:
-                                    if term and isinstance(term, dict) and term.get('original') and term.get('comparison_text'):
-                                        source = term['original'].strip()
-                                        target = term['comparison_text'].strip()
-                                        # 去重：如果原文已存在，跳过（以第一个为准）
-                                        if source not in all_terms:
-                                            all_terms[source] = target
-                            else:
-                                logging.warning(f"术语库 {comp_id} 未找到术语数据")
-                                
-                        except Exception as e:
-                            logging.error(f"查询术语库 {comp_id} 时发生异常: {str(e)}")
-                            continue
-                    
-                    # 转换为tm_list格式
-                    if all_terms:
-                        tm_list = []
-                        for source, target in all_terms.items():
+                # 检查是否有预筛选的术语库（来自OkapiTranslationService）
+                filtered_terms = trans.get('filtered_terms')
+                if filtered_terms:
+                    # 使用预筛选的术语库
+                    # logging.info(f"使用预筛选的术语库，长度: {len(filtered_terms)}")
+                    tm_list = []
+                    for line in filtered_terms.split('\n'):
+                        if ':' in line:
+                            source, target = line.split(':', 1)
                             tm_list.append({
-                                "source": source,
-                                "target": target
+                                "source": source.strip(),
+                                "target": target.strip()
                             })
-                
-                    logging.info("千问的术语库")
-                    # 只打印前10条，避免日志过长
-                    if tm_list and len(tm_list) > 10:
-                        logging.info(f"tm_list(前10条): {tm_list[:10]} ... 共{len(tm_list)}条")
-                    else:
-                        logging.info(f"tm_list: {tm_list}")
-                    # 添加日志，显示最终传入模型的术语表
-                    if all_terms:
-                        logging.info(f"任务使用术语表ID: {comparison_id}")
-                    else:
-                        logging.warning(f"任务 {translate_id} 术语表ID {comparison_id} 未找到内容")
+                    # logging.info(f"预筛选术语库处理完成，共 {len(tm_list)} 条术语")
                 else:
-                    logging.warning(f"任务 {translate_id} 术语表ID格式无效: {comparison_id}")
+                    # 没有预筛选术语库，使用原有的筛选逻辑
+                    try:
+                        # 导入术语筛选模块
+                        from .main import get_filtered_terms_for_text
+                        
+                        # 使用术语筛选功能，根据当前文本内容筛选相关术语
+                        filtered_terms_str = get_filtered_terms_for_text(old_text, comparison_id, max_terms=50)
+                        
+                        if filtered_terms_str:
+                            # 将筛选后的术语字符串转换为tm_list格式
+                            tm_list = []
+                            for line in filtered_terms_str.split('\n'):
+                                if ':' in line:
+                                    source, target = line.split(':', 1)
+                                    tm_list.append({
+                                        "source": source.strip(),
+                                        "target": target.strip()
+                                    })
+                            
+                            # logging.info(f"术语筛选完成: {len(tm_list)} 个术语")
+                        else:
+                            logging.info("没有找到相关术语")
+                            
+                    except Exception as e:
+                        logging.error(f"术语筛选失败: {str(e)}")
+                        # 如果筛选失败，回退到原始逻辑
+                        logging.info("回退到原始术语库处理逻辑")
+                        
+                        # 支持多个术语库ID，逗号分隔
+                        comparison_ids = [int(id.strip()) for id in str(comparison_id).split(',') if id.strip().isdigit()]
+                        
+                        if comparison_ids:
+                            all_terms = {}  # 用于去重的字典
+                            
+                            for comp_id in comparison_ids:
+                                try:
+                                    # 从 comparison_sub 表获取术语数据
+                                    terms = db.get_all("select original, comparison_text from comparison_sub where comparison_sub_id=%s", comp_id)
+                                    
+                                    if terms and isinstance(terms, list) and len(terms) > 0:
+                                        for term in terms:
+                                            if term and isinstance(term, dict) and term.get('original') and term.get('comparison_text'):
+                                                source = term['original'].strip()
+                                                target = term['comparison_text'].strip()
+                                                if source not in all_terms:
+                                                    all_terms[source] = target
+                                    else:
+                                        logging.warning(f"术语库 {comp_id} 未找到术语数据")
+                                        
+                                except Exception as e:
+                                    logging.error(f"查询术语库 {comp_id} 时发生异常: {str(e)}")
+                                    continue
+                            
+                            # 转换为tm_list格式
+                            if all_terms:
+                                tm_list = []
+                                for source, target in all_terms.items():
+                                    tm_list.append({
+                                        "source": source,
+                                        "target": target
+                                    })
+                                
+                                # logging.info(f"原始术语库处理完成，共 {len(tm_list)} 条术语")
+                        else:
+                            logging.warning(f"任务 {translate_id} 术语表ID格式无效: {comparison_id}")
             else:
                 logging.info(f"任务 {translate_id} 未使用术语库，model: {model}, comparison_id: {comparison_id}")
 
@@ -338,11 +749,8 @@ def get(trans, event, texts, index):
 def get11(trans, event, texts, index):
     if event.is_set():
         exit(0)
-    threads = trans['threads']
-    if threads is None or threads == "" or int(threads) < 0:
-        max_threads = 10
-    else:
-        max_threads = int(threads)
+    # 硬编码线程数为30，忽略前端传入的配置
+    max_threads = 30
     # mredis=rediscon.get_conn()
     # threading_num=get_threading_num(mredis)
     # while threading_num>=max_threads:

@@ -4,7 +4,7 @@ from flask_restful import Resource
 from flask_jwt_extended import create_access_token
 from datetime import datetime, timedelta
 
-from app import db
+from app.extensions import db
 from app.models import  Customer, SendCode
 from app.utils.security import hash_password, verify_password
 from app.utils.response import APIResponse

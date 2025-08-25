@@ -12,43 +12,43 @@ dashscope_key = os.environ.get('DASH_SCOPE_KEY', '')
 # 请求频率控制 - 线程安全版本
 import threading
 
-# 暂时降为600，最大840
+# 已解锁到1000次/分钟
 class QwenRateLimiter:
     def __init__(self):
-        self.request_times = []  # 记录最近840次请求的时间戳
+        self.request_times = []  # 记录最近1000次请求的时间戳
         self.last_request_time = 0  # 上次请求时间
         self.lock = threading.Lock()
     
     def wait_for_rate_limit(self):
-        """保证每分钟持续840次请求"""
+        """保证每分钟持续1000次请求"""
         with self.lock:
             current_time = time.time()
             
             # 清理超过60秒的记录
             self.request_times = [t for t in self.request_times if current_time - t < 60]
             
-            # 计算理论上的最小间隔（60秒/840次 = 0.071秒/次）
-            # min_interval = 0.071
-            min_interval = 0.1
+            # 计算理论上的最小间隔（60秒/1000次 = 0.06秒/次）
+            min_interval = 0.06
+            # min_interval = 0.1
 
             
-            # 如果最近60秒内已经有840次请求，需要等待
-            if len(self.request_times) >= 600:
+            # 如果最近60秒内已经有1000次请求，需要等待
+            if len(self.request_times) >= 1000:
                 # 等待到最早请求过期
                 wait_time = self.request_times[0] + 60 - current_time
                 if wait_time > 0:
-                    logging.warning(f"达到每分钟840次限制，等待 {wait_time:.1f} 秒...")
+                    logging.warning(f"达到每分钟1000次限制，等待 {wait_time:.1f} 秒...")
                     time.sleep(wait_time)
                     # 重新清理过期记录
                     current_time = time.time()
                     self.request_times = [t for t in self.request_times if current_time - t < 60]
             
-            # 动态调整间隔，确保持续840次/分钟
+            # 动态调整间隔，确保持续1000次/分钟
             if len(self.request_times) > 0:
                 # 计算当前窗口的剩余时间
                 window_start = self.request_times[0]
                 remaining_time = 60 - (current_time - window_start)
-                remaining_requests = 600 - len(self.request_times)
+                remaining_requests = 1000 - len(self.request_times)
                 
                 if remaining_requests > 0 and remaining_time > 0:
                     # 计算理论间隔
@@ -77,11 +77,11 @@ class QwenRateLimiter:
                 elapsed = current_time - self.request_times[0]
                 if elapsed > 0:
                     current_rate = len(self.request_times) / (elapsed / 60)
-                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/600, 当前速率: {current_rate:.1f}次/分钟")
+                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/1000, 当前速率: {current_rate:.1f}次/分钟")
                 else:
-                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/600")
+                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/1000")
             else:
-                logging.debug(f"Qwen请求计数: {len(self.request_times)}/600")
+                logging.debug(f"Qwen请求计数: {len(self.request_times)}/1000")
     
     def get_current_rate(self):
         """获取当前请求速率（次/分钟）"""
@@ -98,7 +98,7 @@ class QwenRateLimiter:
 qwen_rate_limiter = QwenRateLimiter()
 
 def wait_for_rate_limit():
-    """等待请求间隔，确保不超过每分钟840次限制"""
+    """等待请求间隔，确保不超过每分钟1000次限制"""
     qwen_rate_limiter.wait_for_rate_limit()
 
 def get_current_request_rate():
@@ -156,7 +156,7 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 timeout=60.0  # 增加超时时间
             ) 
             
-            # 设置翻译参数
+            # 设置翻译参数 - 根据官方文档格式
             translation_options = {
                 "source_lang": source_lang,
                 "target_lang": target_language
@@ -164,14 +164,22 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             
             # 添加可选参数
             if tm_list is not None:
-                translation_options["tm_list"] = tm_list
+                translation_options["terms"] = tm_list
                 logging.info(f"📚 使用术语库: {len(tm_list)} 个术语")
-            if terms is not None:
+            elif terms is not None:
                 translation_options["terms"] = terms
-            if domains is not None:
-                translation_options["domains"] = domains
+                logging.info(f"📚 使用自定义术语: {len(terms)} 个术语")
+            # 移除默认的占位符术语库配置，避免翻译服务处理错误
+            # if domains is not None:
+            #     translation_options["domains"] = domains
                 
-            logging.debug(f"🔧 翻译参数: {translation_options}")
+            # 添加详细的请求参数日志
+            logging.info(f"🔧 Qwen翻译请求参数:")
+            logging.info(f"  model: qwen-mt-plus")
+            logging.info(f"  source_lang: {source_lang}")
+            logging.info(f"  target_lang: {target_language}")
+            logging.info(f"  translation_options: {translation_options}")
+            logging.info(f"  text: {text[:100]}...")
             
             # 等待请求间隔
             wait_for_rate_limit()
@@ -191,6 +199,11 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             translated_text = completion.choices[0].message.content
             if not translated_text or not translated_text.strip():
                 raise Exception("翻译结果为空")
+            
+            # 检查翻译结果质量（暂时注释掉）
+            # if _is_translation_result_abnormal(translated_text):
+            #     logging.warning(f"⚠️  检测到异常翻译结果: {translated_text[:100]}...")
+            #     raise Exception("翻译结果异常，可能包含重复字符或错误内容")
                 
             logging.info(f"✅ 翻译成功: {translated_text[:100]}...")
             return translated_text
@@ -233,6 +246,39 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
     logging.error(f"💥 所有重试都失败了，返回原文")
     return text
 
+def _is_translation_result_abnormal(translated_text: str) -> bool:
+    """
+    检查翻译结果是否异常
+    
+    Args:
+        translated_text: 翻译后的文本
+        
+    Returns:
+        bool: 是否异常
+    """
+    if not translated_text:
+        return True
+    
+    # 检查重复字符模式（如"方案方案方案方案"）
+    import re
+    
+    # 检查是否有连续重复的字符或词组
+    # 匹配模式：同一个字符或词组连续出现4次以上
+    repeated_pattern = re.compile(r'(.{1,10})\1{3,}')
+    if repeated_pattern.search(translated_text):
+        return True
+    
+    # 检查是否包含大量特殊字符
+    special_char_ratio = len(re.findall(r'[♂☼⚡]', translated_text)) / len(translated_text) if translated_text else 0
+    if special_char_ratio > 0.1:  # 如果特殊字符占比超过10%
+        return True
+    
+    # 检查是否全是重复的标点符号
+    if re.match(r'^[，。！？、；：""''（）【】]+$', translated_text.strip()):
+        return True
+    
+    return False
+
 def check_qwen_availability():
     """
     检查Qwen翻译服务是否可用
@@ -251,7 +297,7 @@ def check_qwen_availability():
         completion = client.chat.completions.create(
             model="qwen-mt-plus",
             messages=[{"role": "user", "content": "Hello"}],
-            extra_body={"translation_options": {"source_lang": "auto", "target_lang": "Chinese"}}
+            extra_body={"translation_options": {"source_lang": "auto", "target_lang": "zh"}}
         )
         
         return True, "Qwen翻译服务正常"

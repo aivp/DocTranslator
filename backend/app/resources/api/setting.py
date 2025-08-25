@@ -1,5 +1,5 @@
 from flask_restful import Resource
-from app import Setting
+from app.models.setting import Setting
 from app.utils.response import APIResponse
 from flask import current_app
 

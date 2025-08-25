@@ -1,7 +1,7 @@
 # 后台管理用户模型 (对应user表)
 from datetime import datetime
 
-from app import db
+from app.extensions import db
 
 
 class User(db.Model):
