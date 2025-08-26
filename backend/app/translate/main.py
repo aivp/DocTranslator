@@ -195,6 +195,9 @@ def get_filtered_terms_for_text(text, comparison_id, max_terms=50):
     Returns:
         str: 筛选后的术语库字符串，格式与原有逻辑兼容
     """
+    # 记录开始时间
+    start_time = time.time()
+    
     # 获取原始术语库
     all_terms = get_comparison(comparison_id)
     
@@ -218,7 +221,10 @@ def get_filtered_terms_for_text(text, comparison_id, max_terms=50):
     
     result = '\n'.join(combined_terms)
     
-    # logging.info(f"术语筛选完成: {len(all_terms)} -> {len(filtered_terms)} 个术语")
+    # 计算总用时
+    end_time = time.time()
+    duration = end_time - start_time
+    logging.info(f"📚 术语库筛选总用时: {duration:.3f}秒, 原始术语数: {len(all_terms)}, 筛选后: {len(filtered_terms)}")
     
     return result
 

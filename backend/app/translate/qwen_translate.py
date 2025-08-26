@@ -138,6 +138,8 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
         logging.error("目标语言未指定")
         return text
     
+    # 记录开始时间
+    start_time = time.time()
     logging.info(f"🚀 开始Qwen翻译: {text[:100]}... -> {target_language}")
     
     for attempt in range(max_retries):
@@ -184,6 +186,9 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             # 等待请求间隔
             wait_for_rate_limit()
             
+            # 记录API调用开始时间
+            api_start_time = time.time()
+            
             # 调用API
             logging.info(f"📡 发送API请求...")
             completion = client.chat.completions.create(
@@ -204,8 +209,14 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             # if _is_translation_result_abnormal(translated_text):
             #     logging.warning(f"⚠️  检测到异常翻译结果: {translated_text[:100]}...")
             #     raise Exception("翻译结果异常，可能包含重复字符或错误内容")
-                
+            
+            # 计算API调用用时
+            api_end_time = time.time()
+            api_duration = api_end_time - api_start_time
+            total_duration = api_end_time - start_time
+            
             logging.info(f"✅ 翻译成功: {translated_text[:100]}...")
+            logging.info(f"⏱️ API调用用时: {api_duration:.3f}秒, 总用时: {total_duration:.3f}秒")
             return translated_text
             
         except Exception as e:

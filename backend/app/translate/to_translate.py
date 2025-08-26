@@ -547,34 +547,72 @@ def get(trans, event, texts, index):
                             })
                     # logging.info(f"预筛选术语库处理完成，共 {len(tm_list)} 条术语")
                 else:
-                    # 没有预筛选术语库，使用原有的筛选逻辑
-                    try:
-                        # 导入术语筛选模块
-                        from .main import get_filtered_terms_for_text
-                        
-                        # 使用术语筛选功能，根据当前文本内容筛选相关术语
-                        filtered_terms_str = get_filtered_terms_for_text(old_text, comparison_id, max_terms=50)
-                        
-                        if filtered_terms_str:
-                            # 将筛选后的术语字符串转换为tm_list格式
-                            tm_list = []
-                            for line in filtered_terms_str.split('\n'):
-                                if ':' in line:
-                                    source, target = line.split(':', 1)
+                    # 检查是否有预加载的术语库
+                    preloaded_terms = trans.get('preloaded_terms')
+                    if preloaded_terms:
+                        # 使用预加载的术语库进行筛选
+                        try:
+                            from .term_filter import optimize_terms_for_api
+                            
+                            # 记录术语库处理开始时间
+                            term_start_time = time.time()
+                            filtered_terms = optimize_terms_for_api(old_text, preloaded_terms, max_terms=50)
+                            term_end_time = time.time()
+                            term_duration = term_end_time - term_start_time
+                            
+                            logging.info(f"📚 术语库筛选用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms) if filtered_terms else 0}")
+                            
+                            if filtered_terms:
+                                # 转换为tm_list格式
+                                tm_list = []
+                                for term in filtered_terms:
                                     tm_list.append({
-                                        "source": source.strip(),
-                                        "target": target.strip()
+                                        "source": term['source'],
+                                        "target": term['target']
                                     })
+                            else:
+                                logging.info("没有找到相关术语")
+                                tm_list = []
+                                
+                        except Exception as e:
+                            logging.error(f"预加载术语库筛选失败: {str(e)}")
+                            tm_list = []
+                    else:
+                        # 没有预加载的术语库，使用原有的筛选逻辑
+                        try:
+                            # 导入术语筛选模块
+                            from .main import get_filtered_terms_for_text
                             
-                            # logging.info(f"术语筛选完成: {len(tm_list)} 个术语")
-                        else:
-                            logging.info("没有找到相关术语")
+                            # 使用术语筛选功能，根据当前文本内容筛选相关术语
+                            # 记录术语库处理开始时间
+                            term_start_time = time.time()
+                            filtered_terms_str = get_filtered_terms_for_text(old_text, comparison_id, max_terms=50)
+                            term_end_time = time.time()
+                            term_duration = term_end_time - term_start_time
                             
-                    except Exception as e:
-                        logging.error(f"术语筛选失败: {str(e)}")
-                        # 如果筛选失败，回退到原始逻辑
-                        logging.info("回退到原始术语库处理逻辑")
-                        
+                            logging.info(f"📚 术语库处理用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms_str.split(chr(10))) if filtered_terms_str else 0}")
+                            
+                            if filtered_terms_str:
+                                # 将筛选后的术语字符串转换为tm_list格式
+                                tm_list = []
+                                for line in filtered_terms_str.split('\n'):
+                                    if ':' in line:
+                                        source, target = line.split(':', 1)
+                                        tm_list.append({
+                                            "source": source.strip(),
+                                            "target": target.strip()
+                                        })
+                                
+                                # logging.info(f"术语筛选完成: {len(tm_list)} 个术语")
+                            else:
+                                logging.info("没有找到相关术语")
+                                tm_list = []
+                                
+                        except Exception as e:
+                            logging.error(f"术语筛选失败: {str(e)}")
+                            # 如果筛选失败，回退到原始逻辑
+                            logging.info("回退到原始术语库处理逻辑")
+                            
                         # 支持多个术语库ID，逗号分隔
                         comparison_ids = [int(id.strip()) for id in str(comparison_id).split(',') if id.strip().isdigit()]
                         

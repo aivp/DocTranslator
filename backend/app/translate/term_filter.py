@@ -9,6 +9,7 @@
 """
 
 import re
+import time
 import logging
 from typing import Dict, List, Tuple
 from difflib import SequenceMatcher
@@ -208,6 +209,9 @@ def optimize_terms_for_api(text: str, all_terms: Dict[str, str], max_terms: int 
     Returns:
         List[Dict]: 优化后的术语列表，格式与Qwen API兼容
     """
+    # 记录开始时间
+    start_time = time.time()
+    
     # 筛选相关术语
     relevant_terms = filter_relevant_terms(text, all_terms, max_terms)
     
@@ -236,7 +240,18 @@ def optimize_terms_for_api(text: str, all_terms: Dict[str, str], max_terms: int 
                 break
         
         # logger.info(f"术语库优化完成: {len(optimized_terms)}个术语")
+        
+        # 计算总用时
+        end_time = time.time()
+        duration = end_time - start_time
+        logging.info(f"📚 术语筛选算法用时: {duration:.3f}秒, 筛选结果: {len(optimized_terms)}个术语")
+        
         return optimized_terms
+    
+    # 计算总用时
+    end_time = time.time()
+    duration = end_time - start_time
+    logging.info(f"📚 术语筛选算法用时: {duration:.3f}秒, 筛选结果: {len(relevant_terms)}个术语")
     
     return relevant_terms
 

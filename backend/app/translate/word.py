@@ -142,6 +142,19 @@ def start_with_okapi(trans, start_time):
             trans['server'] = 'qwen'
             logger.info("✅ 设置翻译服务为 Qwen")
         
+        # 预加载术语库
+        comparison_id = trans.get('comparison_id')
+        if comparison_id:
+            logger.info(f"📚 开始预加载术语库: {comparison_id}")
+            from .main import get_comparison
+            preloaded_terms = get_comparison(comparison_id)
+            if preloaded_terms:
+                logger.info(f"📚 术语库预加载成功: {len(preloaded_terms)} 个术语")
+                # 将预加载的术语库添加到trans中
+                trans['preloaded_terms'] = preloaded_terms
+            else:
+                logger.warning(f"📚 术语库预加载失败: {comparison_id}")
+        
         # 创建 Okapi 翻译器
         translator = OkapiWordTranslator()
         logger.info("✅ Okapi 翻译器创建成功")
@@ -170,9 +183,24 @@ def start_with_okapi(trans, start_time):
                         comparison_id = self.trans.get('comparison_id')
                         if comparison_id:
                             logger.debug(f"文本 {index} 使用术语库筛选: {comparison_id}")
-                            # 使用术语筛选功能
-                            from .main import get_filtered_terms_for_text
-                            filtered_terms = get_filtered_terms_for_text(text, comparison_id, max_terms=50)
+                            
+                            # 使用预加载的术语库进行筛选
+                            preloaded_terms = self.trans.get('preloaded_terms')
+                            if preloaded_terms:
+                                # 记录术语库处理开始时间
+                                term_start_time = time.time()
+                                from .term_filter import optimize_terms_for_api
+                                filtered_terms = optimize_terms_for_api(text, preloaded_terms, max_terms=50)
+                                term_end_time = time.time()
+                                term_duration = term_end_time - term_start_time
+                                
+                                logger.info(f"📚 术语库筛选用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms) if filtered_terms else 0}")
+                            else:
+                                # 如果没有预加载的术语库，回退到原来的方法
+                                logger.warning(f"文本 {index} 没有预加载的术语库，回退到数据库查询")
+                                from .main import get_filtered_terms_for_text
+                                filtered_terms = get_filtered_terms_for_text(text, comparison_id, max_terms=50)
+                            
                             if filtered_terms:
                                 logger.debug(f"文本 {index} 使用术语库")
                                 # 创建临时翻译配置，包含筛选后的术语库
