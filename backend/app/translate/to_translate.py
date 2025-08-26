@@ -23,7 +23,7 @@ except ImportError:
         return False, "Qwen模块未找到"
 
 
-def translate_text(trans, text, source_lang="zh", target_lang="en"):
+def translate_text(trans, text, source_lang="auto", target_lang="en"):
     """
     翻译单个文本
     
@@ -355,7 +355,7 @@ def translate_text(trans, text, source_lang="zh", target_lang="en"):
             return qwen_translate(
                 text=text,
                 target_language=qwen_target_lang,
-                source_lang=qwen_source_lang
+                source_lang="auto"
             )
         else:
             # OpenAI 翻译 (兼容新旧版本)
@@ -396,7 +396,7 @@ def translate_text(trans, text, source_lang="zh", target_lang="en"):
                     return qwen_translate(
                         text=text,
                         target_language=target_lang,
-                        source_lang=source_lang
+                        source_lang="auto"
                     )
                 except:
                     return text  # 最后返回原文
@@ -672,7 +672,7 @@ def get(trans, event, texts, index):
 
                 elif extension == ".md":
                     if model == 'qwen-mt-plus':
-                        content = qwen_translate(text['text'], target_lang, tm_list=tm_list)
+                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list)
                     else:
                         content = req(text['text'], target_lang, model, prompt, True)
                 else:
@@ -680,13 +680,13 @@ def get(trans, event, texts, index):
                     if 'context_text' in text and text.get('context_type') == 'body':
                         # 正文段落：使用带上下文的文本
                         if model == 'qwen-mt-plus':
-                            content = qwen_translate(text['text'], target_lang, tm_list=tm_list)
+                            content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list)
                         else:
                             content = req(text['context_text'], target_lang, model, prompt, False)
                     else:
                         # 其他内容：使用原始文本
                         if model == 'qwen-mt-plus':
-                            content = qwen_translate(text['text'], target_lang, tm_list=tm_list)
+                            content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list)
                         else:
                             content = req(text['text'], target_lang, model, prompt, False)
                     # print("content", text['content'])

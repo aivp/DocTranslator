@@ -241,17 +241,17 @@ def start_with_okapi(trans, start_time):
                                 temp_trans = self.trans.copy()
                                 temp_trans['filtered_terms'] = filtered_terms
                                 translated = to_translate.translate_text(
-                                    temp_trans, text, source_lang, target_lang
+                                    temp_trans, text, "auto", target_lang
                                 )
                             else:
                                 logger.debug(f"文本 {index} 没有找到相关术语")
                                 translated = to_translate.translate_text(
-                                    self.trans, text, source_lang, target_lang
+                                    self.trans, text, "auto", target_lang
                                 )
                         else:
                             logger.debug(f"文本 {index} 未使用术语库")
                             translated = to_translate.translate_text(
-                                self.trans, text, source_lang, target_lang
+                                self.trans, text, "auto", target_lang
                             )
                         
                         logger.debug(f"文本 {index} 翻译完成: {text[:50]}... -> {translated[:50]}...")
@@ -393,7 +393,7 @@ def start_with_okapi(trans, start_time):
             return language_mapping.get(lang_name.strip(), lang_name.strip())
         
         # 获取并映射语言
-        source_lang = map_language_to_qwen_format(trans.get('source_lang', ''))
+        source_lang = "auto"  # 写死为auto，让API自动检测源语言
         target_lang = map_language_to_qwen_format(trans.get('target_lang', '英语'))
         
         logger.info(f"🔍 语言映射调试:")
