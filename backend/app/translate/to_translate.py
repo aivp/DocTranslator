@@ -779,7 +779,10 @@ def get(trans, event, texts, index):
     texts[index] = text
     # print(text)
     if not event.is_set():
-        process(texts, translate_id)
+        # 对于Word文档翻译，不调用process函数，因为Word翻译有自己的进度更新机制
+        extension = trans.get('extension', '').lower()
+        if extension not in ['.docx', '.doc']:
+            process(texts, translate_id)
     # set_threading_num(mredis)
     return True  # 返回结果而不是exit(0)
 

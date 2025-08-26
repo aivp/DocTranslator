@@ -209,7 +209,7 @@ import Filing from '@/components/filing.vue'
 import RetryIcon from '@/components/icons/RetryIcon.vue'
 import DeleteIcon from '../../components/icons/DeleteIcon.vue'
 import DownloadIcon from '../../components/icons/DownloadIcon.vue'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 const API_URL = import.meta.env.VITE_API_URL
 import {
@@ -260,6 +260,11 @@ const storagePercentage = ref(0.0)
 const editionInfo = ref(false)
 //翻译累积数量
 const transCount = ref(0)
+
+// 自动进度更新相关变量
+const autoRefreshInterval = ref(null)
+const isPageVisible = ref(true)
+const refreshInterval = 5000 // 5秒刷新一次
 
 const uploadRef = ref(null)
 
@@ -1086,6 +1091,20 @@ async function getTranslatesData(page, uuid) {
       } else {
         no_data.value = true
       }
+      
+      // 检查是否需要启动自动进度更新
+      const hasProcessingTasks = translatesData.value.some(item => 
+        item.status === 'process' || item.status === 'none'
+      )
+      
+      if (hasProcessingTasks && !autoRefreshInterval.value) {
+        console.log('🚀 检测到翻译任务，启动自动进度更新')
+        startAutoRefresh()
+      } else if (!hasProcessingTasks && autoRefreshInterval.value) {
+        console.log('✅ 所有翻译任务完成，停止自动进度更新')
+        stopAutoRefresh()
+      }
+      
       // 切换状态
       isLoadingData.value = false
     }
@@ -1094,6 +1113,54 @@ async function getTranslatesData(page, uuid) {
   isLoadingData.value = false
   getStorageInfo()
   getCount()
+}
+
+// 自动进度更新函数
+function startAutoRefresh() {
+  // 清除现有定时器
+  if (autoRefreshInterval.value) {
+    clearInterval(autoRefreshInterval.value)
+  }
+  
+  // 启动新的定时器
+  autoRefreshInterval.value = setInterval(() => {
+    // 只在页面可见且有翻译任务时刷新
+    if (isPageVisible.value && translatesData.value.length > 0) {
+      // 检查是否有正在进行的翻译任务
+      const hasProcessingTasks = translatesData.value.some(item => 
+        item.status === 'process' || item.status === 'none'
+      )
+      
+      if (hasProcessingTasks) {
+        console.log('🔄 自动刷新翻译进度...')
+        getTranslatesData(1)
+      }
+    }
+  }, refreshInterval)
+}
+
+// 停止自动进度更新
+function stopAutoRefresh() {
+  if (autoRefreshInterval.value) {
+    clearInterval(autoRefreshInterval.value)
+    autoRefreshInterval.value = null
+  }
+}
+
+// 页面可见性变化处理
+function handleVisibilityChange() {
+  isPageVisible.value = !document.hidden
+  if (isPageVisible.value) {
+    // 页面变为可见时，立即刷新一次
+    if (translatesData.value.length > 0) {
+      getTranslatesData(1)
+    }
+    // 重新启动自动刷新
+    startAutoRefresh()
+  } else {
+    // 页面不可见时，停止自动刷新以节省资源
+    stopAutoRefresh()
+  }
 }
 
 //获取存储空间等信息的方法
@@ -1216,6 +1283,7 @@ async function downAllTransFile() {
     ElMessage.error('文件下载失败，请稍后重试')
   }
 }
+
 onMounted(() => {
   if (userStore.token) {
     getTranslatesData(1)
@@ -1226,7 +1294,21 @@ onMounted(() => {
     console.log('页面初始化 - 术语库:', translateStore.aiServer.comparison_id)
     console.log('页面初始化 - 目标语言:', translateStore.aiServer.lang)
     console.log('页面初始化 - 表单数据:', form.value)
+    
+    // 启动自动进度更新
+    startAutoRefresh()
+    
+    // 监听页面可见性变化
+    document.addEventListener('visibilitychange', handleVisibilityChange)
   }
+})
+
+onUnmounted(() => {
+  // 清理定时器
+  stopAutoRefresh()
+  
+  // 移除事件监听器
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 <style scoped lang="scss">

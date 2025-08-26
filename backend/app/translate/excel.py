@@ -28,6 +28,41 @@ def start(trans):
     max_run=max_threads if len(texts)>max_threads else len(texts)
     before_active_count=threading.activeCount()
     event=threading.Event()
+    
+    # 进度更新相关变量
+    completed_count = 0
+    total_count = len(texts)
+    progress_lock = threading.Lock()
+    
+    def update_progress():
+        """更新翻译进度"""
+        nonlocal completed_count
+        with progress_lock:
+            completed_count += 1
+            progress_percentage = min((completed_count / total_count) * 100, 100.0)
+            print(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+            
+            # 更新数据库进度
+            try:
+                from .to_translate import db
+                db.execute("update translate set process=%s where id=%s", 
+                         str(format(progress_percentage, '.1f')), 
+                         trans['id'])
+                
+                # 如果进度达到100%，立即更新状态为已完成
+                if progress_percentage >= 100.0:
+                    from datetime import datetime
+                    import pytz
+                    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
+                    db.execute(
+                        "update translate set status='done',end_at=%s,process=100 where id=%s",
+                        end_time, trans['id']
+                    )
+                    print("✅ 翻译完成，状态已更新为已完成")
+                    
+            except Exception as e:
+                print(f"更新进度失败: {str(e)}")
+    
     while run_index<=len(texts)-1:
         if threading.activeCount()<max_run+before_active_count:
             if not event.is_set():
@@ -37,11 +72,46 @@ def start(trans):
             else:
                 return False
     
+    # 等待翻译完成，并监控进度
+    last_completed_count = 0
     while True:
         complete=True
+        current_completed = 0
         for text in texts:
             if not text['complete']:
                 complete=False
+            else:
+                current_completed += 1
+        
+        # 检查是否有新的文本完成
+        if current_completed > last_completed_count:
+            completed_count = current_completed
+            progress_percentage = min((completed_count / total_count) * 100, 100.0)
+            print(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+            
+            # 更新数据库进度
+            try:
+                from .to_translate import db
+                db.execute("update translate set process=%s where id=%s", 
+                         str(format(progress_percentage, '.1f')), 
+                         trans['id'])
+                
+                # 如果进度达到100%，立即更新状态为已完成
+                if progress_percentage >= 100.0:
+                    from datetime import datetime
+                    import pytz
+                    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
+                    db.execute(
+                        "update translate set status='done',end_at=%s,process=100 where id=%s",
+                        end_time, trans['id']
+                    )
+                    print("✅ 翻译完成，状态已更新为已完成")
+                    
+            except Exception as e:
+                print(f"更新进度失败: {str(e)}")
+            
+            last_completed_count = current_completed
+        
         if complete:
             break
         else:

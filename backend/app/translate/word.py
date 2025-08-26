@@ -176,6 +176,40 @@ def start_with_okapi(trans, start_time):
                 
                 logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程（硬编码30）")
                 
+                # 进度更新相关变量
+                completed_count = 0
+                total_count = len(texts)
+                progress_lock = threading.Lock()
+                
+                def update_progress():
+                    """更新翻译进度"""
+                    nonlocal completed_count
+                    with progress_lock:
+                        completed_count += 1
+                        progress_percentage = min((completed_count / total_count) * 100, 100.0)
+                        logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+                        
+                        # 更新数据库进度
+                        try:
+                            from .to_translate import db
+                            db.execute("update translate set process=%s where id=%s", 
+                                     str(format(progress_percentage, '.1f')), 
+                                     self.trans['id'])
+                            
+                            # 如果进度达到100%，立即更新状态为已完成
+                            if progress_percentage >= 100.0:
+                                from datetime import datetime
+                                import pytz
+                                end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
+                                db.execute(
+                                    "update translate set status='done',end_at=%s,process=100 where id=%s",
+                                    end_time, self.trans['id']
+                                )
+                                logger.info("✅ 翻译完成，状态已更新为已完成")
+                                
+                        except Exception as e:
+                            logger.error(f"更新进度失败: {str(e)}")
+                
                 def translate_single_text(index, text):
                     """翻译单个文本，支持术语库筛选"""
                     try:
@@ -241,8 +275,7 @@ def start_with_okapi(trans, start_time):
                         translated_texts[index] = translated_text
                         completed_count += 1
                         
-                        if completed_count % 5 == 0:  # 每完成5个就输出进度
-                            logger.info(f"翻译进度: {completed_count}/{len(texts)} ({completed_count/len(texts)*100:.1f}%)")
+                        update_progress()
                 
                 logger.info(f"并行翻译完成，共翻译 {len(texts)} 个文本")
                 return translated_texts
@@ -1380,6 +1413,40 @@ def run_translation(trans, texts, max_threads):
         logger.info(f"开始翻译 {len(texts)} 个文本片段")
         logger.info(f"翻译服务: {trans.get('server', 'unknown')}")  # 确认使用的翻译服务
 
+    # 进度更新相关变量
+    completed_count = 0
+    total_count = len(texts)
+    progress_lock = threading.Lock()
+    
+    def update_progress():
+        """更新翻译进度"""
+        nonlocal completed_count
+        with progress_lock:
+            completed_count += 1
+            progress_percentage = min((completed_count / total_count) * 100, 100.0)
+            logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+            
+            # 更新数据库进度
+            try:
+                from .to_translate import db
+                db.execute("update translate set process=%s where id=%s", 
+                         str(format(progress_percentage, '.1f')), 
+                         trans['id'])
+                
+                # 如果进度达到100%，立即更新状态为已完成
+                if progress_percentage >= 100.0:
+                    from datetime import datetime
+                    import pytz
+                    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
+                    db.execute(
+                        "update translate set status='done',end_at=%s,process=100 where id=%s",
+                        end_time, trans['id']
+                    )
+                    logger.info("✅ 翻译完成，状态已更新为已完成")
+                    
+            except Exception as e:
+                logger.error(f"更新进度失败: {str(e)}")
+
     # 使用线程池执行翻译任务
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
         # 提交所有翻译任务
@@ -1394,6 +1461,7 @@ def run_translation(trans, texts, max_threads):
         for future in as_completed(futures):
             try:
                 future.result()  # 获取结果，如果有异常会抛出
+                update_progress()  # 更新进度
             except Exception as e:
                 with print_lock:
                     logger.error(f"翻译任务执行异常: {str(e)}")
