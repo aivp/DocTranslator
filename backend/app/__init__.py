@@ -57,16 +57,35 @@ def create_app(config_class=None):
         logger.error(f"Traceback: {traceback.format_exc()}")
         return {"message": "Internal server error", "code": 500}, 500
 
-    # 初始化数据库
-    with app.app_context():
-        db.create_all()
-        # 在这里调用 TranslateEngine
-        # engine = TranslateEngine(task_id=1, app=app)
-        # engine.execute()
-        # 初始化默认配置
-        # if not SystemSetting.query.filter_by(key='version').first():
-        #     db.session.add(SystemSetting(key='version', value='business'))
-        #     db.session.commit()
+    # 初始化数据库（带重试机制）
+    def init_database_with_retry():
+        import time
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        max_retries = 30  # 最大重试30次
+        retry_interval = 2  # 每次重试间隔2秒
+        
+        for attempt in range(max_retries):
+            try:
+                with app.app_context():
+                    db.create_all()
+                    logger.info("数据库连接成功，表创建完成")
+                    return True
+            except Exception as e:
+                logger.warning(f"数据库连接失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_interval)
+                else:
+                    logger.error("数据库连接失败，已达到最大重试次数")
+                    raise e
+        
+        return False
+    
+    # 执行数据库初始化
+    init_database_with_retry()
+    
+    # 初始化数据
     insert_initial_data(app)
     set_auto_increment(app)
     insert_initial_settings(app) # 初始化默认系统配置

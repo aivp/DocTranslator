@@ -103,7 +103,7 @@ def parse_db_url(db_url: str) -> Optional[dict]:
         return None
 
 
-def check_database_initialized(conn_info: dict, retries: int = 3) -> bool:
+def check_database_initialized(conn_info: dict, retries: int = 10) -> bool:
     """数据库初始化检查"""
     for attempt in range(retries):
         try:
@@ -122,7 +122,7 @@ def check_database_initialized(conn_info: dict, retries: int = 3) -> bool:
                 logger.warning(f"数据库连接失败（尝试{retries}次）: {str(e)}")
                 return False
             logger.warning(f"数据库连接异常，重试中... ({attempt + 1}/{retries})")
-            time.sleep(2 ** attempt)  # 指数退避
+            time.sleep(3)  # 固定3秒间隔
         except Exception as e:
             logger.warning(f"数据库检查异常: {str(e)}")
             return False
@@ -132,7 +132,7 @@ def check_database_initialized(conn_info: dict, retries: int = 3) -> bool:
     return False
 
 
-def execute_with_retry(conn_info: dict, sql_path: Path, retries: int = 3) -> bool:
+def execute_with_retry(conn_info: dict, sql_path: Path, retries: int = 10) -> bool:
     """带重试机制的数据库初始化"""
     for attempt in range(retries):
         try:
@@ -142,7 +142,7 @@ def execute_with_retry(conn_info: dict, sql_path: Path, retries: int = 3) -> boo
                 logger.error(f"数据库操作最终失败（尝试{retries}次）: {str(e)}")
                 return False
             logger.warning(f"数据库操作异常，重试中... ({attempt + 1}/{retries})")
-            time.sleep(2 ** attempt)
+            time.sleep(3)  # 固定3秒间隔，避免指数增长
     return False
 
 
