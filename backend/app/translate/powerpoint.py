@@ -5,7 +5,7 @@ from . import common
 import os
 import sys
 import time
-import datetime
+from datetime import datetime
 
 def start(trans):
     # 允许的最大线程
@@ -16,7 +16,7 @@ def start(trans):
         max_threads=int(threads)
     # 当前执行的索引位置
     run_index=0
-    start_time = datetime.datetime.now()
+    start_time = datetime.now()
     wb = pptx.Presentation(trans['file_path']) 
     print(trans['file_path'])
     slides = wb.slides
@@ -88,7 +88,6 @@ def start(trans):
                 
                 # 如果进度达到100%，立即更新状态为已完成
                 if progress_percentage >= 100.0:
-                    from datetime import datetime
                     import pytz
                     end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
                     db.execute(
@@ -135,7 +134,6 @@ def start(trans):
                 
                 # 如果进度达到100%，立即更新状态为已完成
                 if progress_percentage >= 100.0:
-                    from datetime import datetime
                     import pytz
                     end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
                     db.execute(
@@ -196,7 +194,7 @@ def start(trans):
                     text_count+=item.get('count', 1)
 
     wb.save(trans['target_file'])
-    end_time = datetime.datetime.now()
+    end_time = datetime.now()
     spend_time=common.display_spend(start_time, end_time)
     to_translate.complete(trans,text_count,spend_time)
     return True

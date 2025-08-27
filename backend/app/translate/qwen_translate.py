@@ -171,9 +171,10 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             elif terms is not None:
                 translation_options["terms"] = terms
                 logging.info(f"📚 使用自定义术语: {len(terms)} 个术语")
-            # 移除默认的占位符术语库配置，避免翻译服务处理错误
-            # if domains is not None:
-            #     translation_options["domains"] = domains
+            
+            # 硬编码domains参数 - 工程车辆和政府文件领域
+            translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
+            logging.info(f"🎯 使用硬编码领域提示: 工程车辆和政府文件")
                 
             # 添加详细的请求参数日志
             logging.info(f"🔧 Qwen翻译请求参数:")
