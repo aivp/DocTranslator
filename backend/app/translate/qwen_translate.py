@@ -200,11 +200,13 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             
             # 提取翻译结果
             if not completion.choices or len(completion.choices) == 0:
-                raise Exception("API返回结果为空")
+                logging.warning(f"⚠️ API返回结果为空，跳过此文本: {text[:50]}...")
+                return ""  # 直接返回空字符串，不重试
                 
             translated_text = completion.choices[0].message.content
             if not translated_text or not translated_text.strip():
-                raise Exception("翻译结果为空")
+                logging.warning(f"⚠️ 翻译结果为空，跳过此文本: {text[:50]}...")
+                return ""  # 直接返回空字符串，不重试
             
             # 检查翻译结果质量（暂时注释掉）
             # if _is_translation_result_abnormal(translated_text):
@@ -232,6 +234,11 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             # 检查是否是data_inspection_failed错误
             if "data_inspection_failed" in error_msg.lower() or "inappropriate content" in error_msg.lower():
                 logging.warning(f"⚠️  检测到内容检查失败，跳过此内容: {text[:50]}...")
+                return ""  # 直接返回空字符串，不进行重试
+            
+            # 检查是否是空结果相关的错误
+            if "翻译结果为空" in error_msg or "API返回结果为空" in error_msg:
+                logging.warning(f"⚠️ 检测到空结果错误，跳过此内容: {text[:50]}...")
                 return ""  # 直接返回空字符串，不进行重试
             
             # 检查是否是频率限制错误

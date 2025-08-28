@@ -916,13 +916,36 @@ class OkapiWordTranslator:
                 if not success:
                     return False
                 
+                # 步骤2.5：根据目标语言调整XLIFF中的字体信息
+                logger.info("🔄 步骤2.5: 根据目标语言调整XLIFF字体...")
+                font_success = self._adjust_xliff_font(translated_xliff, target_lang)
+                if font_success:
+                    logger.info("✅ XLIFF字体调整成功")
+                else:
+                    logger.warning("XLIFF字体调整失败，但继续处理")
+                
                 # 步骤3：XLIFF → Word 文档
                 logger.info("🔄 步骤3: 合并翻译后的 XLIFF 到 Word...")
                 success = self.okapi_integration.merge_from_xliff(
                     input_file, translated_xliff, output_file
                 )
                 
-                return success
+                if success:
+                    # 步骤4：根据目标语言调整Word文档字体
+                    logger.info("🔄 步骤4: 根据目标语言调整Word文档字体...")
+                    font_success = self._adjust_word_document_font(output_file, target_lang)
+                    if font_success:
+                        logger.info("✅ Word文档字体调整成功")
+                    else:
+                        logger.warning("Word文档字体调整失败，但翻译已完成")
+                    
+                    # 只有在字体调整完成后才返回成功
+                    # 这样可以确保前端状态更新时，所有处理都已完成
+                    logger.info("🎯 所有处理完成：翻译 + 字体调整")
+                    return True
+                else:
+                    logger.error("❌ Word文档合并失败，无法进行字体调整")
+                    return False
                 
         except Exception as e:
             logger.error(f"翻译过程出错: {e}")
@@ -1060,6 +1083,274 @@ class OkapiWordTranslator:
             
         except Exception as e:
             logger.error(f"翻译 XLIFF 内容失败: {e}")
+            return False
+
+    def _adjust_xliff_font(self, xliff_file: str, target_lang: str) -> bool:
+        """
+        在XLIFF文件中根据目标语言调整字体信息
+        
+        Args:
+            xliff_file: XLIFF文件路径
+            target_lang: 目标语言
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 检查目标语言是否为English
+            if not target_lang or target_lang.lower() not in ['english', 'en', 'eng']:
+                logger.debug(f"目标语言不是English，保持原字体: {target_lang}")
+                return True
+            
+            logger.info(f"目标语言是English，开始调整XLIFF字体为Times New Roman")
+            
+            # 检查文件是否存在
+            if not os.path.exists(xliff_file):
+                logger.error(f"XLIFF文件不存在: {xliff_file}")
+                return False
+            
+            # 读取XLIFF文件内容进行分析
+            with open(xliff_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            logger.info(f"XLIFF文件大小: {len(content)} 字符")
+            logger.info(f"XLIFF文件前1000字符: {content[:1000]}")
+            
+            # 查找字体相关的信息 - 支持XLIFF 1.2和2.0格式
+            font_patterns = [
+                # 标准字体属性
+                r'font-family="([^"]*)"',
+                r'font="([^"]*)"',
+                r'family="([^"]*)"',
+                r'typeface="([^"]*)"',
+                # XLIFF 1.2特定属性
+                r'ns\d+:font="([^"]*)"',
+                r'ns\d+:family="([^"]*)"',
+                # 通用属性查找
+                r'[a-zA-Z-]*font[a-zA-Z-]*="([^"]*)"',
+                r'[a-zA-Z-]*family[a-zA-Z-]*="([^"]*)"',
+            ]
+            
+            updated_count = 0
+            modified_content = content
+            
+            # 策略1：查找标准字体属性
+            for pattern in font_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches:
+                    if match.lower() not in ['times new roman', 'timesnewroman', 'times', 'new roman']:
+                        old_font = match
+                        # 替换字体信息
+                        modified_content = re.sub(
+                            f'{pattern[:-1]}"{re.escape(old_font)}"',
+                            f'{pattern[:-1]}"Times New Roman"',
+                            modified_content,
+                            flags=re.IGNORECASE
+                        )
+                        logger.info(f"字体属性从 '{old_font}' 更改为 'Times New Roman'")
+                        updated_count += 1
+            
+            # 策略2：查找包含字体信息的文本内容
+            font_names_in_text = [
+                'arial', 'simsun', 'simhei', 'microsoft', 'calibri', 'verdana', 'tahoma',
+                '宋体', '黑体', '微软雅黑', '新宋体', '仿宋', '楷体'
+            ]
+            
+            for font_name in font_names_in_text:
+                if font_name in content.lower():
+                    # 替换文本中的字体名称
+                    modified_content = re.sub(
+                        font_name, 'Times New Roman', modified_content, flags=re.IGNORECASE
+                    )
+                    logger.info(f"文本内容字体从 '{font_name}' 更改为 'Times New Roman'")
+                    updated_count += 1
+            
+            # 策略3：查找Word特定的格式标签
+            word_format_patterns = [
+                r'<w:rFonts w:ascii="([^"]*)"',
+                r'<w:rFonts w:eastAsia="([^"]*)"',
+                r'<w:rFonts w:hAnsi="([^"]*)"',
+                r'<w:rFonts w:cs="([^"]*)"',
+            ]
+            
+            for pattern in word_format_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches:
+                    if match.lower() not in ['times new roman', 'timesnewroman', 'times', 'new roman']:
+                        old_font = match
+                        # 替换Word格式标签中的字体
+                        modified_content = re.sub(
+                            f'{pattern[:-1]}"{re.escape(old_font)}"',
+                            f'{pattern[:-1]}"Times New Roman"',
+                            modified_content,
+                            flags=re.IGNORECASE
+                        )
+                        logger.info(f"Word格式标签字体从 '{old_font}' 更改为 'Times New Roman'")
+                        updated_count += 1
+            
+            # 策略4：查找样式定义中的字体
+            style_patterns = [
+                r'<w:style w:name="[^"]*"[^>]*>.*?<w:rFonts[^>]*w:ascii="([^"]*)"',
+                r'<w:style w:name="[^"]*"[^>]*>.*?<w:rFonts[^>]*w:eastAsia="([^"]*)"',
+                r'<w:style w:name="[^"]*"[^>]*>.*?<w:rFonts[^>]*w:hAnsi="([^"]*)"',
+            ]
+            
+            for pattern in style_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE | re.DOTALL)
+                for match in matches:
+                    if match.lower() not in ['times new roman', 'timesnewroman', 'times', 'new roman']:
+                        old_font = match
+                        # 替换样式中的字体
+                        modified_content = re.sub(
+                            f'{pattern[:-1]}"{re.escape(old_font)}"',
+                            f'{pattern[:-1]}"Times New Roman"',
+                            modified_content,
+                            flags=re.IGNORECASE | re.DOTALL
+                        )
+                        logger.info(f"样式定义字体从 '{old_font}' 更改为 'Times New Roman'")
+                        updated_count += 1
+            
+            # 策略5：查找并处理我们添加的字体标记
+            font_marker_pattern = r'<font:Times New Roman>(.*?)</font:Times New Roman>'
+            font_marker_matches = re.findall(font_marker_pattern, content)
+            
+            if font_marker_matches:
+                logger.info(f"找到 {len(font_marker_matches)} 个字体标记")
+                # 移除字体标记，但保留文本内容
+                modified_content = re.sub(font_marker_pattern, r'\1', modified_content)
+                updated_count += len(font_marker_matches)
+                logger.info("已移除字体标记，文本内容保留")
+                
+                # 在XLIFF中添加字体样式信息
+                # 查找所有trans-unit标签，为包含英文的target添加字体属性
+                trans_unit_pattern = r'(<ns0:target[^>]*>)(.*?)(</ns0:target>)'
+                
+                def add_font_to_target(match):
+                    target_tag = match.group(1)
+                    target_content = match.group(2)
+                    closing_tag = match.group(3)
+                    
+                    # 检查目标文本是否包含英文（可能是翻译后的文本）
+                    if re.search(r'[a-zA-Z]', target_content):
+                        # 在target标签中添加字体属性
+                        if 'xml:lang="english"' in target_tag or 'target-language="english"' in content:
+                            # 添加字体样式属性
+                            font_attr = ' ns1:font="Times New Roman"'
+                            if font_attr not in target_tag:
+                                target_tag = target_tag.replace('>', font_attr + '>')
+                                logger.info(f"为目标文本添加字体属性: Times New Roman")
+                                updated_count += 1
+                    
+                    return target_tag + target_content + closing_tag
+                
+                modified_content = re.sub(trans_unit_pattern, add_font_to_target, modified_content, flags=re.DOTALL)
+            
+            # 如果内容有变化，保存文件
+            if modified_content != content:
+                with open(xliff_file, 'w', encoding='utf-8') as f:
+                    f.write(modified_content)
+                logger.info(f"XLIFF字体调整完成，更新了 {updated_count} 处字体信息")
+                return True
+            else:
+                logger.info("未找到需要调整的字体信息")
+                # 输出更多调试信息
+                logger.info("尝试查找文件中的其他格式信息...")
+                
+                # 查找所有可能包含格式信息的标签
+                format_tags = re.findall(r'<[^>]*>', content)
+                format_info = []
+                for tag in format_tags:
+                    if any(keyword in tag.lower() for keyword in ['font', 'family', 'style', 'format']):
+                        format_info.append(tag)
+                
+                if format_info:
+                    logger.info(f"找到 {len(format_info)} 个可能包含格式信息的标签:")
+                    for i, tag in enumerate(format_info[:10]):  # 只显示前10个
+                        logger.info(f"  {i+1}: {tag}")
+                else:
+                    logger.info("未找到任何格式相关的标签")
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"调整XLIFF字体失败: {str(e)}")
+            return False
+
+    def _adjust_word_document_font(self, docx_file: str, target_lang: str) -> bool:
+        """
+        根据目标语言调整Word文档字体
+        
+        Args:
+            docx_file: Word文档路径
+            target_lang: 目标语言
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 检查目标语言是否为English
+            if not target_lang or target_lang.lower() not in ['english', 'en', 'eng']:
+                logger.debug(f"目标语言不是English，保持原字体: {target_lang}")
+                return True
+            
+            logger.info(f"目标语言是English，开始调整字体为Times New Roman")
+            
+            # 检查文件是否存在
+            if not os.path.exists(docx_file):
+                logger.error(f"Word文档不存在: {docx_file}")
+                return False
+            
+            # 使用python-docx直接修改Word文档
+            try:
+                from docx import Document
+                
+                # 加载文档
+                doc = Document(docx_file)
+                
+                # 遍历所有段落和表格，调整字体
+                updated_count = 0
+                
+                # 调整段落字体
+                for paragraph in doc.paragraphs:
+                    for run in paragraph.runs:
+                        # 检查run是否包含英文文本
+                        if run.text and re.search(r'[a-zA-Z]', run.text):
+                            # 如果字体不是Times New Roman，则更改
+                            if not run.font.name or run.font.name != 'Times New Roman':
+                                old_font = run.font.name or '默认字体'
+                                run.font.name = 'Times New Roman'
+                                logger.debug(f"段落字体从 '{old_font}' 更改为 'Times New Roman': {run.text[:30]}...")
+                                updated_count += 1
+                
+                # 调整表格字体
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    # 检查run是否包含英文文本
+                                    if run.text and re.search(r'[a-zA-Z]', run.text):
+                                        # 如果字体不是Times New Roman，则更改
+                                        if not run.font.name or run.font.name != 'Times New Roman':
+                                            old_font = run.font.name or '默认字体'
+                                            run.font.name = 'Times New Roman'
+                                            logger.debug(f"表格字体从 '{old_font}' 更改为 'Times New Roman': {run.text[:30]}...")
+                                            updated_count += 1
+                
+                # 保存文档
+                doc.save(docx_file)
+                logger.info(f"Word文档字体调整完成，更新了 {updated_count} 个包含英文的run")
+                return True
+                
+            except ImportError:
+                logger.error("python-docx未安装，无法调整Word文档字体")
+                return False
+            except Exception as e:
+                logger.error(f"调整Word文档字体失败: {str(e)}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"调整Word文档字体失败: {str(e)}")
             return False
 
 

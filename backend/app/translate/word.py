@@ -196,16 +196,12 @@ def start_with_okapi(trans, start_time):
                                      str(format(progress_percentage, '.1f')), 
                                      self.trans['id'])
                             
-                            # 如果进度达到100%，立即更新状态为已完成
+                            # 如果进度达到100%，只更新进度，不更新状态
+                            # 状态更新将在字体调整完成后进行
                             if progress_percentage >= 100.0:
-                                from datetime import datetime
-                                import pytz
-                                end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
-                                db.execute(
-                                    "update translate set status='done',end_at=%s,process=100 where id=%s",
-                                    end_time, self.trans['id']
-                                )
-                                logger.info("✅ 翻译完成，状态已更新为已完成")
+                                logger.info("✅ 翻译进度达到100%，等待字体调整完成...")
+                                # 不更新状态，只更新进度
+                                # 状态将在word.py中的to_translate.complete()调用时更新
                                 
                         except Exception as e:
                             logger.error(f"更新进度失败: {str(e)}")
@@ -255,6 +251,12 @@ def start_with_okapi(trans, start_time):
                             )
                         
                         logger.debug(f"文本 {index} 翻译完成: {text[:50]}... -> {translated[:50]}...")
+                        
+                        # 检查翻译结果是否为空
+                        if not translated or not translated.strip():
+                            logger.warning(f"文本 {index} 翻译结果为空，保持原文: {text[:50]}...")
+                            return index, text, "translation_empty"  # 标记为空结果
+                        
                         return index, translated, None
                     except Exception as e:
                         logger.error(f"文本 {index} 翻译失败: {e}")
@@ -270,15 +272,30 @@ def start_with_okapi(trans, start_time):
                     
                     # 收集结果
                     completed_count = 0
+                    empty_count = 0
+                    error_count = 0
+                    
                     for future in as_completed(future_to_index):
                         index, translated_text, error = future.result()
                         translated_texts[index] = translated_text
                         completed_count += 1
                         
+                        # 统计空结果和错误
+                        if error == "translation_empty":
+                            empty_count += 1
+                        elif error:
+                            error_count += 1
+                        
                         update_progress()
-                
-                logger.info(f"并行翻译完成，共翻译 {len(texts)} 个文本")
-                return translated_texts
+                    
+                    # 记录统计信息
+                    logger.info(f"并行翻译完成，共翻译 {len(texts)} 个文本")
+                    if empty_count > 0:
+                        logger.warning(f"⚠️ 发现 {empty_count} 个空翻译结果，已保持原文")
+                    if error_count > 0:
+                        logger.warning(f"⚠️ 发现 {error_count} 个翻译错误，已保持原文")
+                    
+                    return translated_texts
         
         translator.set_translation_service(OkapiTranslationService(trans))
         logger.info("✅ 翻译服务设置成功")
