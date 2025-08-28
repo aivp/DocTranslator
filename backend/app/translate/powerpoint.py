@@ -11,6 +11,25 @@ from datetime import datetime
 # 配置日志
 logger = logging.getLogger(__name__)
 
+# 字体缩放功能开关
+ENABLE_FONT_SCALING = True  # 设置为False关闭字体缩放，设置为True开启字体缩放
+
+# 字体缩放功能说明：
+# 当ENABLE_FONT_SCALING = True时：
+#   - 系统会根据翻译后文本的长度自动调整字体大小
+#   - 长文本会适当缩小字体，短文本会适当放大字体
+#   - 确保文本在PPT中显示完整且美观
+#
+# 当ENABLE_FONT_SCALING = False时：
+#   - 字体大小保持不变，使用原始设置
+#   - 翻译后的文本可能超出文本框边界
+#   - 需要手动调整文本框大小或字体大小
+#
+# 使用方法：
+# 1. 关闭字体缩放：ENABLE_FONT_SCALING = False
+# 2. 开启字体缩放：ENABLE_FONT_SCALING = True
+# 3. 修改后需要重新运行翻译任务才能生效
+
 def start(trans):
     # 允许的最大线程
     threads=trans['threads']
@@ -26,7 +45,7 @@ def start(trans):
     slides = wb.slides
     texts=[]
     
-    # 提取文本时保存样式信息
+    # 提取文本时保存样式信息，并建立文本与形状的对应关系
     slide_count = 0
     for slide in slides:
         slide_count += 1
@@ -34,27 +53,50 @@ def start(trans):
         logger.info(f"正在处理第 {slide_count} 页幻灯片...")
         
         # 第三页特殊调试
-        if slide_count == 3:
-            # logger.info("🔍 第三页特殊调试模式启动")
-            # logger.info(f"第三页形状总数: {len(slide.shapes)}")
-            pass
+        # if slide_count == 3:
+        #     logger.info("🔍 第三页特殊调试模式启动")
+        #     logger.info(f"第三页形状总数: {len(slide.shapes)}")
         
-        for shape in slide.shapes:
-            # 第三页特殊调试
-            if slide_count == 3:
-                # logger.info(f"🔍 第三页形状详情:")
-                # logger.info(f"  形状类型: {type(shape).__name__}")
-                # logger.info(f"  形状名称: {getattr(shape, 'name', 'N/A')}")
-                # logger.info(f"  是否有表格: {shape.has_table}")
-                # logger.info(f"  是否有文本框架: {shape.has_text_frame}")
-                # logger.info(f"  是否有文本属性: {hasattr(shape, 'text')}")
-                # if hasattr(shape, 'text'):
-                #     logger.info(f"  文本内容: '{getattr(shape, 'text', '')[:50]}...'")
-                # if hasattr(shape, 'text_frame') and shape.text_frame:
-                #     logger.info(f"  文本框架段落数: {len(shape.text_frame.paragraphs)}")
-                #     for i, para in enumerate(shape.text_frame.paragraphs):
-                #         logger.info(f"    段落{i+1}: '{para.text[:50]}...'")
-                pass
+        for shape_index, shape in enumerate(slide.shapes):
+            # 添加详细的形状信息日志
+            # logger.info(f"=== 处理第 {slide_count} 页形状 ===")
+            # logger.info(f"形状类型: {type(shape).__name__}")
+            # logger.info(f"形状名称: {getattr(shape, 'name', 'N/A')}")
+            # logger.info(f"是否有表格: {shape.has_table}")
+            # logger.info(f"是否有文本框架: {shape.has_text_frame}")
+            # logger.info(f"是否有文本属性: {hasattr(shape, 'text')}")
+            # try:
+            #     logger.info(f"是否有占位符格式: {hasattr(shape, 'placeholder_format')}")
+            # except ValueError:
+            #     logger.info(f"是否有占位符格式: False (非占位符形状)")
+            
+            # 调试：记录所有形状的详细信息
+            if slide_count <= 3:  # 只对前3页进行详细调试
+                try:
+                    shape_info = {
+                        'type': type(shape).__name__,
+                        'name': getattr(shape, 'name', 'N/A'),
+                        'has_table': shape.has_table,
+                        'has_text_frame': shape.has_text_frame,
+                        'has_text': hasattr(shape, 'text'),
+                        'text_content': getattr(shape, 'text', 'N/A') if hasattr(shape, 'text') else 'N/A'
+                    }
+                    
+                    # 检查是否有shape_type属性
+                    if hasattr(shape, 'shape_type'):
+                        shape_info['shape_type'] = shape.shape_type
+                    
+                    # 检查是否有其他可能的文本属性
+                    for attr in ['alt_text', 'title', 'description']:
+                        if hasattr(shape, attr):
+                            attr_value = getattr(shape, attr)
+                            if attr_value:
+                                shape_info[attr] = attr_value[:50] + '...' if len(str(attr_value)) > 50 else str(attr_value)
+                    
+                    logger.info(f"形状调试信息: {shape_info}")
+                    
+                except Exception as e:
+                    logger.debug(f"获取形状信息时出错: {str(e)}")
             
             # 处理表格
             if shape.has_table:
@@ -67,7 +109,7 @@ def start(trans):
                     for c in range(cols):
                         cell_text = table.cell(r, c).text
                         if cell_text!=None and len(cell_text)>0 and not common.is_all_punc(cell_text):
-                            # 保存表格单元格的样式信息
+                            # 保存表格单元格的样式信息，并建立对应关系
                             cell = table.cell(r, c)
                             style_info = extract_cell_style(cell)
                             texts.append({
@@ -76,19 +118,23 @@ def start(trans):
                                 "column": c, 
                                 "complete": False,
                                 "type": "table_cell",
-                                "style_info": style_info
+                                "style_info": style_info,
+                                "slide_index": slide_count,
+                                "shape_index": shape_index,
+                                "shape": shape,
+                                "cell": cell
                             })
                             slide_text_count += 1
             
             # 处理所有有文本框架的形状（包括文本框、标题、占位符等）
-            if shape.has_text_frame:
+            elif shape.has_text_frame:
                 text_frame = shape.text_frame
                 # logger.info(f"发现文本框架，段落数: {len(text_frame.paragraphs)}")
-                for paragraph in text_frame.paragraphs:
+                for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
                     text=paragraph.text
                     # logger.info(f"段落文本: '{text[:50]}...' (长度: {len(text)})")
                     if text!=None and len(text)>0 and not common.is_all_punc(text):
-                        # 保存段落的样式信息
+                        # 保存段落的样式信息，并建立对应关系
                         style_info = extract_paragraph_style(paragraph)
                         # logger.info(f"提取段落样式: runs数={len(style_info.get('runs', []))}")
                         texts.append({
@@ -96,7 +142,11 @@ def start(trans):
                             "complete": False,
                             "type": "paragraph",
                             "style_info": style_info,
-                            "paragraph": paragraph
+                            "paragraph": paragraph,
+                            "slide_index": slide_count,
+                            "shape_index": shape_index,
+                            "shape": shape,
+                            "paragraph_index": paragraph_index
                         })
                         slide_text_count += 1
                         # logger.info(f"已添加段落文本: '{text[:30]}...'")
@@ -122,7 +172,10 @@ def start(trans):
                             "text": frame_text,
                             "complete": False,
                             "type": "text_frame",
-                            "text_frame": text_frame
+                            "text_frame": text_frame,
+                            "slide_index": slide_count,
+                            "shape_index": shape_index,
+                            "shape": shape
                         })
                         slide_text_count += 1
             
@@ -134,7 +187,9 @@ def start(trans):
                         "text": text, 
                         "complete": False,
                         "type": "shape_text",
-                        "shape": shape
+                        "shape": shape,
+                        "slide_index": slide_count,
+                        "shape_index": shape_index
                     })
                     slide_text_count += 1
             
@@ -143,8 +198,8 @@ def start(trans):
                 # 检查是否有文本框架但没有被has_text_frame识别
                 text_frame = shape.text_frame
                 if text_frame.text and text_frame.text.strip():
-                    # logger.info(f"处理遗漏的文本框架: {text_frame.text[:50]}...")
-                    for paragraph in text_frame.paragraphs:
+                    # logger.info(f"发现遗漏的文本框架: {text_frame.text[:50]}...")
+                    for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
                         text = paragraph.text
                         if text and len(text.strip()) > 0 and not common.is_all_punc(text):
                             style_info = extract_paragraph_style(paragraph)
@@ -153,7 +208,11 @@ def start(trans):
                                 "complete": False,
                                 "type": "paragraph",
                                 "style_info": style_info,
-                                "paragraph": paragraph
+                                "paragraph": paragraph,
+                                "slide_index": slide_count,
+                                "shape_index": shape_index,
+                                "shape": shape,
+                                "paragraph_index": paragraph_index
                             })
                             slide_text_count += 1
             
@@ -167,7 +226,9 @@ def start(trans):
                         "text": shape_name,
                         "complete": False,
                         "type": "shape_name",
-                        "shape": shape
+                        "shape": shape,
+                        "slide_index": slide_count,
+                        "shape_index": shape_index
                     })
                     slide_text_count += 1
             
@@ -185,7 +246,9 @@ def start(trans):
                                 "text": placeholder_text,
                                 "complete": False,
                                 "type": "placeholder",
-                                "shape": shape
+                                "shape": shape,
+                                "slide_index": slide_count,
+                                "shape_index": shape_index
                             })
                             slide_text_count += 1
             except ValueError as e:
@@ -194,17 +257,23 @@ def start(trans):
             except Exception as e:
                 logger.warning(f"处理占位符时出错: {str(e)}")
         
-        # 记录提取的文本数量
-        # logger.info(f"第 {slide_count} 页幻灯片提取了 {slide_text_count} 个文本元素")
-        
-        # 记录总文本数量
-        # logger.info(f"总共提取了 {len(texts)} 个文本元素")
+        logger.info(f"第 {slide_count} 页幻灯片提取了 {slide_text_count} 个文本元素")
     
     # 额外检查：确保没有遗漏任何文本
     # logger.info(f"总共提取了 {len(texts)} 个文本元素")
     
-    # 调试：打印所有提取的文本类型
-    # logger.info(f"提取的文本类型分布: {text_types}")
+    # 调试：打印所有提取的文本类型和详细信息
+    text_types = {}
+    for i, item in enumerate(texts):
+        text_type = item.get('type', 'unknown')
+        text_types[text_type] = text_types.get(text_type, 0) + 1
+        
+        # 记录每个文本项的详细信息（前10个）
+        if i < 10:
+            logger.info(f"文本项 {i+1}: 类型={text_type}, 幻灯片={item.get('slide_index', 'N/A')}, 形状索引={item.get('shape_index', 'N/A')}, 内容='{item.get('text', '')[:50]}...'")
+    
+    logger.info(f"提取的文本类型分布: {text_types}")
+    logger.info(f"总共提取了 {len(texts)} 个文本元素")
     max_run=max_threads if len(texts)>max_threads else len(texts)
     before_active_count=threading.activeCount()
     event=threading.Event()
@@ -220,7 +289,7 @@ def start(trans):
         with progress_lock:
             completed_count += 1
             progress_percentage = min((completed_count / total_count) * 100, 100.0)
-            logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+            # logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
             
             # 更新数据库进度
             try:
@@ -266,7 +335,7 @@ def start(trans):
         if current_completed > last_completed_count:
             completed_count = current_completed
             progress_percentage = min((completed_count / total_count) * 100, 100.0)
-            logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+            # logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
             
             # 更新数据库进度
             try:
@@ -300,16 +369,9 @@ def start(trans):
     for slide in slides:
         slide_count += 1
         slide_processed_count = 0
-        # 应用翻译结果到幻灯片
         # logger.info(f"正在应用翻译结果到第 {slide_count} 页幻灯片...")
         
-        # 第三页特殊调试
-        if slide_count == 3:
-            # logger.info("🔍 第三页翻译应用调试模式启动")
-            # logger.info(f"第三页待处理文本数: {len(texts)}")
-            pass
-        
-        for shape in slide.shapes:
+        for shape_index, shape in enumerate(slide.shapes):
             # 添加详细的形状信息日志
             # logger.info(f"=== 处理第 {slide_count} 页形状 ===")
             # logger.info(f"形状类型: {type(shape).__name__}")
@@ -317,12 +379,10 @@ def start(trans):
             # logger.info(f"是否有表格: {shape.has_table}")
             # logger.info(f"是否有文本框架: {shape.has_text_frame}")
             # logger.info(f"是否有文本属性: {hasattr(shape, 'text')}")
-            try:
-                # logger.info(f"是否有占位符格式: {hasattr(shape, 'placeholder_format')}")
-                pass
-            except ValueError:
-                # logger.info(f"是否有占位符格式: False (非占位符形状)")
-                pass
+            # try:
+            #     logger.info(f"是否有占位符格式: {hasattr(shape, 'placeholder_format')}")
+            # except ValueError:
+            #     logger.info(f"是否有占位符格式: False (非占位符形状)")
             
             # 处理表格
             if shape.has_table:
@@ -334,116 +394,135 @@ def start(trans):
                     for c in range(cols):
                         cell_text = table.cell(r, c).text
                         if cell_text!=None and len(cell_text)>0 and not common.is_all_punc(cell_text):
-                            item=texts.pop(0)
+                            # 查找对应的翻译结果
                             cell = table.cell(r, c)
-                            # 默认启用自适应样式
-                            apply_translation_to_cell_with_adaptive_styles(cell, item['text'], item.get('style_info', {}))
-                            text_count+=item.get('count', 1)
-                            slide_processed_count += 1
+                            translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "table_cell", cell=cell)
+                            if translated_item:
+                                # 默认启用自适应样式
+                                apply_translation_to_cell_with_adaptive_styles(cell, translated_item['text'], translated_item.get('style_info', {}))
+                                text_count+=translated_item.get('count', 1)
+                                slide_processed_count += 1
+                                logger.info(f"表格单元格翻译应用成功: 原文='{cell_text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
+                            else:
+                                logger.warning(f"未找到表格单元格的翻译结果: {cell_text[:30]}...")
                           
             # 处理所有有文本框架的形状（包括文本框、标题、占位符等）
             elif shape.has_text_frame:
                 text_frame = shape.text_frame
-                # logger.info(f"处理文本框架形状，段落数: {len(text_frame.paragraphs)}")
-                for paragraph in text_frame.paragraphs:
+                logger.info(f"处理文本框架形状，段落数: {len(text_frame.paragraphs)}")
+                for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
                     text=paragraph.text
-                    if text!=None and len(text)>0 and not common.is_all_punc(text) and len(texts)>0:
-                        item=texts.pop(0)
-                        # 默认启用自适应样式
-                        # logger.info(f"应用翻译到段落: 原文='{paragraph.text[:30]}...' -> 译文='{item['text'][:30]}...'")
-                        apply_translation_to_paragraph_with_adaptive_styles(paragraph, item['text'], item.get('style_info', {}))
-                        text_count+=item.get('count', 1)
-                        slide_processed_count += 1
-                        # logger.info(f"段落翻译完成，当前runs数: {len(paragraph.runs)}")
-                    elif len(texts) == 0:
-                        logger.warning(f"文本列表已为空，无法处理段落: '{text[:30]}...'")
+                    if text!=None and len(text)>0 and not common.is_all_punc(text):
+                        # 查找对应的翻译结果
+                        translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "paragraph", paragraph=paragraph, paragraph_index=paragraph_index)
+                        if translated_item:
+                            # 默认启用自适应样式
+                            logger.info(f"应用翻译到段落: 原文='{paragraph.text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
+                            apply_translation_to_paragraph_with_adaptive_styles(paragraph, translated_item['text'], translated_item.get('style_info', {}))
+                            text_count+=translated_item.get('count', 1)
+                            slide_processed_count += 1
+                            logger.info(f"段落翻译完成，当前runs数: {len(paragraph.runs)}")
+                        else:
+                            logger.warning(f"未找到段落的翻译结果: {text[:30]}...")
                 
                 # 处理遗漏的文本框架内容
-                if text_frame.text and text_frame.text.strip() and len(texts)>0:
-                    # 检查是否有对应的文本框架项目
-                    for i, item in enumerate(texts):
-                        if item.get('type') == 'text_frame' and item.get('text_frame') == text_frame:
-                            item = texts.pop(i)
-                            logger.info(f"处理文本框架内容: 原文='{text_frame.text[:30]}...' -> 译文='{item['text'][:30]}...'")
-                            # 直接设置文本框架的文本
-                            original_text = text_frame.text
-                            text_frame.text = item['text']
-                            # 应用自适应样式到所有段落
-                            if text_frame.paragraphs:
-                                for paragraph in text_frame.paragraphs:
-                                    if paragraph.runs:
-                                        for run in paragraph.runs:
-                                            apply_adaptive_styles_ppt(run, original_text, item['text'])
-                            text_count += item.get('count', 1)
-                            slide_processed_count += 1
-                            logger.info(f"文本框架内容处理完成，当前段落数: {len(text_frame.paragraphs)}")
-                            break
+                if text_frame.text and text_frame.text.strip():
+                    # 查找对应的翻译结果
+                    translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "text_frame", text_frame=text_frame)
+                    if translated_item:
+                        logger.info(f"处理文本框架内容: 原文='{text_frame.text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
+                        # 直接设置文本框架的文本
+                        original_text = text_frame.text
+                        text_frame.text = translated_item['text']
+                        # 应用自适应样式到所有段落
+                        if text_frame.paragraphs:
+                            for paragraph in text_frame.paragraphs:
+                                if paragraph.runs:
+                                    for run in paragraph.runs:
+                                        if ENABLE_FONT_SCALING:
+                                            apply_adaptive_styles_ppt(run, original_text, translated_item['text'])
+                        text_count += translated_item.get('count', 1)
+                        slide_processed_count += 1
+                        logger.info(f"文本框架内容处理完成，当前段落数: {len(text_frame.paragraphs)}")
+                    else:
+                        logger.warning(f"未找到文本框架内容的翻译结果: {text_frame.text[:30]}...")
             
             # 处理其他可能有文本的形状（如形状内的文本）
             elif hasattr(shape, 'text') and shape.text:
                 text = shape.text
-                if text!=None and len(text)>0 and not common.is_all_punc(text) and len(texts)>0:
-                    item=texts.pop(0)
-                    # 处理形状文本
-                    original_text = shape.text
-                    shape.text = item['text']
-                    # 应用自适应样式到形状文本
-                    apply_adaptive_styles_to_shape(shape, original_text, item['text'])
-                    text_count+=item.get('count', 1)
-                    slide_processed_count += 1
-                elif len(texts) == 0:
-                    logger.warning(f"文本列表已为空，无法处理形状文本: '{text[:30]}...'")
+                if text!=None and len(text)>0 and not common.is_all_punc(text):
+                    # 查找对应的翻译结果
+                    translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "shape_text", shape=shape)
+                    if translated_item:
+                        # 处理形状文本
+                        original_text = shape.text
+                        shape.text = translated_item['text']
+                        # 应用自适应样式到形状文本
+                        apply_adaptive_styles_to_shape(shape, original_text, translated_item['text'])
+                        text_count+=translated_item.get('count', 1)
+                        slide_processed_count += 1
+                        logger.info(f"形状文本翻译应用成功: 原文='{original_text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
+                    else:
+                        logger.warning(f"未找到形状文本的翻译结果: {text[:30]}...")
             
             # 处理遗漏的文本框架
             elif hasattr(shape, 'text_frame') and shape.text_frame:
                 text_frame = shape.text_frame
                 if text_frame.text and text_frame.text.strip():
-                    for paragraph in text_frame.paragraphs:
+                    for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
                         text = paragraph.text
-                        if text and len(text.strip()) > 0 and not common.is_all_punc(text) and len(texts)>0:
-                            item=texts.pop(0)
-                            # 默认启用自适应样式
-                            apply_translation_to_paragraph_with_adaptive_styles(paragraph, item['text'], item.get('style_info', {}))
-                            text_count+=item.get('count', 1)
-                            slide_processed_count += 1
-                        elif len(texts) == 0:
-                            logger.warning(f"文本列表已为空，无法处理遗漏的文本框架段落: '{text[:30]}...'")
+                        if text and len(text.strip()) > 0 and not common.is_all_punc(text):
+                            # 查找对应的翻译结果
+                            translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "paragraph", paragraph=paragraph, paragraph_index=paragraph_index)
+                            if translated_item:
+                                # 默认启用自适应样式
+                                apply_translation_to_paragraph_with_adaptive_styles(paragraph, translated_item['text'], translated_item.get('style_info', {}))
+                                text_count+=translated_item.get('count', 1)
+                                slide_processed_count += 1
+                                logger.info(f"遗漏文本框架段落翻译应用成功: 原文='{text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
+                            else:
+                                logger.warning(f"未找到遗漏文本框架段落的翻译结果: {text[:30]}...")
             
             # 处理形状名称文本
             elif hasattr(shape, 'name') and shape.name:
                 shape_name = shape.name
-                if shape_name and len(shape_name.strip()) > 0 and len(texts)>0:
-                    item=texts.pop(0)
-                    # 处理形状名称文本
-                    original_name = shape.name
-                    shape.name = item['text']
-                    # 应用自适应样式到形状名称
-                    apply_adaptive_styles_to_shape(shape, original_name, item['text'])
-                    text_count+=item.get('count', 1)
-                    slide_processed_count += 1
-                elif len(texts) == 0:
-                    logger.warning(f"文本列表已为空，无法处理形状名称: '{shape_name[:30]}...'")
+                if shape_name and len(shape_name.strip()) > 0:
+                    # 查找对应的翻译结果
+                    translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "shape_name", shape=shape)
+                    if translated_item:
+                        # 处理形状名称文本
+                        original_name = shape.name
+                        shape.name = translated_item['text']
+                        # 应用自适应样式到形状名称
+                        apply_adaptive_styles_to_shape(shape, original_name, translated_item['text'])
+                        text_count+=translated_item.get('count', 1)
+                        slide_processed_count += 1
+                        logger.info(f"形状名称翻译应用成功: 原文='{original_name[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
+                    else:
+                        logger.warning(f"未找到形状名称的翻译结果: {shape_name[:30]}...")
             
             # 处理占位符文本
             try:
-                if hasattr(shape, 'placeholder_format') and shape.placeholder_format and len(texts)>0:
-                    # 检查是否有对应的占位符项目
-                    for i, item in enumerate(texts):
-                        if item.get('type') == 'placeholder' and item.get('shape') == shape:
-                            item = texts.pop(i)
-                            # 处理占位符文本
-                            if hasattr(shape, 'text_frame') and shape.text_frame:
-                                original_text = shape.text_frame.text
-                                shape.text_frame.text = item['text']
-                                # 应用自适应样式到所有段落
-                                if shape.text_frame.paragraphs:
-                                    for paragraph in shape.text_frame.paragraphs:
-                                        if paragraph.runs:
-                                            for run in paragraph.runs:
-                                                apply_adaptive_styles_ppt(run, original_text, item['text'])
-                            text_count += item.get('count', 1)
+                if hasattr(shape, 'placeholder_format') and shape.placeholder_format:
+                    # 查找对应的翻译结果
+                    translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "placeholder", shape=shape)
+                    if translated_item:
+                        # 处理占位符文本
+                        if hasattr(shape, 'text_frame') and shape.text_frame:
+                            original_text = shape.text_frame.text
+                            shape.text_frame.text = translated_item['text']
+                            # 应用自适应样式到所有段落
+                            if shape.text_frame.paragraphs:
+                                for paragraph in shape.text_frame.paragraphs:
+                                    if paragraph.runs:
+                                        for run in paragraph.runs:
+                                            if ENABLE_FONT_SCALING:
+                                                apply_adaptive_styles_ppt(run, original_text, translated_item['text'])
+                            text_count += translated_item.get('count', 1)
                             slide_processed_count += 1
-                            break
+                            logger.info(f"占位符文本翻译应用成功: 原文='{original_text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
+                        else:
+                            logger.warning(f"未找到占位符文本的翻译结果")
             except ValueError as e:
                 # 忽略"shape is not a placeholder"错误
                 pass
@@ -453,12 +532,12 @@ def start(trans):
         logger.info(f"第 {slide_count} 页幻灯片处理了 {slide_processed_count} 个文本元素")
     
     # 检查是否还有未处理的文本
-    if texts:
-        logger.warning(f"还有 {len(texts)} 个文本元素未处理:")
-        for i, item in enumerate(texts[:5]):  # 只显示前5个
-            logger.warning(f"  未处理文本 {i+1}: {item.get('text', '')[:50]}... (类型: {item.get('type', 'unknown')})")
-        if len(texts) > 5:
-            logger.warning(f"  ... 还有 {len(texts) - 5} 个未处理")
+    # if texts:
+    #     logger.warning(f"还有 {len(texts)} 个文本元素未处理:")
+    #     for i, item in enumerate(texts[:5]):  # 只显示前5个
+    #         logger.warning(f"  未处理文本 {i+1}: {item.get('text', '')[:50]}... (类型: {item.get('type', 'unknown')})")
+    #     if len(texts) > 5:
+    #         logger.warning(f"  ... 还有 {len(texts) - 5} 个未处理")
     
     # 添加详细的处理统计
     logger.info(f"=== PowerPoint处理统计 ===")
@@ -556,7 +635,8 @@ def apply_translation_to_paragraph(paragraph, translated_text, style_info):
         # 应用自适应样式到所有runs
         if paragraph.runs:
             for run in paragraph.runs:
-                apply_adaptive_styles_ppt(run, original_text, translated_text)
+                if ENABLE_FONT_SCALING:
+                    apply_adaptive_styles_ppt(run, original_text, translated_text)
     
     # 恢复段落级别的样式
     if style_info and 'paragraph_level' in style_info:
@@ -588,62 +668,62 @@ def apply_translation_to_cell(cell, translated_text, style_info):
             for paragraph in cell.text_frame.paragraphs:
                 if paragraph.runs:
                     for run in paragraph.runs:
-                        apply_adaptive_styles_ppt(run, original_text, translated_text)
+                        if ENABLE_FONT_SCALING:
+                            apply_adaptive_styles_ppt(run, original_text, translated_text)
 
 
 def apply_translation_to_paragraph_with_adaptive_styles(paragraph, translated_text, style_info):
     """应用翻译结果到段落并恢复样式，同时应用自适应样式"""
-    try:
-        # 保存原始文本用于自适应计算
-        original_text = paragraph.text
-        
-        # 清空段落内容
-        paragraph.clear()
-        
-        # 如果有样式信息，按run恢复样式
-        if style_info and 'runs' in style_info and style_info['runs']:
-            # 按原始run的样式分配翻译文本
-            distribute_text_to_runs_with_adaptive_styles(paragraph, translated_text, style_info['runs'], original_text)
-        else:
-            # 没有样式信息，直接添加文本
-            paragraph.text = translated_text
-            # 应用自适应样式到所有runs
-            if paragraph.runs:
-                for run in paragraph.runs:
+    # 保存原始文本用于自适应计算
+    original_text = paragraph.text
+    
+    # 清空段落内容
+    paragraph.clear()
+    
+    # 如果有样式信息，按run恢复样式
+    if style_info and 'runs' in style_info and style_info['runs']:
+        # 按原始run的样式分配翻译文本
+        distribute_text_to_runs_with_adaptive_styles(paragraph, translated_text, style_info['runs'], original_text)
+    else:
+        # 没有样式信息，直接添加文本
+        paragraph.text = translated_text
+        # 应用自适应样式到所有runs
+        if paragraph.runs:
+            for run in paragraph.runs:
+                if ENABLE_FONT_SCALING:
                     apply_adaptive_styles_ppt(run, original_text, translated_text)
-        
-        # 恢复段落级别的样式
-        if style_info and 'paragraph_level' in style_info:
-            para_level = style_info['paragraph_level']
-            if 'alignment' in para_level:
-                paragraph.alignment = para_level['alignment']
-            if 'level' in para_level:
-                paragraph.level = para_level['level']
-
-    except Exception as e:
-        logger.error(f"应用段落自适应样式失败: {str(e)}")
-        # 回退到普通方法
-        apply_translation_to_paragraph(paragraph, translated_text, style_info)
+    
+    # 恢复段落级别的样式
+    if style_info and 'paragraph_level' in style_info:
+        para_level = style_info['paragraph_level']
+        if 'alignment' in para_level:
+            paragraph.alignment = para_level['alignment']
+        if 'level' in para_level:
+            paragraph.level = para_level['level']
 
 
 def apply_translation_to_cell_with_adaptive_styles(cell, translated_text, style_info):
-    """应用翻译到单元格，使用自适应样式"""
-    try:
-        # 保存原始文本用于自适应计算
-        original_text = cell.text
-        
-        # 清空单元格内容
-        cell.text = ""
-        
-        # 使用自适应样式分发文本
-        distribute_text_to_paragraphs_with_adaptive_styles(cell.text_frame.paragraphs[0], translated_text, style_info, original_text)
-        
-        # logger.info(f"单元格自适应样式应用完成，当前runs数: {len(cell.text_frame.paragraphs[0].runs)}")
-        
-    except Exception as e:
-        logger.error(f"应用单元格自适应样式失败: {str(e)}")
-        # 回退到普通方法
-        apply_translation_to_cell(cell, translated_text, style_info)
+    """应用翻译结果到表格单元格并恢复样式，同时应用自适应样式"""
+    # 保存原始文本用于自适应计算
+    original_text = cell.text
+    
+    # 清空单元格内容
+    cell.text = ""
+    
+    # 如果有样式信息，按段落恢复样式
+    if style_info and 'paragraphs' in style_info and style_info['paragraphs']:
+        # 按原始段落的样式分配翻译文本
+        distribute_text_to_paragraphs_with_adaptive_styles(cell.text_frame, translated_text, style_info['paragraphs'], original_text)
+    else:
+        # 没有样式信息，直接添加文本
+        cell.text = translated_text
+        # 应用自适应样式到单元格中的所有段落的所有runs
+        if cell.text_frame.paragraphs:
+            for paragraph in cell.text_frame.paragraphs:
+                if paragraph.runs:
+                    for run in paragraph.runs:
+                        if ENABLE_FONT_SCALING:
+                            apply_adaptive_styles_ppt(run, original_text, translated_text)
 
 
 def distribute_text_to_runs_with_adaptive_styles(paragraph, translated_text, run_styles, original_text):
@@ -653,7 +733,8 @@ def distribute_text_to_runs_with_adaptive_styles(paragraph, translated_text, run
         # 应用自适应样式到所有runs
         if paragraph.runs:
             for run in paragraph.runs:
-                apply_adaptive_styles_ppt(run, original_text, translated_text)
+                if ENABLE_FONT_SCALING:
+                    apply_adaptive_styles_ppt(run, original_text, translated_text)
         return
     
     # 计算每个run应该分配的文本长度
@@ -663,7 +744,8 @@ def distribute_text_to_runs_with_adaptive_styles(paragraph, translated_text, run
         # 应用自适应样式到所有runs
         if paragraph.runs:
             for run in paragraph.runs:
-                apply_adaptive_styles_ppt(run, original_text, translated_text)
+                if ENABLE_FONT_SCALING:
+                    apply_adaptive_styles_ppt(run, original_text, translated_text)
         return
     
     # 按比例分配翻译文本
@@ -693,7 +775,8 @@ def distribute_text_to_runs_with_adaptive_styles(paragraph, translated_text, run
             run.text = allocated_text
             apply_run_style(run, run_style['style'])
             # 应用自适应样式 - 使用整个段落的原始文本和翻译文本
-            apply_adaptive_styles_ppt(run, original_text, translated_text)
+            if ENABLE_FONT_SCALING:
+                apply_adaptive_styles_ppt(run, original_text, translated_text)
 
 
 def distribute_text_to_paragraphs_with_adaptive_styles(text_frame, translated_text, paragraph_styles, original_text):
@@ -705,7 +788,8 @@ def distribute_text_to_paragraphs_with_adaptive_styles(text_frame, translated_te
             for paragraph in text_frame.paragraphs:
                 if paragraph.runs:
                     for run in paragraph.runs:
-                        apply_adaptive_styles_ppt(run, original_text, translated_text)
+                        if ENABLE_FONT_SCALING:
+                            apply_adaptive_styles_ppt(run, original_text, translated_text)
         return
     
     # 清空文本框架
@@ -720,7 +804,8 @@ def distribute_text_to_paragraphs_with_adaptive_styles(text_frame, translated_te
             for paragraph in text_frame.paragraphs:
                 if paragraph.runs:
                     for run in paragraph.runs:
-                        apply_adaptive_styles_ppt(run, original_text, translated_text)
+                        if ENABLE_FONT_SCALING:
+                            apply_adaptive_styles_ppt(run, original_text, translated_text)
         return
     
     current_pos = 0
@@ -751,16 +836,15 @@ def distribute_text_to_paragraphs_with_adaptive_styles(text_frame, translated_te
         
         if allocated_text:
             # 按run分配文本并应用样式
-            distribute_text_to_runs_with_adaptive_styles(paragraph, allocated_text, para_style['runs'], original_text)
-            
-            # 恢复段落级别的样式
-            if 'paragraph_level' in para_style:
-                para_level = para_style['paragraph_level']
-                if 'alignment' in para_level:
-                    paragraph.alignment = para_level['alignment']
-                if 'level' in para_level:
-                    paragraph.level = para_level['level']
-
+            if para_style['runs']:
+                distribute_text_to_runs_with_adaptive_styles(paragraph, allocated_text, para_style['runs'], original_text)
+            else:
+                paragraph.text = allocated_text
+                # 应用自适应样式到所有runs
+                if paragraph.runs:
+                    for run in paragraph.runs:
+                        if ENABLE_FONT_SCALING:
+                            apply_adaptive_styles_ppt(run, original_text, allocated_text)
 
 def apply_run_style(run, style):
     """应用run的样式"""
@@ -816,28 +900,36 @@ def calculate_adaptive_font_size_ppt(original_text, translated_text, original_fo
         if not original_font_size:
             return None
         
+        # 计算文本长度比例
         original_length = len(original_text.strip())
         translated_length = len(translated_text.strip())
         
         if original_length == 0:
             return original_font_size
         
+        # 计算长度比例
         length_ratio = translated_length / original_length
         
-        # logger.info(f"PPT字体自适应调试: 原文长度={original_length}, 译文长度={translated_length}, 比例={length_ratio:.2f}")
+        # 添加调试日志
+        logger.info(f"PPT字体自适应调试: 原文长度={original_length}, 译文长度={translated_length}, 比例={length_ratio:.2f}")
         
+        # 如果翻译后文本变长，适当缩小字体
         if length_ratio > 2.0:  # 文本长度增加超过100%
+            # 文本特别长时，最小可以到原始大小的50%
             new_size = max(original_font_size * 0.5, original_font_size / length_ratio)
-            # logger.info(f"PPT字体自适应: 文本特别长，缩小到50% -> {new_size}pt")
+            logger.info(f"PPT字体自适应: 文本特别长，缩小到50% -> {new_size}pt")
             return int(new_size)
         elif length_ratio > 1.3:  # 文本长度增加超过30%
+            # 最小可以到原始大小的50%
             new_size = max(original_font_size * 0.5, original_font_size / length_ratio)
-            # logger.info(f"PPT字体自适应: 文本较长，缩小到50% -> {new_size}pt")
+            logger.info(f"PPT字体自适应: 文本较长，缩小到50% -> {new_size}pt")
             return int(new_size)
         elif length_ratio < 0.7:  # 文本长度减少超过30%
+            # 如果文本变短，可以适当增大字体，但不要超过原始大小的130%
             new_size = min(original_font_size * 1.3, original_font_size / length_ratio)
             return int(new_size)
         else:
+            # 长度变化不大，保持原始字体大小
             return original_font_size
             
     except Exception as e:
@@ -846,53 +938,69 @@ def calculate_adaptive_font_size_ppt(original_text, translated_text, original_fo
 
 
 def apply_adaptive_styles_ppt(run, original_text, translated_text):
+    """应用自适应样式到PPT run"""
+    # 检查字体缩放功能是否启用
+    if not ENABLE_FONT_SCALING:
+        return  # 如果关闭了字体缩放，直接返回
+    
     try:
         # 获取原始字体大小
         original_font_size = None
         
-        # 方法1：直接从run获取
-        if hasattr(run, 'font') and run.font and hasattr(run.font, 'size'):
-            original_font_size = run.font.size
-            # logger.info(f"从run.font.size获取字体大小: {original_font_size}pt")
+        # 方法1：直接从run获取字体大小
+        if run.font.size:
+            try:
+                original_font_size = run.font.size.pt
+            except:
+                original_font_size = None
         
-        # 方法2：从段落默认属性获取
-        if not original_font_size and hasattr(run, '_element') and run._element.getparent() is not None:
-            parent = run._element.getparent()
-            if hasattr(parent, 'pPr') and parent.pPr is not None:
-                if hasattr(parent.pPr, 'defRPr') and parent.pPr.defRPr is not None:
-                    if hasattr(parent.pPr.defRPr, 'sz') and parent.pPr.defRPr.sz is not None:
-                        original_font_size = parent.pPr.defRPr.sz.val
-                        # logger.info(f"从段落默认属性获取字体大小: {original_font_size}pt")
+        # 方法2：从段落级别获取字体大小
+        if not original_font_size and hasattr(run, '_element') and run._element.getparent():
+            try:
+                paragraph = run._element.getparent()
+                if hasattr(paragraph, 'pPr') and paragraph.pPr:
+                    defRPr = paragraph.pPr.defRPr
+                    if defRPr and defRPr.sz:
+                        original_font_size = defRPr.sz.val / 100  # 转换为pt
+            except:
+                pass
         
-        # 方法3：使用默认值
+        # 方法3：使用默认字体大小
         if not original_font_size:
             original_font_size = 14  # 默认14pt
-            # logger.info(f"使用默认字体大小: {original_font_size}pt")
+            logger.info(f"使用默认字体大小: {original_font_size}pt")
         
-        # 计算新的字体大小
-        new_font_size = calculate_adaptive_font_size_ppt(original_text, translated_text, original_font_size)
+        # 添加详细调试信息
+        logger.info(f"=== PPT自适应样式调试 ===")
+        logger.info(f"Run文本: '{run.text[:30]}...'")
+        logger.info(f"原文: '{original_text[:30]}...'")
+        logger.info(f"译文: '{translated_text[:30]}...'")
+        logger.info(f"原始字体大小: {original_font_size}pt")
         
-        if new_font_size and new_font_size != original_font_size:
-            # 应用新的字体大小
-            if hasattr(run, 'font') and run.font:
-                run.font.size = Pt(new_font_size)
-                # logger.info(f"应用自适应字体大小: {original_font_size}pt -> {new_font_size}pt")
-            else:
-                # 如果没有font属性，尝试创建
-                run.font.size = Pt(new_font_size)
-                # logger.info(f"创建并应用自适应字体大小: {original_font_size}pt -> {new_font_size}pt")
-        else:
-            # logger.info(f"字体大小无需调整: {original_font_size}pt")
-            pass
+        # 计算自适应字体大小
+        if original_font_size:
+            adaptive_font_size = calculate_adaptive_font_size_ppt(original_text, translated_text, original_font_size)
+            logger.info(f"计算后字体大小: {adaptive_font_size}pt")
             
+            if adaptive_font_size and adaptive_font_size != original_font_size:
+                from pptx.util import Pt
+                run.font.size = Pt(adaptive_font_size)
+                logger.info(f"✅ 字体大小已调整: {original_font_size}pt -> {adaptive_font_size}pt")
+            else:
+                logger.info(f"⚠️ 字体大小未改变 (原始={original_font_size}pt, 计算={adaptive_font_size}pt)")
+        else:
+            logger.warning(f"❌ 无法获取原始字体大小")
+                    
     except Exception as e:
-        logger.error(f"应用PPT自适应样式失败: {str(e)}")
-        # 出错时保持原始字体大小
-        pass
+        logger.error(f"❌ 应用PPT自适应样式失败: {str(e)}")
 
 
 def apply_adaptive_styles_to_shape(shape, original_text, translated_text):
     """应用自适应样式到形状文本"""
+    # 检查字体缩放功能是否启用
+    if not ENABLE_FONT_SCALING:
+        return  # 如果关闭了字体缩放，直接返回
+    
     try:
         # 获取原始字体大小
         original_font_size = None
@@ -915,7 +1023,7 @@ def apply_adaptive_styles_to_shape(shape, original_text, translated_text):
             try:
                 # 使用一个合理的默认字体大小
                 original_font_size = 18  # 默认18pt
-                # logger.info(f"PPT形状自适应: 使用默认字体大小 {original_font_size}pt")
+                logger.info(f"PPT形状自适应: 使用默认字体大小 {original_font_size}pt")
             except:
                 original_font_size = None
         
@@ -923,7 +1031,7 @@ def apply_adaptive_styles_to_shape(shape, original_text, translated_text):
         if not original_font_size and hasattr(shape, 'name') and shape.name:
             # 对于形状名称，使用较小的默认字体大小
             original_font_size = 12  # 默认12pt
-            # logger.info(f"PPT形状名称自适应: 使用默认字体大小 {original_font_size}pt")
+            logger.info(f"PPT形状名称自适应: 使用默认字体大小 {original_font_size}pt")
         
         # 计算自适应字体大小
         if original_font_size:
@@ -934,11 +1042,11 @@ def apply_adaptive_styles_to_shape(shape, original_text, translated_text):
                 if hasattr(shape, 'text_frame') and shape.text_frame and shape.text_frame.paragraphs:
                     for paragraph in shape.text_frame.paragraphs:
                         for run in paragraph.runs:
-                            run.font.size = Pt(adaptive_font_size)
-                # logger.info(f"PPT形状字体大小自适应: {original_font_size}pt -> {adaptive_font_size}pt")
+                            if ENABLE_FONT_SCALING:
+                                run.font.size = Pt(adaptive_font_size)
+                logger.info(f"PPT形状字体大小自适应: {original_font_size}pt -> {adaptive_font_size}pt")
             else:
-                # logger.info(f"PPT形状自适应: 字体大小未改变 (原始={original_font_size}pt, 计算={adaptive_font_size}pt)")
-                pass
+                logger.info(f"PPT形状自适应: 字体大小未改变 (原始={original_font_size}pt, 计算={adaptive_font_size}pt)")
         else:
             logger.warning(f"PPT形状自适应: 无法获取原始字体大小")
                     
@@ -1028,8 +1136,8 @@ def distribute_text_to_paragraphs(text_frame, translated_text, paragraph_styles)
             current_pos += allocated_length
         
         if allocated_text:
-            # 按run分配文本并应用样式
-            distribute_text_to_runs(paragraph, allocated_text, para_style['runs'])
+            # 按run分配文本并应用自适应样式
+            distribute_text_to_runs_with_adaptive_styles(paragraph, allocated_text, para_style['runs'], allocated_text)
             
             # 恢复段落级别的样式
             if 'paragraph_level' in para_style:
@@ -1038,5 +1146,53 @@ def distribute_text_to_paragraphs(text_frame, translated_text, paragraph_styles)
                     paragraph.alignment = para_level['alignment']
                 if 'level' in para_level:
                     paragraph.level = para_level['level']
+
+
+def find_translated_text_for_shape(texts, slide_index, shape_index, text_type, **kwargs):
+    """从texts列表中查找与给定形状和文本类型匹配的翻译结果"""
+    # 首先尝试精确匹配
+    for item in texts:
+        if item['type'] == text_type:
+            # 检查形状是否匹配
+            if 'shape' in kwargs and item['shape'] == kwargs['shape']:
+                return item
+            # 检查文本框架是否匹配
+            if 'text_frame' in kwargs and item.get('text_frame') == kwargs['text_frame']:
+                return item
+            # 检查段落是否匹配
+            if 'paragraph' in kwargs and item.get('paragraph') == kwargs['paragraph']:
+                return item
+            # 检查单元格是否匹配
+            if 'cell' in kwargs and item.get('cell') == kwargs['cell']:
+                return item
+    
+    # 如果精确匹配失败，尝试基于位置和内容的智能匹配
+    for item in texts:
+        if item['type'] == text_type:
+            # 检查幻灯片索引和形状索引是否匹配
+            if (item.get('slide_index') == slide_index and 
+                item.get('shape_index') == shape_index):
+                
+                # 对于段落类型，还需要检查段落索引
+                if text_type == 'paragraph' and 'paragraph_index' in kwargs:
+                    if item.get('paragraph_index') == kwargs['paragraph_index']:
+                        return item
+                else:
+                    return item
+    
+    # 如果位置匹配也失败，尝试基于内容的模糊匹配
+    for item in texts:
+        if item['type'] == text_type:
+            # 检查是否在同一个幻灯片上
+            if item.get('slide_index') == slide_index:
+                # 对于某些类型，可以基于内容进行匹配
+                if text_type in ['paragraph', 'text_frame', 'shape_text']:
+                    # 这里可以添加更智能的内容匹配逻辑
+                    # 暂时返回第一个匹配的类型
+                    return item
+    
+    # 如果所有匹配都失败，记录警告并返回None
+    logger.warning(f"未找到匹配的翻译结果: slide_index={slide_index}, shape_index={shape_index}, text_type={text_type}, kwargs={kwargs}")
+    return None
 
 
