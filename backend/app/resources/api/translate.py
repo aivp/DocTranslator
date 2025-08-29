@@ -133,15 +133,14 @@ class TranslateStartResource(Resource):
                 translate_settings[setting.alias] = setting.value
             # 更新翻译记录
             translate.server = data.get('server', 'openai')
-            translate.origin_filename = data['file_name']
+            translate.origin_filename = origin_filename
             translate.target_filepath = target_abs_path  # 存储翻译结果的绝对路径
 
-            # 强制写死关键参数，前端无法覆盖
-            translate.model = 'qwen-mt-plus'  # 强制写死，忽略前端传入的model
+            translate.model = data['model']
             translate.app_key = data.get('app_key', None)
             translate.app_id = data.get('app_id', None)
-            translate.backup_model = 'us.anthropic.claude-sonnet-4-20250514-v1:0'  # 强制写死，忽略前端传入的backup_model
-            translate.type = 'trans_text_only_inherit'  # 强制写死，忽略前端传入的type[2]
+            translate.backup_model = data['backup_model']
+            translate.type = translate_type
             translate.prompt = data['prompt']
             translate.threads = int(data['threads'])
             # 会员用户下使用系统的api_url和api_key
@@ -198,7 +197,7 @@ class TranslateStartResource(Resource):
             prompt_id = data.get('prompt_id', '0')
             translate.prompt_id = int(prompt_id) if prompt_id else None
             translate.doc2x_flag = data.get('doc2x_flag', 'N')
-            translate.doc2x_secret_key = data.get('doc2x_secret_key', '')
+            translate.doc2x_secret_key = data.get('doc2x_secret_key', 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0')
             if data['server'] == 'baidu':
                 translate.lang = data['to_lang']
                 translate.comparison_id = 1 if data.get('needIntervene', False) else None  # 使用术语库

@@ -210,11 +210,14 @@ def start(trans):
         # 使用Doc2X服务将PDF转换为DOCX
         print(f"开始将PDF转换为DOCX: {original_path}")
 
-        # 获取doc2x API密钥 - 直接写死，不再需要传递
-        api_key = "sk-6jr7hx69652pzdd4o4poj3hp5mauana0"  # 请替换为你的实际密钥
-        
+        # 获取API密钥
+        api_key = trans.get('doc2x_api_key', '')
+        print(f"🔑 检查API密钥: {'已设置' if api_key else '未设置'}")
         if not api_key:
-            raise ValueError("doc2x API密钥未配置")
+            print(f"❌ 缺少Doc2X API密钥")
+            to_translate.error(trans['id'], "缺少Doc2X API密钥")
+            return False
+        print(f"✅ API密钥已设置")
 
         # 1. 启动转换任务
         print(f"🚀 开始启动Doc2X转换任务...")
@@ -340,9 +343,104 @@ def start(trans):
         print(f"过滤后需要翻译的文本片段: {len(filtered_texts)}")
         print(f"跳过的文本片段: {skipped_count}")
 
-        # 多线程翻译
-        # 硬编码线程数为30，忽略前端传入的配置
-        run_translation(docx_trans, filtered_texts, max_threads=30)
+        # 多线程翻译 - 使用Okapi方案而不是传统run方式
+        print("🔄 使用 Okapi Framework 进行PDF翻译...")
+        
+        try:
+            # 导入 Okapi 集成模块
+            from .okapi_integration import OkapiWordTranslator, verify_okapi_installation
+            
+            # 验证 Okapi 安装
+            if not verify_okapi_installation():
+                print("❌ Okapi 安装验证失败，回退到传统方法")
+                run_translation(docx_trans, filtered_texts, max_threads=30)
+            else:
+                print("✅ Okapi 安装验证成功，使用Okapi方案")
+                
+                # 如果用户选择了qwen-mt-plus，设置server为qwen
+                if docx_trans.get('model') == 'qwen-mt-plus':
+                    docx_trans['server'] = 'qwen'
+                    print("✅ 设置翻译服务为 Qwen")
+                
+                # 预加载术语库
+                comparison_id = docx_trans.get('comparison_id')
+                if comparison_id:
+                    print(f"📚 开始预加载术语库: {comparison_id}")
+                    from .main import get_comparison
+                    preloaded_terms = get_comparison(comparison_id)
+                    if preloaded_terms:
+                        print(f"📚 术语库预加载成功: {len(preloaded_terms)} 个术语")
+                        docx_trans['preloaded_terms'] = preloaded_terms
+                    else:
+                        print(f"📚 术语库预加载失败: {comparison_id}")
+                
+                # 创建 Okapi 翻译器
+                translator = OkapiWordTranslator()
+                print("✅ Okapi 翻译器创建成功")
+                
+                # 语言映射：将中文语言名称转换为英文全拼
+                def map_language_to_qwen_format(lang_name):
+                    language_mapping = {
+                        '中文': 'Chinese',
+                        '英语': 'English',
+                        '日语': 'Japanese',
+                        '韩语': 'Korean',
+                        '法语': 'French',
+                        '德语': 'German',
+                        '西班牙语': 'Spanish',
+                        '俄语': 'Russian',
+                        '阿拉伯语': 'Arabic',
+                        '葡萄牙语': 'Portuguese',
+                        '意大利语': 'Italian',
+                        '泰语': 'Thai',
+                        '越南语': 'Vietnamese',
+                        '印尼语': 'Indonesian',
+                        '马来语': 'Malay',
+                        '菲律宾语': 'Filipino',
+                        '缅甸语': 'Burmese',
+                        '柬埔寨语': 'Khmer',
+                        '老挝语': 'Lao',
+                        '柬语': 'Khmer'
+                    }
+                    return language_mapping.get(lang_name.strip(), lang_name.strip())
+                
+                # 获取并映射语言
+                source_lang = "auto"  # 写死为auto，让API自动检测源语言
+                target_lang = map_language_to_qwen_format(docx_trans.get('lang', '英语'))
+                
+                print(f"🔍 语言映射调试:")
+                print(f"  原始目标语言: {docx_trans.get('lang', '英语')}")
+                print(f"  映射后目标语言: {target_lang}")
+                
+                # 执行翻译
+                success = translator.translate_document(
+                    docx_path,
+                    target_file,
+                    source_lang,
+                    target_lang
+                )
+                
+                if success:
+                    print("✅ Okapi PDF翻译完成")
+                    # 完成处理
+                    end_time = datetime.datetime.now()
+                    spend_time = common.display_spend(start_time, end_time)
+                    
+                    # 统计翻译的文本数量（这里简化处理）
+                    text_count = len(filtered_texts)  # 使用过滤后的文本数量
+                    
+                    if docx_trans['run_complete']:
+                        to_translate.complete(docx_trans, text_count, spend_time)
+                    
+                    print(f"✅ Okapi PDF翻译完成，用时: {spend_time}")
+                    return True
+                else:
+                    print("❌ Okapi PDF翻译失败，回退到传统方法")
+                    run_translation(docx_trans, filtered_texts, max_threads=30)
+                    
+        except Exception as e:
+            print(f"❌ Okapi PDF翻译出错: {e}，回退到传统方法")
+            run_translation(docx_trans, filtered_texts, max_threads=30)
 
         # 写入翻译结果（完全保留原始格式）
         text_count = apply_translations(document, texts)

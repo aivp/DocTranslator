@@ -1442,7 +1442,7 @@ def run_translation(trans, texts, max_threads):
                 db.execute("update translate set process=%s where id=%s", 
                          str(format(progress_percentage, '.1f')), 
                          trans['id'])
-                
+                    
             except Exception as e:
                 logger.error(f"更新进度失败: {str(e)}")
 
