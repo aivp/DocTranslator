@@ -210,14 +210,11 @@ def start(trans):
         # 使用Doc2X服务将PDF转换为DOCX
         print(f"开始将PDF转换为DOCX: {original_path}")
 
-        # 获取API密钥
-        api_key = trans.get('doc2x_api_key', '')
-        print(f"🔑 检查API密钥: {'已设置' if api_key else '未设置'}")
+        # 获取doc2x API密钥 - 直接写死，不再需要传递
+        api_key = "sk-6jr7hx69652pzdd4o4poj3hp5mauana0"  # 请替换为你的实际密钥
+        
         if not api_key:
-            print(f"❌ 缺少Doc2X API密钥")
-            to_translate.error(trans['id'], "缺少Doc2X API密钥")
-            return False
-        print(f"✅ API密钥已设置")
+            raise ValueError("doc2x API密钥未配置")
 
         # 1. 启动转换任务
         print(f"🚀 开始启动Doc2X转换任务...")

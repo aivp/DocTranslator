@@ -35,13 +35,13 @@ class Config:
     CODE_EXPIRATION = 1800  # 30分钟（单位：秒）
     # 文件上传配置
     # 允许上传的文件类型
-    UPLOAD_BASE_DIR='storage'
+    UPLOAD_BASE_DIR='/app/storage'  # 修复为绝对路径
     UPLOAD_ROOT = os.path.join(os.path.dirname(__file__), 'uploads')  # 与 app.py 同级
     DATE_FORMAT = "%Y-%m-%d"  # 日期格式
     ALLOWED_EXTENSIONS = {'docx', 'xlsx', 'pptx', 'pdf', 'txt', 'md', 'csv', 'xls', 'doc'}
     # UPLOAD_FOLDER = '/uploads'  # 建议使用绝对路径
     MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 500)) * 1024 * 1024  # 500MB
-    MAX_USER_STORAGE = int(os.getenv('MAX_USER_STORAGE', 1024)) * 1024 * 1024  # 默认1GB
+    MAX_USER_STORAGE = int(os.getenv('MAX_USER_STORAGE', 1024)) * 1024 * 1024
     # 翻译结果存储配置
     STORAGE_FOLDER = '/app/storage'  # 翻译结果存储路径
     STATIC_FOLDER = '/public/static'  # 设置静态文件路径
