@@ -278,28 +278,28 @@ const uploadRef = ref(null)
 const form = ref({
   files: [],
   file_name: '',
-  api_url: '',
+  api_url: 'https://api.openai.com',
   api_key: null,
   app_key: null,
   app_id: null,
-  model: 'qwen-mt-plus',  // 设置默认模型
-  backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',   // 设置默认备用模型
-  langs: ['','英语'],  // 设置默认目标语言
-  lang: '英语',  // 设置默认语言
+  model: 'qwen-mt-plus',
+  backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+  langs: ['','英语'],
+  lang: '英语',
   to_lang: null,
-  type: 'trans_text_only_inherit',  // 设置默认翻译类型
+  type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],
   uuid: '',
   prompt:
     '你是一个文档翻译助手，请将以下文本、单词或短语直接翻译成{target_lang}，不返回原文本。如果文本中包含{target_lang}文本、特殊名词（比如邮箱、品牌名、单位名词如mm、px、℃等）、无法翻译等特殊情况，请直接返回原文而无需解释原因。遇到无法翻译的文本直接返回原内容。保留多余空格。',
-  threads: 20,  // 设置默认线程数
+  threads: 30,
   size: 0,
   scanned: false, // 添加 scanned 字段
   origin_lang: '', // 添加起始语言字段
   comparison_id: '', //术语id
-  prompt_id: '0', //提示语id
+  prompt_id: '', //提示语id,
   translate_id: null,
   doc2x_secret_key: '',
-  server: 'openai',  // 设置默认服务
+  server: 'openai',
   doc2x_flag: 'N',
 })
 
@@ -321,6 +321,7 @@ const translateButtonState = ref({
 // 检查翻译队列状态
 function checkTranslationQueue() {
   if (translationQueue.value.isRunning) {
+    console.log('翻译队列正在运行中，跳过检查')
     return
   }
   
@@ -387,6 +388,7 @@ function process(uuid) {
           const failedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
           if (failedFileIndex !== -1) {
             form.value.files.splice(failedFileIndex, 1)
+            console.log('已从文件列表中移除翻译失败的文件:', uuid)
           }
           
           // 任务失败后，尝试启动下一个
@@ -408,6 +410,7 @@ function process(uuid) {
           const completedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
           if (completedFileIndex !== -1) {
             form.value.files.splice(completedFileIndex, 1)
+            console.log('已从文件列表中移除翻译完成的文件:', uuid)
           }
           
           // 翻译完成后，自动启动下一个待翻译的文件
@@ -417,6 +420,9 @@ function process(uuid) {
 
         if (res.data.progress == 100) {
           // 进度达到100%但状态还不是done，继续监控状态变化
+          console.log("进度达到100%，等待状态更新...")
+          
+          // 继续监控状态变化，缩短间隔以便更快检测
           setTimeout(() => process(uuid), 5000)
         } else {
           // 如果未完成，继续调用 process 函数
@@ -437,6 +443,7 @@ function process(uuid) {
         const failedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
         if (failedFileIndex !== -1) {
           form.value.files.splice(failedFileIndex, 1)
+          console.log('已从文件列表中移除查询失败的文件:', uuid)
         }
         
         // 任务失败后，尝试启动下一个
@@ -458,6 +465,7 @@ function process(uuid) {
       const failedFileIndex = form.value.files.findIndex(file => file.uuid === uuid)
       if (failedFileIndex !== -1) {
         form.value.files.splice(failedFileIndex, 1)
+        console.log('已从文件列表中移除网络错误的文件:', uuid)
       }
       
       // 任务失败后，尝试启动下一个
@@ -471,28 +479,33 @@ async function startNextTranslation() {
     // 获取当前翻译列表
     const res = await translates({ page: 1, limit: 100 })
     if (res.code !== 200) {
+      console.log('获取翻译列表失败，无法启动下一个任务')
       return
     }
     
     const translateList = res.data.data
     if (!translateList || translateList.length === 0) {
+      console.log('没有待翻译的文件')
       return
     }
     
     // 查找状态为 'none' 的第一个文件
     const nextTask = translateList.find(item => item.status === 'none')
     if (!nextTask) {
+      console.log('没有待翻译的文件，所有任务已完成或进行中')
       return
     }
+    
+    console.log('自动启动下一个翻译任务:', nextTask.origin_filename)
     
     // 准备翻译参数
     const translateParams = {
       server: nextTask.server || 'openai',
-      model: nextTask.model || 'gpt-3.5-turbo',
+      model: nextTask.model || 'qwen-mt-plus',
       lang: nextTask.lang || '英语',
       uuid: nextTask.uuid,
       prompt: nextTask.prompt || '请将以下内容翻译为{target_lang}',
-      threads: nextTask.threads || 10,
+      threads: nextTask.threads || 30,
       file_name: nextTask.origin_filename,
       api_url: nextTask.api_url || '',
       api_key: nextTask.api_key || '',
@@ -504,13 +517,14 @@ async function startNextTranslation() {
       comparison_id: nextTask.comparison_id || '',
       prompt_id: nextTask.prompt_id || '',
       doc2x_flag: nextTask.doc2x_flag || 'N',
-      doc2x_secret_key: nextTask.doc2x_secret_key || '',
+      doc2x_secret_key: nextTask.doc2x_secret_key || 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0',
       size: nextTask.size || 0
     }
     
     // 启动翻译任务
     const translateRes = await transalteFile(translateParams)
     if (translateRes.code === 200) {
+      console.log('自动启动翻译任务成功:', nextTask.origin_filename)
       ElMessage.success({
         message: `自动启动翻译任务: ${nextTask.origin_filename}`,
         duration: 3000
@@ -522,6 +536,7 @@ async function startNextTranslation() {
       // 启动进度查询
       process(nextTask.uuid)
     } else {
+      console.log('自动启动翻译任务失败:', translateRes.message)
       ElMessage.warning({
         message: `自动启动翻译任务失败: ${nextTask.origin_filename}`,
         duration: 3000
@@ -536,6 +551,7 @@ async function startNextTranslation() {
 // 批量启动翻译任务
 async function startBatchTranslation() {
   try {
+    console.log('开始批量启动翻译任务，文件数量:', form.value.files.length)
     
     // 获取第一个文件的配置作为模板
     const firstFile = form.value.files[0]
@@ -577,7 +593,9 @@ async function startBatchTranslation() {
           existingTask
         })
       } else if (existingTask) {
+        console.log(`文件 ${file.file_name} 状态为 ${existingTask.status}，跳过翻译`)
       } else {
+        console.log(`文件 ${file.file_name} 未找到对应任务，跳过翻译`)
       }
     }
     
@@ -585,6 +603,8 @@ async function startBatchTranslation() {
       ElMessage.warning('没有需要翻译的文件，所有文件都已完成或正在处理中')
       return
     }
+    
+    console.log(`实际需要翻译的文件数量: ${filesToTranslate.length}/${form.value.files.length}`)
     
     let successCount = 0
     let failCount = 0
@@ -607,6 +627,7 @@ async function startBatchTranslation() {
         const res = await transalteFile(translateParams)
         if (res.code === 200) {
           successCount++
+          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动成功:`, file.file_name)
           
           // 启动进度查询
           process(file.uuid)
@@ -617,6 +638,7 @@ async function startBatchTranslation() {
           }
         } else {
           failCount++
+          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动失败:`, file.file_name, res.message)
         }
       } catch (error) {
         failCount++
@@ -669,6 +691,7 @@ async function startBatchTranslation() {
 const doc2xStatusQuery = async (data) => {
   const res = await doc2xQueryStatusService(data)
   if (res.code == 200) {
+    console.log('doc2x进度查询', res.data)
     // 如果返回的字段中明确表示任务失败
     if (res.data.status === 'failed') {
       // 处理任务失败
@@ -685,6 +708,7 @@ const doc2xStatusQuery = async (data) => {
       const failedFileIndex = form.value.files.findIndex(file => file.uuid === data.uuid)
       if (failedFileIndex !== -1) {
         form.value.files.splice(failedFileIndex, 1)
+        console.log('已从文件列表中移除doc2x翻译失败的文件:', data.uuid)
       }
       
       return // 直接返回，不再继续查询
@@ -701,6 +725,7 @@ const doc2xStatusQuery = async (data) => {
       const completedFileIndex = form.value.files.findIndex(file => file.uuid === data.uuid)
       if (completedFileIndex !== -1) {
         form.value.files.splice(completedFileIndex, 1)
+        console.log('已从文件列表中移除doc2x翻译完成的文件:', data.uuid)
       }
     } else {
       // 如果未完成，继续调用 process 函数
@@ -721,6 +746,7 @@ const doc2xStatusQuery = async (data) => {
     const failedFileIndex = form.value.files.findIndex(file => file.uuid === data.uuid)
     if (failedFileIndex !== -1) {
       form.value.files.splice(failedFileIndex, 1)
+      console.log('已从文件列表中移除doc2x查询失败的文件:', data.uuid)
     }
   }
 }
@@ -728,6 +754,12 @@ const doc2xStatusQuery = async (data) => {
 async function handleTranslate(transform) {
   // 首先再次赋值，防止没有更新
   form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
+  
+  // 添加调试信息
+  console.log('翻译设置中的术语库:', translateStore.aiServer.comparison_id)
+  console.log('翻译设置中的目标语言:', translateStore.aiServer.lang)
+  console.log('当前表单数据:', form.value)
+  console.log('当前服务类型:', currentServiceType.value)
   
   // 确保语言字段正确设置
   if (currentServiceType.value === 'ai' && translateStore.aiServer.lang) {
@@ -747,72 +779,103 @@ async function handleTranslate(transform) {
   //   return
   // }
   const file_suffix = form.value.files[0].file_name.split('.').pop().toLowerCase()
-  // 既然后端已经写死了doc2x密钥，前端不需要再判断
-  // 如果是PDF文件，直接设置为doc2x服务
-  if (file_suffix == 'pdf') {
+  // 先判断是不是pdf文件和是否启用doc2x
+  // if (file_suffix == 'pdf' && translateStore.common.doc2x_flag == 'N') {
+  //   return ElMessage({
+  //     message: '使用pdf翻译请先配置doc2x密钥',
+  //     type: 'error',
+  //   })
+  // }
+  if (
+    file_suffix == 'pdf' &&
+    translateStore.common.doc2x_flag == 'Y' 
+  ) {
     form.value.server = 'doc2x'
-    form.value.doc2x_flag = 'Y'
+    form.value.doc2x_flag = translateStore.common.doc2x_flag
+    form.value.doc2x_secret_key = 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0'
+    console.log('翻译pdf表单：', form.value)
+    // 1.启动doc2x翻译
+    // const res = await doc2xStartService(form.value)
+    // if (res.code == 200) {
+    //   ElMessage({
+    //     message: '提交doc2x翻译任务成功！',
+    //     type: 'success',
+    //   })
+    //   // 更新uuid
+    //   form.value.uuid = res.data.uuid
+    //   // 刷新翻译列表
+    //   getTranslatesData(1)
+    //   // 启动任务查询
+    //   doc2xStatusQuery({ translate_id: form.value.translate_id })
+    // } else {
+    //   ElMessage({
+    //     message: '提交翻译任务失败~',
+    //     type: 'error',
+    //   })
+    // }
+    // // 4.清空上传文件列表
+    // uploadRef.value.clearFiles()
+    // return res
   }
 
-  if (currentServiceType.value == 'ai') {
-    // 2.检查翻译设置是否完整 - 去掉验证，因为已经有默认值
-    // if (form.value.server === '') {
-    //   ElMessage({
-    //     message: '请选择翻译服务提供商',
-    //     type: 'error',
-    //   })
-    //   return
-    // }
+  // if (currentServiceType.value == 'ai') {
+  //   // 2.检查翻译设置是否完整
+  //   if (form.value.server === '') {
+  //     ElMessage({
+  //       message: '请选择翻译服务提供商',
+  //       type: 'error',
+  //     })
+  //     return
+  //   }
 
-    // if (form.value.type === '') {
-    //   ElMessage({
-    //     message: '请选择翻译类型',
-    //     type: 'error',
-    //   })
-    //   return
-    // }
+  //   if (form.value.type === '') {
+  //     ElMessage({
+  //       message: '请选择翻译类型',
+  //       type: 'error',
+  //     })
+  //     return
+  //   }
 
-    // if (form.value.model === '') {
-    //   ElMessage({
-    //     message: '请选择翻译模型',
-    //     type: 'error',
-    //   })
-    //   return
-    // }
+  //   if (form.value.model === '') {
+  //     ElMessage({
+  //       message: '请选择翻译模型',
+  //       type: 'error',
+  //     })
+  //     return
+  //   }
 
-    // if (form.value.langs.length < 1) {
-    //   ElMessage({
-    //     message: '请选择目标语言',
-    //     type: 'error',
-    //   })
-    //   return
-    // }
+  //   if (form.value.langs.length < 1) {
+  //     ElMessage({
+  //       message: '请选择目标语言',
+  //       type: 'error',
+  //     })
+  //     return
+  //   }
 
-    // if (form.value.prompt === '') {
-    //   ElMessage({
-    //     message: '请输入翻译提示词',
-    //     type: 'error',
-    //   })
-    //   return
-    // }
-    
-    // 翻译服务 检查api密钥是否为空 会员不需要提供key
-    if (form.value.api_key === '' && !userStore.isVip) {
-      ElMessage({
-        message: '请输入API密钥',
-        type: 'error',
-      })
-      return
-    }
-  } else if (currentServiceType.value == 'baidu') {
-    if (form.value.app_key === '' || form.value.app_id === '' || form.value.to_lang === '') {
-      ElMessage({
-        message: '请填写百度翻译相关信息!',
-        type: 'error',
-      })
-      return
-    }
-  }
+  //   if (form.value.prompt === '') {
+  //     ElMessage({
+  //       message: '请输入翻译提示词',
+  //       type: 'error',
+  //     })
+  //     return
+  //   }
+  //   // 翻译服务 检查api密钥是否为空 会员不需要提供key
+  //   if (form.value.api_key === '' && !userStore.isVip) {
+  //     ElMessage({
+  //       message: '请输入API密钥',
+  //       type: 'error',
+  //     })
+  //     return
+  //   }
+  // } else if (currentServiceType.value == 'baidu') {
+  //   if (form.value.app_key === '' || form.value.app_id === '' || form.value.to_lang === '') {
+  //     ElMessage({
+  //       message: '请填写百度翻译相关信息!',
+  //       type: 'error',
+  //     })
+  //     return
+  //   }
+  // }
 
   // 3.提交翻译任务
   // 如果是会员，不需要提供api和key
@@ -830,6 +893,7 @@ async function handleTranslate(transform) {
       await startBatchTranslation()
     } else {
       // 单个文件翻译（保持原有逻辑）
+      console.log('翻译表单：', form.value)
       const res = await transalteFile(form.value)
       if (res.code == 200) {
         ElMessage({
@@ -1048,8 +1112,10 @@ async function getTranslatesData(page, uuid) {
       )
       
       if (hasProcessingTasks && !autoRefreshInterval.value) {
+        console.log('🚀 检测到翻译任务，启动自动进度更新')
         startAutoRefresh()
       } else if (!hasProcessingTasks && autoRefreshInterval.value) {
+        console.log('✅ 所有翻译任务完成，停止自动进度更新')
         stopAutoRefresh()
       }
       
@@ -1074,6 +1140,8 @@ async function updateProgressOnly() {
     if (processingTasks.length === 0) {
       return
     }
+    
+    console.log(`🔄 更新 ${processingTasks.length} 个任务的进度...`)
     
     // 并行查询所有任务的进度
     const progressPromises = processingTasks.map(task => 
@@ -1102,6 +1170,8 @@ async function updateProgressOnly() {
           if (progressData.end_at) {
             translatesData.value[taskIndex].end_at = progressData.end_at
           }
+          
+          console.log(`✅ 任务 ${task.uuid} 进度更新: ${progressData.process}%`)
         }
       }
     })
@@ -1128,6 +1198,7 @@ function startAutoRefresh() {
       )
       
       if (hasProcessingTasks) {
+        console.log('🔄 自动更新翻译进度...')
         updateProgressOnly() // 使用专门的进度更新函数
       }
     }
@@ -1279,42 +1350,22 @@ async function downAllTransFile() {
   }
 }
 
-// 页面初始化
-onMounted(async () => {
-  try {
-    // 获取翻译列表
+onMounted(() => {
+  if (userStore.token) {
     getTranslatesData(1)
+    form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
     
-    // 先设置默认值
-    const defaultValues = {
-      model: 'qwen-mt-plus',
-      backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-      type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 确保type[2]是trans_text_only_inherit
-      langs: ['','英语'],
-      lang: '英语',
-      prompt: '你是一个文档翻译助手，请将以下文本、单词或短语直接翻译成{target_lang}，不返回原文本。如果文本中包含{target_lang}文本、特殊名词（比如邮箱、品牌名、单位名词如mm、px、℃等）、无法翻译等特殊情况，请直接返回原文而无需解释原因。遇到无法翻译的文本直接返回原内容。保留多余空格。',
-      threads: 20,
-      server: 'openai'
-    }
-    
-    // 获取翻译设置并合并，但保留我们的默认值
-    const storeForm = translateStore.getCurrentServiceForm || {}
-    
-    // 强制覆盖关键字段，确保默认值不被覆盖
-    form.value = { 
-      ...form.value, 
-      ...defaultValues,  // 先设置默认值
-      ...storeForm,      // 然后合并存储的设置
-      // 强制覆盖关键字段，确保默认值
-      model: 'qwen-mt-plus',
-      backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-      type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit']
-    }
+    // 添加调试信息
+    console.log('页面初始化 - 翻译设置:', translateStore.aiServer)
+    console.log('页面初始化 - 术语库:', translateStore.aiServer.comparison_id)
+    console.log('页面初始化 - 目标语言:', translateStore.aiServer.lang)
+    console.log('页面初始化 - 表单数据:', form.value)
     
     // 启动自动进度更新
     startAutoRefresh()
-  } catch (error) {
-    console.error('页面初始化失败:', error)
+    
+    // 监听页面可见性变化
+    document.addEventListener('visibilitychange', handleVisibilityChange)
   }
 })
 

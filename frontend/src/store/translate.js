@@ -12,15 +12,16 @@ export const useTranslateStore = defineStore('translate-settings', () => {
   const aiServer = ref({
     api_url: settingsStore.system_settings.api_url || '',
     api_key: '',
-    model: settingsStore.system_settings.default_model,
-    backup_model: settingsStore.system_settings.default_backup,
-    prompt: settingsStore.system_settings.prompt_template,
+    // 使用硬编码的默认值，优先级高于后端配置
+    model: 'qwen-mt-plus',  // 硬编码：通义千问
+    backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 硬编码：Claude
+    prompt: settingsStore.system_settings.prompt_template || '你是一个文档翻译助手，请将以下文本、单词或短语直接翻译成{target_lang}，不返回原文本。如果文本中包含{target_lang}文本、特殊名词（比如邮箱、品牌名、单位名词如mm、px、℃等）、无法翻译等特殊情况，请直接返回原文而无需解释原因。遇到无法翻译的文本直接返回原内容。保留多余空格。',
     prompt_id: null,
-    threads: settingsStore.system_settings.max_threads,
+    threads: 30,  // 硬编码：30线程
     comparison_id: [], // 改为数组类型，支持多选术语库，默认为空数组
-    lang: '英语', // 设置默认目标语言为英语
-    doc2x_flag: '',
-    doc2x_secret_key: ''
+    lang: '英语', // 硬编码：默认目标语言为英语
+    doc2x_flag: 'N',  // 硬编码：不使用Doc2x
+    doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0'
   })
 
   // 百度翻译设置
@@ -41,19 +42,18 @@ export const useTranslateStore = defineStore('translate-settings', () => {
   })
   // 其他设置
   const otherSettings = ref({
-    langs: ['中文', '英语'],
+    langs: ['', '英语'],
     comparison_id: '',
-    threads: 5,
+    threads: 30,
     doc2x_flag: 'N', // 是否使用doc2x
     doc2x_secret_key: ''
   })
   // 通用设置
   const common = ref({
-    langs: ['中文', '英语'],
-    type: ['trans_text', 'trans_text_only', 'trans_text_only_new'],
-    // comparison_id: null,
-    doc2x_flag: 'N',
-    doc2x_secret_key: ''
+    langs: ['', '英语'],  // 硬编码：默认语言数组
+    type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 硬编码：默认译文形式
+    doc2x_flag: 'N',  // 硬编码：不使用Doc2x
+    doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0'
   })
 
   // 模型和语言选项

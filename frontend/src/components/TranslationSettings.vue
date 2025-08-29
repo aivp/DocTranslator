@@ -39,12 +39,14 @@
 
       <!-- AI翻译设置 -->
       <template v-if="settingsForm.currentService === 'ai'">
+        <!-- 目标语言 -->
         <el-form-item label="目标语言" required width="100%">
           <el-select v-model="settingsForm.aiServer.lang" placeholder="请选择目标语言" clearable>
             <el-option v-for="lang in languageOptions" :key="lang.value" :label="lang.label" :value="lang.value" />
           </el-select>
         </el-form-item>
 
+        <!-- 术语库 -->
         <el-form-item label="术语库" width="100%">
           <el-select
             v-model="settingsForm.aiServer.comparison_id"
@@ -359,7 +361,12 @@ const formReset = () => {
     currentService: 'ai',  // 默认AI翻译
     aiServer: { 
       ...translateStore.aiServer, 
-      lang: '英语',  // 设置默认目标语言为英语
+      // 硬编码的默认值
+      model: 'qwen-mt-plus',  // 主模型：通义千问
+      backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 备用模型：Claude
+      lang: '英语',  // 默认目标语言：英语
+      type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 默认译文形式：仅文字+仅译文+继承原版面
+      threads: 30,  // 默认线程数：30
       comparison_id: [],  // 术语库多选，默认为空数组
     },
     baidu: { ...translateStore.baidu },
@@ -389,7 +396,24 @@ const formConfim = (formEl) => {
       translateStore.updateCurrentService(settingsForm.value.currentService)
 
       if (settingsForm.value.currentService === 'ai') {
-        translateStore.updateAIServerSettings(settingsForm.value.aiServer)
+        // 更新AI设置，包括所有硬编码的字段
+        translateStore.updateAIServerSettings({
+          ...settingsForm.value.aiServer,
+          // 确保硬编码的默认值被保存
+          model: settingsForm.value.aiServer.model || 'qwen-mt-plus',
+          backup_model: settingsForm.value.aiServer.backup_model || 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+          lang: settingsForm.value.aiServer.lang || '英语',
+          type: settingsForm.value.aiServer.type || ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],
+          threads: settingsForm.value.aiServer.threads || 30,
+        })
+        
+        // 同时更新通用设置
+        translateStore.updateCommonSettings({
+          ...settingsForm.value.common,
+          type: settingsForm.value.aiServer.type || ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],
+          threads: settingsForm.value.aiServer.threads || 30,
+        })
+        
         // 添加调试信息
         console.log('保存后的store数据:', translateStore.aiServer)
         console.log('保存后的术语库:', translateStore.aiServer.comparison_id)
@@ -398,7 +422,7 @@ const formConfim = (formEl) => {
       } else if (settingsForm.value.currentService === 'google') {
         translateStore.updateGoogleSettings(settingsForm.value.google)
       }
-      // console.log('settingsForm.value.common', settingsForm.value.baidu)
+      
       translateStore.updateCommonSettings(settingsForm.value.common)
       ElMessage.success('设置保存成功')
       formSetShow.value = false
@@ -412,12 +436,17 @@ const formCancel = () => {
 }
 const open = () => {
   formSetShow.value = true
-  // 初始化表单数据
+  // 初始化表单数据，使用硬编码的默认值
   settingsForm.value = {
     currentService: 'ai',  // 默认AI翻译
     aiServer: { 
       ...translateStore.aiServer, 
-      lang: translateStore.aiServer.lang || '英语',  // 使用store中的值，如果没有则默认为英语
+      // 硬编码的默认值，覆盖store中的值
+      model: 'qwen-mt-plus',  // 主模型：通义千问
+      backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 备用模型：Claude
+      lang: '英语',  // 默认目标语言：英语
+      type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 默认译文形式：仅文字+仅译文+继承原版面
+      threads: 30,  // 默认线程数：30
       comparison_id: (() => {
         // 清理数据，确保没有空值或无效值
         const storedValue = translateStore.aiServer.comparison_id
@@ -434,7 +463,7 @@ const open = () => {
   }
   
   // 添加调试信息
-  console.log('打开设置时的数据:', settingsForm.value.aiServer.comparison_id)
+  console.log('打开设置时的数据:', settingsForm.value.aiServer)
 }
 
 function docx2_check() {
