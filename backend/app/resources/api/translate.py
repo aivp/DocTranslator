@@ -764,3 +764,96 @@ class Doc2xCheckResource(Resource):
         if secret_key == "valid_key_123":  # 示例验证
             return APIResponse.success(message="接口正常")
         return APIResponse.error("无效密钥", 400)
+
+
+class TranslateProgressResource(Resource):
+    @require_valid_token  # 先检查token
+    @jwt_required()
+    def post(self):
+        """查询翻译进度（只返回进度信息，不返回完整任务信息）"""
+        data = request.form
+        uuid = data.get('uuid')
+        
+        if not uuid:
+            return APIResponse.error("缺少任务UUID", 400)
+        
+        try:
+            # 获取用户信息
+            user_id = get_jwt_identity()
+            
+            # 查询翻译记录（只查询进度相关字段）
+            record = Translate.query.filter_by(
+                uuid=uuid,
+                customer_id=user_id,
+                deleted_flag='N'
+            ).first()
+            
+            if not record:
+                return APIResponse.error("任务不存在", 404)
+            
+            # 只返回进度相关信息，减少数据传输
+            # 注意：只返回模型中实际存在的字段，并确保所有字段都是JSON可序列化的
+            progress_data = {
+                'uuid': str(record.uuid) if record.uuid else None,
+                'status': str(record.status) if record.status else None,
+                'process': float(record.process) if record.process is not None else 0.0,
+                'start_at': record.start_at.isoformat() if record.start_at else None,
+                'end_at': record.end_at.isoformat() if record.end_at else None,
+                'failed_reason': str(record.failed_reason) if record.failed_reason else None
+            }
+            
+            # 计算耗时（如果开始时间和结束时间都存在）
+            if record.start_at and record.end_at:
+                try:
+                    from datetime import datetime
+                    start_time = record.start_at
+                    end_time = record.end_at
+                    if isinstance(start_time, str):
+                        start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    if isinstance(end_time, str):
+                        end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                    
+                    time_diff = end_time - start_time
+                    total_seconds = time_diff.total_seconds()
+                    
+                    if total_seconds < 60:
+                        spend_time = f"{int(total_seconds)}秒"
+                    elif total_seconds < 3600:
+                        minutes = int(total_seconds // 60)
+                        seconds = int(total_seconds % 60)
+                        spend_time = f"{minutes}分{seconds}秒"
+                    else:
+                        hours = int(total_seconds // 3600)
+                        minutes = int((total_seconds % 3600) // 60)
+                        spend_time = f"{hours}小时{minutes}分"
+                    
+                    progress_data['spend_time'] = spend_time
+                except Exception as e:
+                    current_app.logger.warning(f"计算耗时失败: {str(e)}")
+                    progress_data['spend_time'] = None
+            else:
+                progress_data['spend_time'] = None
+            
+            # 最后检查：确保所有数据都是JSON可序列化的
+            try:
+                # 测试JSON序列化
+                import json
+                json.dumps(progress_data)
+                return APIResponse.success(progress_data)
+            except (TypeError, ValueError) as json_error:
+                current_app.logger.error(f"JSON序列化失败: {str(json_error)}")
+                current_app.logger.error(f"问题数据: {progress_data}")
+                
+                # 如果序列化失败，返回简化的数据
+                safe_data = {
+                    'uuid': str(record.uuid) if record.uuid else None,
+                    'status': str(record.status) if record.status else None,
+                    'process': 0.0,
+                    'error': '数据序列化失败'
+                }
+                
+                return APIResponse.success(safe_data)
+            
+        except Exception as e:
+            current_app.logger.error(f"查询翻译进度失败: {str(e)}", exc_info=True)
+            return APIResponse.error('查询进度失败', 500)

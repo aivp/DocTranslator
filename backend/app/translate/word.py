@@ -196,13 +196,6 @@ def start_with_okapi(trans, start_time):
                                      str(format(progress_percentage, '.1f')), 
                                      self.trans['id'])
                             
-                            # 如果进度达到100%，只更新进度，不更新状态
-                            # 状态更新将在字体调整完成后进行
-                            if progress_percentage >= 100.0:
-                                logger.info("✅ 翻译进度达到100%，等待字体调整完成...")
-                                # 不更新状态，只更新进度
-                                # 状态将在word.py中的to_translate.complete()调用时更新
-                                
                         except Exception as e:
                             logger.error(f"更新进度失败: {str(e)}")
                 
@@ -1450,17 +1443,6 @@ def run_translation(trans, texts, max_threads):
                          str(format(progress_percentage, '.1f')), 
                          trans['id'])
                 
-                # 如果进度达到100%，立即更新状态为已完成
-                if progress_percentage >= 100.0:
-                    from datetime import datetime
-                    import pytz
-                    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
-                    db.execute(
-                        "update translate set status='done',end_at=%s,process=100 where id=%s",
-                        end_time, trans['id']
-                    )
-                    logger.info("✅ 翻译完成，状态已更新为已完成")
-                    
             except Exception as e:
                 logger.error(f"更新进度失败: {str(e)}")
 

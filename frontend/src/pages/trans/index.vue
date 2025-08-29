@@ -135,7 +135,12 @@
               <span class="file_name">{{ item.origin_filename }}</span>
             </div>
             <div :class="item.status == 'done' ? 'pc_show table_li status' : 'table_li status'">
-              <el-progress class="translated-process" :percentage="item.process" color="#055CF9" />
+              <!-- 进行中显示实际进度，已完成显示100% -->
+              <el-progress 
+                class="translated-process" 
+                :percentage="item.status === 'done' ? 100 : Number(item.process)" 
+                color="#055CF9" 
+              />
               <img v-if="item.status == 'none'" src="@assets/waring.png" alt="未开始" />
               <img v-if="item.status == 'done'" src="@assets/success.png" alt="已完成" />
               <img v-if="item.status == 'process'" src="@assets/waring.png" alt="进行中" />
@@ -156,13 +161,14 @@
             </div>
             <!-- 操作 -->
             <div class="table_li">
-              <!-- 翻译成功图标 -->
-              <template v-if="item.status == 'done'">
+              <!-- 翻译成功图标：进度100%且状态为已完成时才显示 -->
+              <template v-if="item.status === 'done' && Number(item.process) >= 100">
                 <el-link class="icon_down" :href="API_URL + '/api/translate/download/' + item.id" target="_blank">
                   <span class="icon_handle"><DownloadIcon /></span>
                   <!-- <img src="@assets/icon_down.png" alt="" /> -->
                 </el-link>
               </template>
+              
               <!-- 失败重试图标 -->
               <template v-if="item.status == 'failed' || item.status == 'none'">
                 <span class="icon_handle" @click="retryTranslate(item)">
@@ -223,7 +229,8 @@ import {
   downAllTranslate,
   doc2xStartService,
   doc2xQueryStatusService,
-  getFinishCount
+  getFinishCount,
+  getTranslateProgress
 } from '@/api/trans'
 import { storage } from '@/api/account'
 import uploadPng from '@assets/upload.png'
@@ -373,7 +380,8 @@ function process(uuid) {
             type: 'error',
             duration: 5000,
           })
-          // 更新翻译任务列表
+          
+          // 任务失败后，刷新一次列表，让用户看到状态变化
           getTranslatesData(1)
           
           // 任务失败时，从form.files中移除失败的文件
@@ -387,27 +395,15 @@ function process(uuid) {
           setTimeout(() => startNextTranslation(), 2000)
           return // 直接返回，不再继续查询
         }
-
-        if (res.data.progress == 100) {
-          // 任务完成
-          // translating[uuid] = false
-          // translated.value = true
-          // target_url.value = API_URL + res.data.url
-          // target_count.value = res.data.count
-          // target_time.value = res.data.time
-          // result.value[uuid]['disabled'] = false
-          // // 以下演示版存储
-          // result.value[uuid]['status'] = 'done'
-          // result.value[uuid]['spend_time'] = res.data.time
-          // result.value[uuid]['end_at'] = res.data.end_time
-          // result.value[uuid]['process'] = 100
-          // result.value[uuid]['origin_filename'] = result.value[uuid]['file_name']
-          // result.value[uuid]['target_filepath'] = res.data.url
-
-          // 任务完成时，更新翻译任务列表
+        
+        // 如果返回的字段中明确表示任务完成
+        if (res.data.status === 'done') {
+          // 任务状态已完成，立即刷新列表
           ElMessage.success({
-            message: '文件翻译成功！',
+            message: '文件翻译完成！',
           })
+          
+          // 立即刷新列表，让用户看到状态变化
           getTranslatesData(1)
           
           // 翻译完成后，从form.files中移除已完成的文件
@@ -419,6 +415,15 @@ function process(uuid) {
           
           // 翻译完成后，自动启动下一个待翻译的文件
           setTimeout(() => startNextTranslation(), 2000)
+          return // 直接返回，不再继续查询
+        }
+
+        if (res.data.progress == 100) {
+          // 进度达到100%但状态还不是done，继续监控状态变化
+          console.log("进度达到100%，等待状态更新...")
+          
+          // 继续监控状态变化，缩短间隔以便更快检测
+          setTimeout(() => process(uuid), 5000)
         } else {
           // 如果未完成，继续调用 process 函数
           setTimeout(() => process(uuid), 10000)
@@ -430,7 +435,8 @@ function process(uuid) {
           type: 'error',
           duration: 5000,
         })
-        // 任务失败时，更新翻译任务列表
+        
+        // 任务失败后，刷新一次列表，让用户看到状态变化
         getTranslatesData(1)
         
         // 任务失败时，从form.files中移除失败的文件
@@ -451,7 +457,8 @@ function process(uuid) {
         type: 'error',
         duration: 5000,
       })
-      // 任务失败时，更新翻译任务列表
+      
+      // 网络错误后，刷新一次列表，让用户看到状态变化
       getTranslatesData(1)
       
       // 网络错误时，从form.files中移除失败的文件
@@ -523,8 +530,8 @@ async function startNextTranslation() {
         duration: 3000
       })
       
-      // 刷新翻译列表
-      getTranslatesData(1)
+      // 使用专门的进度更新函数，而不是刷新整个列表
+      updateProgressOnly()
       
       // 启动进度查询
       process(nextTask.uuid)
@@ -693,7 +700,8 @@ const doc2xStatusQuery = async (data) => {
         type: 'error',
         duration: 5000,
       })
-      // 更新翻译任务列表
+      
+      // doc2x翻译失败后，刷新一次列表，让用户看到状态变化
       getTranslatesData(1)
       
       // doc2x翻译失败时，从form.files中移除失败的文件
@@ -705,10 +713,12 @@ const doc2xStatusQuery = async (data) => {
       
       return // 直接返回，不再继续查询
     } else if (res.data.status == 'done') {
-      // 任务完成时，更新翻译任务列表
+      // 任务完成时，显示成功消息
       ElMessage.success({
         message: '文件翻译成功！',
       })
+      
+      // doc2x翻译完成后，刷新一次列表，让用户看到状态变化
       getTranslatesData(1)
       
       // doc2x翻译完成后，从form.files中移除已完成的文件
@@ -728,7 +738,8 @@ const doc2xStatusQuery = async (data) => {
       type: 'error',
       duration: 5000,
     })
-    // 任务失败时，更新翻译任务列表
+    
+    // doc2x查询失败后，刷新一次列表，让用户看到状态变化
     getTranslatesData(1)
     
     // doc2x查询失败时，从form.files中移除失败的文件
@@ -890,9 +901,11 @@ async function handleTranslate(transform) {
           message: '提交翻译任务成功！',
           type: 'success',
         })
-        // 刷新翻译列表
-        getTranslatesData(1)
-        // 启动任务查询
+        
+        // 先刷新一次列表，让用户看到新创建的翻译任务
+        await getTranslatesData(1)
+        
+        // 然后启动任务查询
         process(form.value.uuid)
       } else {
         ElMessage({
@@ -943,16 +956,18 @@ async function retryTranslate(item) {
       message: '启动翻译任务成功！',
       type: 'success',
     })
-    // 刷新翻译列表
-    getTranslatesData(1)
-    // 启动任务查询
+    
+    // 先刷新一次列表，让用户看到重启的翻译任务状态
+    await getTranslatesData(1)
+    
+    // 然后启动任务查询
     process(form.value.uuid)
   } else {
     ElMessage({
       message: '启动翻译任务失败~',
-      type: 'error',
-    })
-  }
+          type: 'error',
+        })
+      }
 }
 
 // 上传之前   && editionInfo.value != 'community'
@@ -1115,6 +1130,58 @@ async function getTranslatesData(page, uuid) {
   getCount()
 }
 
+// 专门的进度更新函数（只更新进度，不刷新整个列表）
+async function updateProgressOnly() {
+  try {
+    // 获取所有正在进行的翻译任务
+    const processingTasks = translatesData.value.filter(item => 
+      item.status === 'process' || item.status === 'none'
+    )
+    
+    if (processingTasks.length === 0) {
+      return
+    }
+    
+    console.log(`🔄 更新 ${processingTasks.length} 个任务的进度...`)
+    
+    // 并行查询所有任务的进度
+    const progressPromises = processingTasks.map(task => 
+      getTranslateProgress({ uuid: task.uuid })
+        .then(res => ({ task, res }))
+        .catch(err => ({ task, error: err }))
+    )
+    
+    const results = await Promise.allSettled(progressPromises)
+    
+    // 更新本地数据中的进度信息
+    results.forEach(result => {
+      if (result.status === 'fulfilled' && result.value.res?.code === 200) {
+        const { task, res } = result.value
+        const progressData = res.data
+        
+        // 找到对应的任务并更新进度
+        const taskIndex = translatesData.value.findIndex(item => item.uuid === task.uuid)
+        if (taskIndex !== -1) {
+          // 只更新进度相关字段，不触发整个列表刷新
+          translatesData.value[taskIndex].process = progressData.process
+          translatesData.value[taskIndex].status = progressData.status
+          translatesData.value[taskIndex].spend_time = progressData.spend_time
+          
+          // 如果任务完成，更新结束时间
+          if (progressData.end_at) {
+            translatesData.value[taskIndex].end_at = progressData.end_at
+          }
+          
+          console.log(`✅ 任务 ${task.uuid} 进度更新: ${progressData.process}%`)
+        }
+      }
+    })
+    
+  } catch (error) {
+    console.error('更新进度失败:', error)
+  }
+}
+
 // 自动进度更新函数
 function startAutoRefresh() {
   // 清除现有定时器
@@ -1132,8 +1199,8 @@ function startAutoRefresh() {
       )
       
       if (hasProcessingTasks) {
-        console.log('🔄 自动刷新翻译进度...')
-        getTranslatesData(1)
+        console.log('🔄 自动更新翻译进度...')
+        updateProgressOnly() // 使用专门的进度更新函数
       }
     }
   }, refreshInterval)
@@ -1151,9 +1218,9 @@ function stopAutoRefresh() {
 function handleVisibilityChange() {
   isPageVisible.value = !document.hidden
   if (isPageVisible.value) {
-    // 页面变为可见时，立即刷新一次
+    // 页面变为可见时，立即更新进度一次
     if (translatesData.value.length > 0) {
-      getTranslatesData(1)
+      updateProgressOnly()
     }
     // 重新启动自动刷新
     startAutoRefresh()

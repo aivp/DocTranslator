@@ -7,9 +7,21 @@ import sys
 import time
 import logging
 from datetime import datetime
+import re # Added for regex operations
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+# 简单的语法检查
+try:
+    # 测试基本语法
+    test_var = "test"
+    test_list = [1, 2, 3]
+    test_dict = {"key": "value"}
+    logger.info("PPT翻译模块语法检查通过")
+except Exception as e:
+    logger.error(f"PPT翻译模块语法检查失败: {e}")
+    raise
 
 # 字体缩放功能开关
 ENABLE_FONT_SCALING = True  # 设置为False关闭字体缩放，设置为True开启字体缩放
@@ -45,6 +57,9 @@ def start(trans):
     slides = wb.slides
     texts=[]
     
+    # 全局去重集合：记录所有已提取的文本内容
+    extracted_texts_global = set()
+    
     # 提取文本时保存样式信息，并建立文本与形状的对应关系
     slide_count = 0
     for slide in slides:
@@ -52,52 +67,7 @@ def start(trans):
         slide_text_count = 0
         logger.info(f"正在处理第 {slide_count} 页幻灯片...")
         
-        # 第三页特殊调试
-        # if slide_count == 3:
-        #     logger.info("🔍 第三页特殊调试模式启动")
-        #     logger.info(f"第三页形状总数: {len(slide.shapes)}")
-        
         for shape_index, shape in enumerate(slide.shapes):
-            # 添加详细的形状信息日志
-            # logger.info(f"=== 处理第 {slide_count} 页形状 ===")
-            # logger.info(f"形状类型: {type(shape).__name__}")
-            # logger.info(f"形状名称: {getattr(shape, 'name', 'N/A')}")
-            # logger.info(f"是否有表格: {shape.has_table}")
-            # logger.info(f"是否有文本框架: {shape.has_text_frame}")
-            # logger.info(f"是否有文本属性: {hasattr(shape, 'text')}")
-            # try:
-            #     logger.info(f"是否有占位符格式: {hasattr(shape, 'placeholder_format')}")
-            # except ValueError:
-            #     logger.info(f"是否有占位符格式: False (非占位符形状)")
-            
-            # 调试：记录所有形状的详细信息
-            if slide_count <= 3:  # 只对前3页进行详细调试
-                try:
-                    shape_info = {
-                        'type': type(shape).__name__,
-                        'name': getattr(shape, 'name', 'N/A'),
-                        'has_table': shape.has_table,
-                        'has_text_frame': shape.has_text_frame,
-                        'has_text': hasattr(shape, 'text'),
-                        'text_content': getattr(shape, 'text', 'N/A') if hasattr(shape, 'text') else 'N/A'
-                    }
-                    
-                    # 检查是否有shape_type属性
-                    if hasattr(shape, 'shape_type'):
-                        shape_info['shape_type'] = shape.shape_type
-                    
-                    # 检查是否有其他可能的文本属性
-                    for attr in ['alt_text', 'title', 'description']:
-                        if hasattr(shape, attr):
-                            attr_value = getattr(shape, attr)
-                            if attr_value:
-                                shape_info[attr] = attr_value[:50] + '...' if len(str(attr_value)) > 50 else str(attr_value)
-                    
-                    logger.info(f"形状调试信息: {shape_info}")
-                    
-                except Exception as e:
-                    logger.debug(f"获取形状信息时出错: {str(e)}")
-            
             # 处理表格
             if shape.has_table:
                 table = shape.table
@@ -105,106 +75,53 @@ def start(trans):
                 rows = len(table.rows)
                 cols = len(table.columns)
                 for r in range(rows):
-                    row_data = []
                     for c in range(cols):
                         cell_text = table.cell(r, c).text
                         if cell_text!=None and len(cell_text)>0 and not common.is_all_punc(cell_text):
-                            # 保存表格单元格的样式信息，并建立对应关系
-                            cell = table.cell(r, c)
-                            style_info = extract_cell_style(cell)
-                            texts.append({
-                                "text": cell_text,
-                                "row": r,
-                                "column": c, 
-                                "complete": False,
-                                "type": "table_cell",
-                                "style_info": style_info,
-                                "slide_index": slide_count,
-                                "shape_index": shape_index,
-                                "shape": shape,
-                                "cell": cell
-                            })
-                            slide_text_count += 1
+                            # 检查是否重复
+                            cell_text_clean = cell_text.strip()
+                            if cell_text_clean not in extracted_texts_global:
+                                # 保存表格单元格的样式信息，并建立对应关系
+                                cell = table.cell(r, c)
+                                style_info = extract_cell_style(cell)
+                                texts.append({
+                                    "text": cell_text,
+                                    "row": r,
+                                    "column": c, 
+                                    "complete": False,
+                                    "type": "table_cell",
+                                    "style_info": style_info,
+                                    "slide_index": slide_count,
+                                    "shape_index": shape_index,
+                                    "shape": shape,
+                                    "cell": cell
+                                })
+                                slide_text_count += 1
+                                extracted_texts_global.add(cell_text_clean)
+                                logger.debug(f"添加表格单元格文本: {cell_text_clean[:50]}...")
+                            else:
+                                logger.debug(f"跳过重复的表格单元格文本: {cell_text_clean[:50]}...")
             
             # 处理所有有文本框架的形状（包括文本框、标题、占位符等）
             elif shape.has_text_frame:
                 text_frame = shape.text_frame
-                # logger.info(f"发现文本框架，段落数: {len(text_frame.paragraphs)}")
-                for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
-                    text=paragraph.text
-                    # logger.info(f"段落文本: '{text[:50]}...' (长度: {len(text)})")
-                    if text!=None and len(text)>0 and not common.is_all_punc(text):
-                        # 保存段落的样式信息，并建立对应关系
-                        style_info = extract_paragraph_style(paragraph)
-                        # logger.info(f"提取段落样式: runs数={len(style_info.get('runs', []))}")
-                        texts.append({
-                            "text": text, 
-                            "complete": False,
-                            "type": "paragraph",
-                            "style_info": style_info,
-                            "paragraph": paragraph,
-                            "slide_index": slide_count,
-                            "shape_index": shape_index,
-                            "shape": shape,
-                            "paragraph_index": paragraph_index
-                        })
-                        slide_text_count += 1
-                        # logger.info(f"已添加段落文本: '{text[:30]}...'")
-                    else:
-                        # logger.info(f"跳过段落文本: '{text[:30]}...' (原因: 空文本或纯标点)")
-                        pass
+                logger.debug(f"发现文本框架，段落数: {len(text_frame.paragraphs)}")
                 
-                # 额外检查：处理可能遗漏的文本框架内容
-                if text_frame.text and text_frame.text.strip():
-                    # 检查是否有文本但没有被段落处理
-                    frame_text = text_frame.text.strip()
-                    # 更严格的重复检查：检查是否与任何已提取的文本重复
-                    is_duplicate = False
-                    for item in texts:
-                        if item['text'].strip() == frame_text:
-                            is_duplicate = True
-                            # logger.info(f"跳过重复的文本框架内容: {frame_text[:50]}...")
-                            break
-                    
-                    if not is_duplicate:
-                        # logger.info(f"发现遗漏的文本框架内容: {frame_text[:50]}...")
-                        texts.append({
-                            "text": frame_text,
-                            "complete": False,
-                            "type": "text_frame",
-                            "text_frame": text_frame,
-                            "slide_index": slide_count,
-                            "shape_index": shape_index,
-                            "shape": shape
-                        })
-                        slide_text_count += 1
-            
-            # 处理其他可能有文本的形状（如形状内的文本）
-            elif hasattr(shape, 'text') and shape.text:
-                text = shape.text
-                if text!=None and len(text)>0 and not common.is_all_punc(text):
-                    texts.append({
-                        "text": text, 
-                        "complete": False,
-                        "type": "shape_text",
-                        "shape": shape,
-                        "slide_index": slide_count,
-                        "shape_index": shape_index
-                    })
-                    slide_text_count += 1
-            
-            # 处理可能遗漏的文本类型
-            elif hasattr(shape, 'text_frame') and shape.text_frame:
-                # 检查是否有文本框架但没有被has_text_frame识别
-                text_frame = shape.text_frame
-                if text_frame.text and text_frame.text.strip():
-                    # logger.info(f"发现遗漏的文本框架: {text_frame.text[:50]}...")
-                    for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
-                        text = paragraph.text
-                        if text and len(text.strip()) > 0 and not common.is_all_punc(text):
+                # 记录已提取的文本，避免重复提取
+                extracted_texts_in_frame = set()
+                paragraph_texts = []  # 收集所有段落文本
+                
+                # 第一优先级：提取段落文本
+                for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
+                    text = paragraph.text
+                    if text!=None and len(text)>0 and not common.is_all_punc(text):
+                        text_clean = text.strip()
+                        # 检查是否重复
+                        if text_clean not in extracted_texts_global:
+                            # 保存段落的样式信息，并建立对应关系
                             style_info = extract_paragraph_style(paragraph)
                             texts.append({
-                                "text": text,
+                                "text": text, 
                                 "complete": False,
                                 "type": "paragraph",
                                 "style_info": style_info,
@@ -215,62 +132,160 @@ def start(trans):
                                 "paragraph_index": paragraph_index
                             })
                             slide_text_count += 1
-            
-            # 处理其他可能的文本类型
-            elif hasattr(shape, 'name') and shape.name:
-                # 检查形状名称是否包含文本
-                shape_name = shape.name
-                if shape_name and len(shape_name.strip()) > 0:
-                    # logger.info(f"发现形状名称文本: {shape_name}")
-                    texts.append({
-                        "text": shape_name,
-                        "complete": False,
-                        "type": "shape_name",
-                        "shape": shape,
-                        "slide_index": slide_count,
-                        "shape_index": shape_index
-                    })
-                    slide_text_count += 1
-            
-            # 额外检查：处理可能遗漏的占位符文本
-            try:
-                if hasattr(shape, 'placeholder_format') and shape.placeholder_format:
-                    placeholder_type = shape.placeholder_format.type
-                    # logger.info(f"发现占位符类型: {placeholder_type}")
-                    # 检查占位符是否有文本内容
-                    if hasattr(shape, 'text_frame') and shape.text_frame:
-                        placeholder_text = shape.text_frame.text.strip()
-                        if placeholder_text and not any(item['text'] == placeholder_text for item in texts[-slide_text_count:]):
-                            # logger.info(f"发现占位符文本: {placeholder_text[:50]}...")
+                            # 记录已提取的文本
+                            extracted_texts_in_frame.add(text_clean)
+                            extracted_texts_global.add(text_clean)
+                            paragraph_texts.append(text_clean)
+                            logger.debug(f"添加段落文本: {text_clean[:30]}...")
+                        else:
+                            logger.debug(f"跳过重复的段落文本: {text_clean[:30]}... (已在其他地方提取)")
+                
+                # 第二优先级：检查文本框架是否有遗漏的文本
+                if text_frame.text and text_frame.text.strip():
+                    frame_text = text_frame.text.strip()
+                    
+                    # 智能判断：只有当框架文本与段落文本组合不完全匹配时才添加
+                    # 避免重复提取相同的内容
+                    if frame_text not in extracted_texts_global:
+                        # 检查框架文本是否只是段落文本的组合
+                        is_just_combination = False
+                        if paragraph_texts:
+                            # 移除所有空格和标点，比较纯文本内容
+                            frame_text_clean = re.sub(r'[\s\.,，。！？；：""''（）【】]+', '', frame_text)
+                            paragraph_combined = re.sub(r'[\s\.,，。！？；：""''（）【】]+', '', ''.join(paragraph_texts))
+                            
+                            # 如果框架文本与段落组合文本相同或相似，说明没有遗漏
+                            if frame_text_clean == paragraph_combined or len(frame_text_clean) == len(paragraph_combined):
+                                is_just_combination = True
+                                logger.debug(f"框架文本与段落组合相同，跳过: {frame_text[:50]}...")
+                        
+                        if not is_just_combination:
+                            logger.debug(f"发现遗漏的文本框架内容: {frame_text[:50]}...")
                             texts.append({
-                                "text": placeholder_text,
+                                "text": frame_text,
                                 "complete": False,
-                                "type": "placeholder",
-                                "shape": shape,
+                                "type": "text_frame",
+                                "text_frame": text_frame,
                                 "slide_index": slide_count,
-                                "shape_index": shape_index
+                                "shape_index": shape_index,
+                                "shape": shape
                             })
                             slide_text_count += 1
-            except ValueError as e:
-                # 忽略"shape is not a placeholder"错误
-                pass
-            except Exception as e:
-                logger.warning(f"处理占位符时出错: {str(e)}")
+                            extracted_texts_global.add(frame_text)
+                            logger.debug(f"添加遗漏的文本框架内容: {frame_text[:50]}...")
+                        else:
+                            logger.debug(f"跳过重复的文本框架内容: {frame_text[:50]}... (与段落组合相同)")
+                    else:
+                        logger.debug(f"跳过重复的文本框架内容: {frame_text[:50]}... (已在其他地方提取)")
+            
+            # 处理其他可能有文本的形状（如形状内的文本）
+            # 注意：这里只处理没有文本框架的形状，避免重复提取
+            elif hasattr(shape, 'text') and shape.text and not shape.has_text_frame:
+                text = shape.text
+                if text!=None and len(text)>0 and not common.is_all_punc(text):
+                    text_clean = text.strip()
+                    # 检查是否与已提取的文本重复
+                    if text_clean not in extracted_texts_global:
+                        texts.append({
+                            "text": text, 
+                            "complete": False,
+                            "type": "shape_text",
+                            "shape": shape,
+                            "slide_index": slide_count,
+                            "shape_index": shape_index
+                        })
+                        slide_text_count += 1
+                        extracted_texts_global.add(text_clean)
+                        logger.debug(f"添加形状文本: {text_clean[:50]}...")
+                    else:
+                        logger.debug(f"跳过重复的形状文本: {text_clean[:50]}... (已在其他地方提取)")
+            
+            # 处理形状名称（通常不会与内容文本重复）
+            elif hasattr(shape, 'name') and shape.name:
+                shape_name = shape.name
+                if shape_name and len(shape_name.strip()) > 0:
+                    shape_name_clean = shape_name.strip()
+                    # 检查是否与已提取的文本重复
+                    if shape_name_clean not in extracted_texts_global:
+                        texts.append({
+                            "text": shape_name,
+                            "complete": False,
+                            "type": "shape_name",
+                            "shape": shape,
+                            "slide_index": slide_count,
+                            "shape_index": shape_index
+                        })
+                        slide_text_count += 1
+                        extracted_texts_global.add(shape_name_clean)
+                        logger.debug(f"添加形状名称文本: {shape_name_clean[:50]}...")
+                    else:
+                        logger.debug(f"跳过重复的形状名称文本: {shape_name_clean[:50]}... (已在其他地方提取)")
         
         logger.info(f"第 {slide_count} 页幻灯片提取了 {slide_text_count} 个文本元素")
     
-    # 额外检查：确保没有遗漏任何文本
-    # logger.info(f"总共提取了 {len(texts)} 个文本元素")
+    # 最终去重检查
+    logger.info(f"总共提取了 {len(texts)} 个文本元素")
+    
+    # 最终去重清理：移除完全重复的文本
+    unique_texts = []
+    seen_texts = set()
+    
+    for item in texts:
+        text_content = item.get('text', '').strip()
+        if text_content and text_content not in seen_texts:
+            unique_texts.append(item)
+            seen_texts.add(text_content)
+            logger.debug(f"保留文本: {text_content[:50]}...")
+        else:
+            logger.warning(f"移除重复文本: {text_content[:50]}... (类型: {item.get('type', 'unknown')})")
+    
+    # 更新texts列表
+    original_count = len(texts)
+    texts = unique_texts
+    logger.info(f"去重后文本数量: {len(texts)} (原来: {original_count}, 移除: {original_count - len(texts)})")
     
     # 调试：打印所有提取的文本类型和详细信息
     text_types = {}
+    duplicate_check = {}  # 检查重复文本
+    
     for i, item in enumerate(texts):
         text_type = item.get('type', 'unknown')
         text_types[text_type] = text_types.get(text_type, 0) + 1
         
+        # 检查重复文本
+        text_content = item.get('text', '').strip()
+        if text_content in duplicate_check:
+            duplicate_check[text_content].append({
+                'index': i,
+                'type': text_type,
+                'slide': item.get('slide_index', 'N/A'),
+                'shape': item.get('shape_index', 'N/A')
+            })
+        else:
+            duplicate_check[text_content] = [{
+                'index': i,
+                'type': text_type,
+                'slide': item.get('slide_index', 'N/A'),
+                'shape': item.get('shape_index', 'N/A')
+            }]
+        
         # 记录每个文本项的详细信息（前10个）
         if i < 10:
             logger.info(f"文本项 {i+1}: 类型={text_type}, 幻灯片={item.get('slide_index', 'N/A')}, 形状索引={item.get('shape_index', 'N/A')}, 内容='{item.get('text', '')[:50]}...'")
+    
+    # 报告重复文本情况
+    duplicate_count = 0
+    for text_content, occurrences in duplicate_check.items():
+        if len(occurrences) > 1:
+            duplicate_count += 1
+            logger.warning(f"发现重复文本: '{text_content[:50]}...' 出现 {len(occurrences)} 次:")
+            for occ in occurrences:
+                logger.warning(f"  - 索引{occ['index']}, 类型={occ['type']}, 幻灯片={occ['slide']}, 形状={occ['shape']}")
+    
+    if duplicate_count > 0:
+        logger.warning(f"总共发现 {duplicate_count} 个重复文本，这可能导致翻译重复")
+    else:
+        logger.info("未发现重复文本，提取正常")
     
     logger.info(f"提取的文本类型分布: {text_types}")
     logger.info(f"总共提取了 {len(texts)} 个文本元素")
@@ -289,7 +304,6 @@ def start(trans):
         with progress_lock:
             completed_count += 1
             progress_percentage = min((completed_count / total_count) * 100, 100.0)
-            # logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
             
             # 更新数据库进度
             try:
@@ -335,7 +349,6 @@ def start(trans):
         if current_completed > last_completed_count:
             completed_count = current_completed
             progress_percentage = min((completed_count / total_count) * 100, 100.0)
-            # logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
             
             # 更新数据库进度
             try:
@@ -344,16 +357,6 @@ def start(trans):
                          str(format(progress_percentage, '.1f')), 
                          trans['id'])
                 
-                # 如果进度达到100%，立即更新状态为已完成
-                if progress_percentage >= 100.0:
-                    import pytz
-                    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
-                    db.execute(
-                        "update translate set status='done',end_at=%s,process=100 where id=%s",
-                        end_time, trans['id']
-                    )
-                    print("✅ 翻译完成，状态已更新为已完成")
-                    
             except Exception as e:
                 print(f"更新进度失败: {str(e)}")
             
@@ -1137,7 +1140,8 @@ def distribute_text_to_paragraphs(text_frame, translated_text, paragraph_styles)
         
         if allocated_text:
             # 按run分配文本并应用自适应样式
-            distribute_text_to_runs_with_adaptive_styles(paragraph, allocated_text, para_style['runs'], allocated_text)
+            # 注意：最后一个参数应该是original_text，用于样式恢复
+            distribute_text_to_runs_with_adaptive_styles(paragraph, allocated_text, para_style['runs'], original_text)
             
             # 恢复段落级别的样式
             if 'paragraph_level' in para_style:

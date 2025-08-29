@@ -52,6 +52,15 @@ export function transalteProcess(params) {
     });
 }
 
+// 专门的进度查询API（只返回进度信息，不返回完整任务信息）
+export function getTranslateProgress(params) {
+    return request({
+        url: `/api/translate/progress`,
+        method: 'POST',
+        data: params
+    });
+}
+
 /**
  * 翻译
  */

@@ -1100,9 +1100,12 @@ def complete(trans, text_count, spend_time):
     import pytz
     end_time = datetime.now(pytz.timezone('Asia/Shanghai'))  # 使用东八区时区，与translate_service.py保持一致
     
+    # 确保target_filepath字段被正确更新
+    target_filepath = trans.get('target_file', '')
+    
     db.execute(
-        "update translate set status='done',end_at=%s,process=100,target_filesize=%s,word_count=%s where id=%s",
-        end_time, target_filesize, text_count, trans['id'])
+        "update translate set status='done',end_at=%s,process=100,target_filesize=%s,word_count=%s,target_filepath=%s where id=%s",
+        end_time, target_filesize, text_count, target_filepath, trans['id'])
 
 
 def error(translate_id, message):

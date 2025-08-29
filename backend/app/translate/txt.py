@@ -116,17 +116,6 @@ def start(trans):
                          str(format(progress_percentage, '.1f')), 
                          trans['id'])
                 
-                # 如果进度达到100%，立即更新状态为已完成
-                if progress_percentage >= 100.0:
-                    from datetime import datetime
-                    import pytz
-                    end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
-                    db.execute(
-                        "update translate set status='done',end_at=%s,process=100 where id=%s",
-                        end_time, trans['id']
-                    )
-                    print("✅ 翻译完成，状态已更新为已完成")
-                    
             except Exception as e:
                 print(f"更新进度失败: {str(e)}")
             
