@@ -133,14 +133,15 @@ class TranslateStartResource(Resource):
                 translate_settings[setting.alias] = setting.value
             # 更新翻译记录
             translate.server = data.get('server', 'openai')
-            translate.origin_filename = origin_filename
+            translate.origin_filename = data['file_name']
             translate.target_filepath = target_abs_path  # 存储翻译结果的绝对路径
 
-            translate.model = data['model']
+            # 强制写死关键参数，前端无法覆盖
+            translate.model = 'qwen-mt-plus'  # 强制写死，忽略前端传入的model
             translate.app_key = data.get('app_key', None)
             translate.app_id = data.get('app_id', None)
-            translate.backup_model = data['backup_model']
-            translate.type = translate_type
+            translate.backup_model = 'us.anthropic.claude-sonnet-4-20250514-v1:0'  # 强制写死，忽略前端传入的backup_model
+            translate.type = 'trans_text_only_inherit'  # 强制写死，忽略前端传入的type[2]
             translate.prompt = data['prompt']
             translate.threads = int(data['threads'])
             # 会员用户下使用系统的api_url和api_key
