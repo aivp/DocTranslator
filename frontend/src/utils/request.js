@@ -51,7 +51,6 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   response => {
     const res = response.data
-    console.log('API响应数据:', res) // 添加调试信息
     
     // 检查业务状态码 - 后端返回的是元组格式 (data, code)
     // 如果 res 是数组且第二个元素是状态码，说明是元组格式
