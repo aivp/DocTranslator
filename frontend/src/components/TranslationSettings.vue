@@ -364,14 +364,17 @@ const formReset = () => {
       // 硬编码的默认值
       model: 'qwen-mt-plus',  // 主模型：通义千问
       backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 备用模型：Claude
-      lang: '英语',  // 默认目标语言：英语
+      lang: translateStore.aiServer.lang || '英语',  // 只针对语言：使用store中的值，如果没有则默认为英语
       type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 默认译文形式：仅文字+仅译文+继承原版面
       threads: 30,  // 默认线程数：30
       comparison_id: [],  // 术语库多选，默认为空数组
     },
     baidu: { ...translateStore.baidu },
     google: { ...translateStore.google },
-    common: { ...translateStore.common },
+    common: { 
+      ...translateStore.common,
+      langs: translateStore.common.langs || ['', '英语'],  // 只针对langs：使用store中的值，如果没有则默认为['', '英语']
+    },
   }
   check_text.value = ''
 }
@@ -444,7 +447,7 @@ const open = () => {
       // 硬编码的默认值，覆盖store中的值
       model: 'qwen-mt-plus',  // 主模型：通义千问
       backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 备用模型：Claude
-      lang: '英语',  // 默认目标语言：英语
+      lang: translateStore.aiServer.lang || '英语',  // 只针对语言：使用store中的值，如果没有则默认为英语
       type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 默认译文形式：仅文字+仅译文+继承原版面
       threads: 30,  // 默认线程数：30
       comparison_id: (() => {
@@ -459,7 +462,10 @@ const open = () => {
     },
     baidu: { ...translateStore.baidu },
     google: { ...translateStore.google },
-    common: { ...translateStore.common },
+    common: { 
+      ...translateStore.common,
+      langs: translateStore.common.langs || ['', '英语'],  // 只针对langs：使用store中的值，如果没有则默认为['', '英语']
+    },
   }
   
   // 添加调试信息
