@@ -142,6 +142,7 @@
                 color="#055CF9" 
               />
               <img v-if="item.status == 'none'" src="@assets/waring.png" alt="未开始" />
+              <img v-if="item.status == 'changing'" src="@assets/waring.png" alt="转换中" />
               <img v-if="item.status == 'done'" src="@assets/success.png" alt="已完成" />
               <img v-if="item.status == 'process'" src="@assets/waring.png" alt="进行中" />
               <img v-if="item.status == 'failed'" src="@assets/waring.png" alt="失败" />
@@ -1108,7 +1109,7 @@ async function getTranslatesData(page, uuid) {
       
       // 检查是否需要启动自动进度更新
       const hasProcessingTasks = translatesData.value.some(item => 
-        item.status === 'process' || item.status === 'none'
+        item.status === 'process' || item.status === 'changing' || item.status === 'none'
       )
       
       if (hasProcessingTasks && !autoRefreshInterval.value) {
@@ -1134,7 +1135,7 @@ async function updateProgressOnly() {
   try {
     // 获取所有正在进行的翻译任务
     const processingTasks = translatesData.value.filter(item => 
-      item.status === 'process' || item.status === 'none'
+      item.status === 'process' || item.status === 'changing' || item.status === 'none'
     )
     
     if (processingTasks.length === 0) {
@@ -1164,6 +1165,7 @@ async function updateProgressOnly() {
           // 只更新进度相关字段，不触发整个列表刷新
           translatesData.value[taskIndex].process = progressData.process
           translatesData.value[taskIndex].status = progressData.status
+          translatesData.value[taskIndex].status_name = progressData.status_name  // 添加状态名称更新
           translatesData.value[taskIndex].spend_time = progressData.spend_time
           
           // 如果任务完成，更新结束时间
@@ -1171,7 +1173,7 @@ async function updateProgressOnly() {
             translatesData.value[taskIndex].end_at = progressData.end_at
           }
           
-          console.log(`✅ 任务 ${task.uuid} 进度更新: ${progressData.process}%`)
+          console.log(`✅ 任务 ${task.uuid} 进度更新: ${progressData.process}%, 状态: ${progressData.status_name}`)
         }
       }
     })
@@ -1194,7 +1196,7 @@ function startAutoRefresh() {
     if (isPageVisible.value && translatesData.value.length > 0) {
       // 检查是否有正在进行的翻译任务
       const hasProcessingTasks = translatesData.value.some(item => 
-        item.status === 'process' || item.status === 'none'
+        item.status === 'process' || item.status === 'changing' || item.status === 'none'
       )
       
       if (hasProcessingTasks) {
@@ -1679,6 +1681,9 @@ onUnmounted(() => {
         }
         .process {
           color: #ff9c00;
+        }
+        .changing {
+          color: #ff9c00;  /* 转换中状态，使用橙色 */
         }
       }
       .icon_down::after {

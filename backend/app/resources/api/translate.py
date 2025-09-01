@@ -251,7 +251,7 @@ class TranslateListResource(Resource):
 
             # 状态过滤
             if status_filter:
-                valid_statuses = {'none', 'process', 'done', 'failed'}
+                valid_statuses = {'none', 'changing', 'process', 'done', 'failed'}
                 if status_filter not in valid_statuses:
                     return APIResponse.error(f"Invalid status value: {status_filter}"), 400
                 query = query.filter_by(status=status_filter)
@@ -268,6 +268,7 @@ class TranslateListResource(Resource):
                 # 获取状态中文描述
                 status_name_map = {
                     'none': '未开始',
+                    'changing': '转换中',  # 新增：PDF转换状态
                     'process': '进行中',
                     'done': '已完成',
                     'failed': '失败'
@@ -793,9 +794,21 @@ class TranslateProgressResource(Resource):
             
             # 只返回进度相关信息，减少数据传输
             # 注意：只返回模型中实际存在的字段，并确保所有字段都是JSON可序列化的
+            
+            # 获取状态中文描述
+            status_name_map = {
+                'none': '未开始',
+                'changing': '转换中',
+                'process': '进行中',
+                'done': '已完成',
+                'failed': '失败'
+            }
+            status_name = status_name_map.get(str(record.status), '未知状态')
+            
             progress_data = {
                 'uuid': str(record.uuid) if record.uuid else None,
                 'status': str(record.status) if record.status else None,
+                'status_name': status_name,  # 添加状态中文名称
                 'process': float(record.process) if record.process is not None else 0.0,
                 'start_at': record.start_at.isoformat() if record.start_at else None,
                 'end_at': record.end_at.isoformat() if record.end_at else None,

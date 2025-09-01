@@ -79,7 +79,10 @@ class TranslateEngine:
             raise FileNotFoundError(f"原始文件不存在: {task.origin_filepath}")
 
         # 更新任务状态
-        task.status = 'process'
+        # PDF文件不在这里设置状态，由PDF翻译函数自己管理
+        # 其他文件使用process状态
+        if not task.origin_filepath.lower().endswith('.pdf'):
+            task.status = 'process'    # 非PDF文件：进行中
         task.start_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
         db.session.commit()
         return task

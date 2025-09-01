@@ -169,6 +169,14 @@ def start(trans):
         print(f"目标文件: {trans['target_file']}")
         print(f"开始时间: {start_time}")
         print("=" * 50)
+        
+        # 立即更新任务状态为"changing"，设置PDF转换初始进度0%
+        try:
+            from .to_translate import db
+            db.execute("update translate set status='changing', process='0' where id=%s", trans['id'])
+            print("✅ 已更新任务状态为changing，进度0%（开始PDF转换）")
+        except Exception as e:
+            print(f"⚠️  更新任务状态失败: {str(e)}")
 
         # 检查文件是否存在
         original_path = Path(trans['file_path'])
@@ -209,6 +217,12 @@ def start(trans):
 
         # 使用Doc2X服务将PDF转换为DOCX
         print(f"开始将PDF转换为DOCX: {original_path}")
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 记录Doc2X开始时间
+        doc2x_start_time = datetime.datetime.now()
+        logger.info(f"🚀 Doc2X转换开始时间: {doc2x_start_time}")
 
         # 获取API密钥
         api_key = trans.get('doc2x_api_key', '')
@@ -221,9 +235,28 @@ def start(trans):
 
         # 1. 启动转换任务
         print(f"🚀 开始启动Doc2X转换任务...")
+        task_start_time = datetime.datetime.now()
+        logger.info(f"📤 Doc2X任务启动时间: {task_start_time}")
         try:
             uid = Doc2XService.start_task(api_key, str(original_path))
+            task_end_time = datetime.datetime.now()
+            task_duration = task_end_time - task_start_time
+            logger.info(f"📤 Doc2X任务启动耗时: {task_duration.total_seconds():.2f}秒")
             print(f"✅ Doc2X任务启动成功，UID: {uid}")
+            
+            # Doc2X任务启动成功，设置为changing状态
+            try:
+                from .to_translate import db
+                print(f"🔍 准备更新任务状态: 任务ID={trans['id']}, 新状态=changing, 新进度=0")
+                result = db.execute("update translate set status='changing', process='0' where id=%s", trans['id'])
+                print(f"🔍 数据库更新结果: {result}")
+                print("✅ 已更新任务状态为changing，进度0%（Doc2X任务启动成功）")
+            except Exception as e:
+                print(f"❌ 更新任务状态失败: {str(e)}")
+                # 如果状态更新失败，记录错误但不中断流程
+                import traceback
+                traceback.print_exc()
+                
         except Exception as e:
             print(f"❌ 启动Doc2X任务失败: {str(e)}")
             to_translate.error(trans['id'], f"启动Doc2X任务失败: {str(e)}")
@@ -232,20 +265,43 @@ def start(trans):
         # 2. 等待解析完成
         max_retries = 60  # 最多等待10分钟
         retry_count = 0
+        parse_start_time = datetime.datetime.now()
+        logger.info(f"🔄 Doc2X解析开始时间: {parse_start_time}")
+        
         while retry_count < max_retries:
             try:
                 status_info = Doc2XService.check_parse_status(api_key, uid)
                 if status_info['status'] == 'success':
+                    parse_end_time = datetime.datetime.now()
+                    parse_duration = parse_end_time - parse_start_time
+                    logger.info(f"🔄 Doc2X解析完成时间: {parse_end_time}")
+                    logger.info(f"⏱️  Doc2X解析总耗时: {parse_duration.total_seconds():.2f}秒")
                     print(f"PDF解析成功: {uid}")
+                    
+                    # Doc2X解析完成，但保持changing状态，继续导出和下载
+                    print(f"PDF解析成功: {uid}")
+                    # 不在这里切换状态，等所有Doc2X阶段完成后再切换
                     break
                 elif status_info['status'] == 'failed':
                     to_translate.error(trans['id'],
                                        f"PDF解析失败: {status_info.get('detail', '未知错误')}")
                     return False
 
-                # 更新进度
-                progress = int(status_info.get('progress', 0) * 50)  # 解析阶段占总进度的50%
-                print(f"PDF解析进度: {progress}%")
+                # 模拟进度：基于重试次数计算进度（0-90%）
+                # 前90%用于解析阶段，最后10%留给导出和下载
+                simulated_progress = min(90, int((retry_count / max_retries) * 90))
+                print(f"🔍 模拟进度: {simulated_progress}% (重试次数: {retry_count}/{max_retries})")
+                
+                # 实时更新数据库进度
+                try:
+                    print(f"🔍 准备更新进度: 任务ID={trans['id']}, 新进度={simulated_progress}%")
+                    result = db.execute("update translate set process=%s where id=%s", str(simulated_progress), trans['id'])
+                    print(f"🔍 进度更新结果: {result}")
+                    print(f"✅ 已更新进度为 {simulated_progress}%")
+                except Exception as e:
+                    print(f"❌ 更新进度失败: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
 
                 # 等待10秒后再次检查
                 time.sleep(10)
@@ -259,17 +315,43 @@ def start(trans):
             return False
 
         # 3. 触发导出
+        export_start_time = datetime.datetime.now()
+        logger.info(f"📤 Doc2X导出开始时间: {export_start_time}")
+        
+        # 开始导出阶段，进度设为95%（changing状态下的进度）
+        print("📤 开始导出阶段")
+        try:
+            from .to_translate import db
+            db.execute("update translate set process='95' where id=%s", trans['id'])
+            print("✅ 已更新进度为95%（开始导出）")
+        except Exception as e:
+            print(f"⚠️  更新进度失败: {str(e)}")
+            
         try:
             export_success = Doc2XService.trigger_export(api_key, uid, original_path.stem)
             if not export_success:
                 to_translate.error(trans['id'], "触发导出失败")
                 return False
+            export_end_time = datetime.datetime.now()
+            export_duration = export_end_time - export_start_time
+            logger.info(f"📤 Doc2X导出耗时: {export_duration.total_seconds():.2f}秒")
             print(f"已触发导出: {uid}")
         except Exception as e:
             to_translate.error(trans['id'], f"触发导出失败: {str(e)}")
             return False
 
         # 4. 等待导出完成并下载
+        download_start_time = datetime.datetime.now()
+        logger.info(f"📥 Doc2X下载开始时间: {download_start_time}")
+        
+        # 开始下载阶段，进度设为98%（changing状态下的进度）
+        print("📥 开始下载阶段")
+        try:
+            db.execute("update translate set process='98' where id=%s", trans['id'])
+            print("✅ 已更新进度为98%（开始下载）")
+        except Exception as e:
+            print(f"⚠️  更新进度失败: {str(e)}")
+            
         try:
             download_url = Doc2XService.check_export_status(api_key, uid)
             print(f"获取到下载链接: {download_url}")
@@ -279,7 +361,29 @@ def start(trans):
             if not download_success:
                 to_translate.error(trans['id'], "下载转换后的DOCX文件失败")
                 return False
+            download_end_time = datetime.datetime.now()
+            download_duration = download_end_time - download_start_time
+            logger.info(f"📥 Doc2X下载耗时: {download_duration.total_seconds():.2f}秒")
             print(f"DOCX文件下载成功: {docx_path}")
+            
+            # 下载完成，进度设为100%（changing状态下的进度）
+            try:
+                db.execute("update translate set process='100' where id=%s", trans['id'])
+                print("✅ 已更新进度为100%（下载完成）")
+            except Exception as e:
+                print(f"⚠️  更新进度失败: {str(e)}")
+            
+            # Doc2X所有阶段完成，切换到process状态开始翻译
+            try:
+                print(f"🔍 准备切换到process状态: 任务ID={trans['id']}, 新状态=process, 新进度=0")
+                result = db.execute("update translate set status='process', process='0' where id=%s", trans['id'])
+                print(f"🔍 状态切换结果: {result}")
+                print("✅ 已更新状态为process，进度0%（Doc2X全部完成，开始翻译）")
+            except Exception as e:
+                print(f"❌ 更新状态失败: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                
         except Exception as e:
             to_translate.error(trans['id'], f"下载DOCX文件失败: {str(e)}")
             return False
@@ -295,6 +399,17 @@ def start(trans):
             print("⚠️  DOCX文件质量检查发现问题，但继续处理...")
         else:
             print("✅ DOCX文件质量检查通过")
+            
+        # 记录Doc2X完成时间并计算耗时
+        doc2x_end_time = datetime.datetime.now()
+        doc2x_duration = doc2x_end_time - doc2x_start_time
+        logger.info(f"✅ Doc2X转换完成时间: {doc2x_end_time}")
+        logger.info(f"⏱️  Doc2X转换总耗时: {doc2x_duration}")
+        logger.info(f"📊 Doc2X转换耗时详情:")
+        logger.info(f"   - 开始时间: {doc2x_start_time}")
+        logger.info(f"   - 完成时间: {doc2x_end_time}")
+        logger.info(f"   - 总耗时: {doc2x_duration}")
+        logger.info(f"   - 耗时秒数: {doc2x_duration.total_seconds():.2f}秒")
 
         # 5. 使用Word翻译逻辑处理DOCX文件
         # 创建一个新的trans对象，包含DOCX文件路径
@@ -345,6 +460,9 @@ def start(trans):
 
         # 多线程翻译 - 使用Okapi方案而不是传统run方式
         print("🔄 使用 Okapi Framework 进行PDF翻译...")
+        
+        # 开始Okapi翻译，进度从0%开始
+        print("🔄 开始Okapi翻译，进度从0%开始")
         
         try:
             # 导入 Okapi 集成模块
@@ -422,6 +540,14 @@ def start(trans):
                 
                 if success:
                     print("✅ Okapi PDF翻译完成")
+                    
+                    # 更新进度为100%（翻译完成）
+                    try:
+                        db.execute("update translate set process='100' where id=%s", trans['id'])
+                        print("✅ 已更新进度为100%（翻译完成）")
+                    except Exception as e:
+                        print(f"⚠️  更新进度失败: {str(e)}")
+                    
                     # 完成处理
                     end_time = datetime.datetime.now()
                     spend_time = common.display_spend(start_time, end_time)
@@ -460,6 +586,14 @@ def start(trans):
         # 7. 完成处理
         end_time = datetime.datetime.now()
         spend_time = common.display_spend(start_time, end_time)
+        
+        # 更新进度为100%（传统方法翻译完成）
+        try:
+            db.execute("update translate set process='100' where id=%s", trans['id'])
+            print("✅ 已更新进度为100%（传统方法翻译完成）")
+        except Exception as e:
+            print(f"⚠️  更新进度失败: {str(e)}")
+        
         if trans['run_complete']:
             to_translate.complete(trans, text_count, spend_time)
         print(f"PDF翻译任务完成: {trans['id']}")
