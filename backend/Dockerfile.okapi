@@ -19,6 +19,9 @@ RUN wget -q "https://okapiframework.org/binaries/main/${OKAPI_VERSION}/okapi-app
     mv /opt/okapi-apps_gtk2-linux-x86_64_${OKAPI_VERSION} ${OKAPI_HOME} && \
     rm okapi-apps.zip
 
+# 替换 tikal.sh 文件
+COPY tikal.sh ${OKAPI_HOME}/tikal.sh
+
 # 显示安装的文件
 RUN echo "=== Okapi 安装内容 ===" && \
     ls -la ${OKAPI_HOME} && \
@@ -45,4 +48,4 @@ RUN pip install -r requirements.txt
 EXPOSE 8000
 
 # 启动命令
-CMD ["python", "main.py"] 
+CMD ["python", "main.py"]
