@@ -15,26 +15,10 @@ RUN apt-get update && apt-get install -y \
     openjdk-17-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
-# 下载并安装 Okapi Framework
-# https://okapiframework.org/binaries/main/1.47.0/okapi-apps_gtk2-linux-x86_64_1.47.0.zip
-RUN wget -q "https://okapiframework.org/binaries/main/${OKAPI_VERSION}/okapi-apps_gtk2-linux-x86_64_${OKAPI_VERSION}.zip" -O okapi.zip && \
-    unzip -q okapi.zip -d ${OKAPI_HOME} && \
-    rm -f okapi.zip && \
-    chmod +x ${OKAPI_HOME}/lib/*.jar
-
-# 创建符号链接，方便访问
-RUN ln -s ${OKAPI_HOME}/lib/okapi-application-tikal-1.47.0.jar /usr/local/bin/okapi-application-tikal-1.47.0.jar && \
-    ln -s ${OKAPI_HOME}/lib/okapi-application-rainbow-1.47.0.jar /usr/local/bin/okapi-application-rainbow-1.47.0.jar
-
-# 替换 tikal.sh 文件
-COPY tikal.sh ${OKAPI_HOME}/tikal.sh
-
-# 设置 Tikal 脚本权限并创建链接
-RUN chmod +x ${OKAPI_HOME}/tikal.sh && \
-    ln -sf ${OKAPI_HOME}/tikal.sh /usr/local/bin/tikal.sh
-
-# 验证安装
-RUN java -cp "${OKAPI_HOME}/lib/*" net.sf.okapi.applications.tikal.Main -i
+# 下载并安装 Okapi 
+RUN wget "https://webset-backup-1254120053.cos.ap-shanghai.myqcloud.com/upload/zys/okapi.tgz" -P /opt && \
+tar -zxf /opt/okapi.tgz -C /opt && \
+rm -f /opt/okapi.tgz
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
