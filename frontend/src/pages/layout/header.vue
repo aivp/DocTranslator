@@ -98,6 +98,7 @@ import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
 import { useTranslateStore } from '@/store/translate'
 import { authInfo } from '@/api/account'
+import { logout as logoutApi } from '@/api/auth'
 import { ref, onMounted } from 'vue'
 import SvgIcon from '@/components/SvgIcon/index.vue'
 import { UserFilled } from '@element-plus/icons-vue'
@@ -106,6 +107,7 @@ import { getSystemSetting, getTranslateSetting } from '@/api/settings'
 import Logo from '@/assets/logo.png'
 import { useSystemStore } from '@/store/system'
 import { setFavicon } from '@/utils/title'
+import { ElMessage } from 'element-plus'
 const systemStore = useSystemStore()
 const userStore = useUserStore()
 const translationSettings = ref(null)
@@ -162,9 +164,26 @@ function windowOpen(url) {
 }
 
 // 退出登录
-function confirmLogout() {
-  userStore.logout()
-  logoutVisible.value = false
+async function confirmLogout() {
+  try {
+    // 调用后端退出登录API
+    await logoutApi()
+    ElMessage.success('退出登录成功')
+  } catch (error) {
+    console.error('退出登录API调用失败:', error)
+    // 即使API调用失败，也要清除本地状态
+    ElMessage.warning('退出登录失败，但已清除本地登录状态')
+  } finally {
+    // 清除本地用户状态
+    userStore.logout()
+    logoutVisible.value = false
+    
+    // 强制跳转到登录页面
+    await router.push('/login')
+    
+    // 刷新页面确保完全重置状态
+    window.location.reload()
+  }
 }
 // 获取系统相关设置
 const getSystemSettingsInfo = async () => {

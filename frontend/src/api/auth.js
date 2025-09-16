@@ -41,3 +41,11 @@ export function forget(data) {
         data: data
     });
 }
+
+// 退出登录
+export function logout() {
+    return request({
+        url: `/api/logout`,
+        method: 'POST'
+    });
+}
