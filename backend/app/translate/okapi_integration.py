@@ -201,7 +201,6 @@ class DockerOkapiIntegration:
             # 使用 Tikal 脚本 - 默认生成 XLIFF 1.2，但我们会处理为 2.0
             cmd = [self.tikal_script, "-x", input_file, "-sl", source_lang, "-tl", target_lang]
             logger.info(f"使用 Tikal 脚本执行提取")
-            
             logger.info(f"执行提取命令: {' '.join(cmd)}")
             
             # 记录执行时间
@@ -312,7 +311,7 @@ class DockerOkapiIntegration:
                 logger.info(f"  - {f}")
             
             # 使用 Tikal 脚本 - 根据官方文档，合并命令不需要 -f 参数
-            cmd = [self.tikal_script, "-m", xliff_file]
+            cmd = [self.tikal_script, "-m", xliff_file, "-trace"]
             logger.info(f"使用 Tikal 脚本执行合并")
             
             logger.info(f"执行合并命令: {' '.join(cmd)}")

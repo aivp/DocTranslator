@@ -81,8 +81,8 @@
         <div class="dialog-title">退出登录</div>
         <div class="dialog-content">您确定要退出登录吗？</div>
         <div class="dialog-btns">
-          <el-button class="dialog-btn cancel" @click="logoutVisible = false">取消</el-button>
-          <el-button class="dialog-btn confirm" type="primary" color="#055CF9" @click="confirmLogout">确认</el-button>
+          <el-button class="dialog-btn cancel" @click="logoutVisible = false" :disabled="logoutLoading">取消</el-button>
+          <el-button class="dialog-btn confirm" type="primary" color="#055CF9" @click="confirmLogout" :loading="logoutLoading">确认</el-button>
         </div>
       </div>
     </el-dialog>
@@ -116,6 +116,7 @@ const translateStore = useTranslateStore()
 const router = useRouter()
 
 const logoutVisible = ref(false)
+const logoutLoading = ref(false)
 
 // 获取用户信息
 const getUserInfo = async () => {
@@ -165,6 +166,8 @@ function windowOpen(url) {
 
 // 退出登录
 async function confirmLogout() {
+  logoutLoading.value = true // 开始loading
+  
   try {
     // 调用后端退出登录API
     await logoutApi()
@@ -178,11 +181,14 @@ async function confirmLogout() {
     userStore.logout()
     logoutVisible.value = false
     
-    // 强制跳转到登录页面
-    await router.push('/login')
-    
-    // 刷新页面确保完全重置状态
-    window.location.reload()
+    // 延迟跳转，让用户看到提示信息
+    setTimeout(async () => {
+      // 强制跳转到登录页面
+      await router.push('/login')
+      
+      // 刷新页面确保完全重置状态
+      window.location.reload()
+    }, 1500) // 延迟1.5秒，让用户看到提示信息
   }
 }
 // 获取系统相关设置

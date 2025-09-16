@@ -15,7 +15,7 @@ from app.resources.admin.users import AdminUserListResource, AdminCreateUserReso
 from app.resources.api.AccountResource import ChangePasswordResource, EmailChangePasswordResource, \
     StorageInfoResource, UserInfoResource, SendChangeCodeResource
 from app.resources.api.AuthResource import SendRegisterCodeResource, UserRegisterResource, \
-    UserLoginResource, SendResetCodeResource, ResetPasswordResource
+    UserLoginResource, SendResetCodeResource, ResetPasswordResource, UserLogoutResource
 from app.resources.api.comparison import MyComparisonListResource, SharedComparisonListResource, \
     EditComparisonResource, ShareComparisonResource, CopyComparisonResource, \
     FavoriteComparisonResource, CreateComparisonResource, DeleteComparisonResource, \
@@ -42,6 +42,7 @@ def register_routes(api):
     api.add_resource(SendRegisterCodeResource, '/api/register/send')
     api.add_resource(UserRegisterResource, '/api/register')
     api.add_resource(UserLoginResource, '/api/login')
+    api.add_resource(UserLogoutResource, '/api/logout')
     api.add_resource(SendResetCodeResource, '/api/find/send')
     api.add_resource(ResetPasswordResource, '/api/find')
 

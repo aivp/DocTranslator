@@ -1238,9 +1238,10 @@ function getStorageInfo() {
       const storage = res.data.used_storage
       // 更新存储空间
       userStore.updateStorage(storage)
-      storageTotal.value = (res.data.total_storage / (1024 * 1024)).toFixed(2)
+      // 修复存储空间计算：total_storage是字节，需要转换为MB
+      storageTotal.value = (parseInt(res.data.total_storage) / (1024 * 1024)).toFixed(2)
       storageUsed.value = res.data.used_storage
-      storagePercentage.value = res.data.percentage
+      storagePercentage.value = parseFloat(res.data.percentage)
     }
   })
 }

@@ -3,6 +3,7 @@ from flask import request, current_app
 from flask_restful import Resource
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
+import pytz
 from app import db
 from app.models import Customer, SendCode
 from app.utils.security import hash_password, verify_password
@@ -23,7 +24,7 @@ class ChangePasswordResource(Resource):
     def post(self):
         """修改密码（旧密码验证）[^1]"""
         user_id = get_jwt_identity()
-        data = request.json
+        data = request.form
 
         # 参数校验
         required_fields = ['oldpwd', 'newpwd', 'newpwd_confirmation']
@@ -206,9 +207,20 @@ class UserInfoResource(Resource):
         user_id = get_jwt_identity()
         customer = Customer.query.get(user_id)
 
+        # 将UTC时间转换为东八时区
+        utc_time = customer.created_at
+        if utc_time.tzinfo is None:
+            # 如果时间没有时区信息，假设为UTC
+            utc_time = pytz.utc.localize(utc_time)
+        
+        # 转换为东八时区
+        beijing_tz = pytz.timezone('Asia/Shanghai')
+        beijing_time = utc_time.astimezone(beijing_tz)
+        
         return APIResponse.success({
             'email': customer.email,
             'level': customer.level,
-            'created_at': customer.created_at.isoformat(),
-            'storage': customer.storage
+            'created_at': beijing_time.isoformat(),
+            'storage': customer.storage,
+            'total_storage': customer.total_storage
         })

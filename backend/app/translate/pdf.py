@@ -496,6 +496,10 @@ def start(trans):
                 translator = OkapiWordTranslator()
                 print("✅ Okapi 翻译器创建成功")
                 
+                # 设置翻译服务
+                translator.set_translation_service(docx_trans)
+                print("✅ Okapi 翻译服务设置成功")
+                
                 # 语言映射：将中文语言名称转换为英文全拼
                 def map_language_to_qwen_format(lang_name):
                     language_mapping = {

@@ -1,7 +1,7 @@
 # resources/auth.py
 from flask import request
 from flask_restful import Resource
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
 
 from app.extensions import db
@@ -84,7 +84,7 @@ class UserLoginResource(Resource):
         customer = Customer.query.filter_by(email=data['email']).first()
 
         if not customer or not verify_password(customer.password, data['password']):
-            return APIResponse.error('账号或密码错误')
+            return APIResponse.error('账号或密码错误', 500)
         # 确保identity是字符串
         access_token = create_access_token(identity=str(customer.id))
         return APIResponse.success({
@@ -140,4 +140,22 @@ class ResetPasswordResource(Resource):
         customer.updated_at = datetime.utcnow()
         db.session.commit()
         return APIResponse.success()
+
+
+class UserLogoutResource(Resource):
+    @jwt_required()
+    def post(self):
+        """用户退出登录接口"""
+        # 获取当前用户ID
+        current_user_id = get_jwt_identity()
+        
+        # 这里可以添加一些退出登录的逻辑，比如：
+        # 1. 记录退出登录时间
+        # 2. 清除服务端session（如果有的话）
+        # 3. 记录日志等
+        
+        # 由于JWT是无状态的，服务端不需要特别处理token失效
+        # 客户端清除token即可
+        
+        return APIResponse.success(message='退出登录成功')
 

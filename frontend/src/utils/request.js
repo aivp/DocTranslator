@@ -37,6 +37,12 @@ service.interceptors.request.use(
     config.headers['Authorization'] = 'Bearer ' + userStore.token;
     config.headers['credentials']='include'
     config.headers['withCredentials']=true  // 携带凭据（如 Cookies）
+    
+    // 设置Content-Type为application/x-www-form-urlencoded
+    if (config.data && !(config.data instanceof FormData)) {
+      config.headers['Content-Type'] = 'application/x-www-form-urlencoded'
+    }
+    
       // config.headers['language'] = localStorage.getItem('language')||'zh';
       return config
   },
@@ -86,6 +92,15 @@ service.interceptors.response.use(
   error => {
     const { response } = error
     if (response) {
+      // 尝试从响应中获取具体的错误信息
+      let errorMessage = '请求失败'
+      
+      if (response.data && response.data.message) {
+        errorMessage = response.data.message
+      } else if (response.data && response.data.error) {
+        errorMessage = response.data.error
+      }
+      
       switch (response.status) {
         case 401:
           ElMessage.error('身份过期，请重新登录')
@@ -98,8 +113,11 @@ service.interceptors.response.use(
         case 403:
           ElMessage.error('用户状态异常或权限不足!')
           break
+        case 500:
+          ElMessage.error(errorMessage)
+          break
         default:
-          ElMessage.error('请求失败')
+          ElMessage.error(errorMessage)
       }
     } else {
       ElMessage.error('网络连接异常')

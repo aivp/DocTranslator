@@ -115,6 +115,7 @@ import { useRouter } from 'vue-router'
 import { formatTime } from '@/utils/tools'
 import { User, Lock, Setting, Message, Calendar } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
+import { authInfo, storage } from '@/api/account'
 
 import BasicInfo from './components/BasicInfo.vue'
 import SecuritySettings from './components/SecuritySettings.vue'
@@ -129,7 +130,15 @@ const userInfo = ref({
   email: '',
   level: '',
   storage: 0,
+  total_storage: 1073741824, // 默认1GB
   created_at: ''
+})
+
+// 存储空间数据
+const storageInfo = ref({
+  used_storage: 0,
+  total_storage: 1073741824,
+  percentage: 0
 })
 
 // 翻译设置（完整配置）
@@ -154,10 +163,36 @@ const translationSettings = ref({
 
 // 默认头像
 const defaultAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
-// 初始化从store获取用户信息
-onMounted(() => {
-  userInfo.value = userStore.userInfo
-  // const registerTime=formatDate(userInfo.value.create_at)
+// 初始化获取用户信息和存储空间信息
+onMounted(async () => {
+  try {
+    // 获取用户基本信息
+    const userRes = await authInfo()
+    if (userRes.code === 200) {
+      userInfo.value = {
+        ...userRes.data,
+        storage: userRes.data.storage || 0,
+        total_storage: userRes.data.total_storage || 1073741824
+      }
+    }
+    
+    // 获取存储空间详细信息
+    const storageRes = await storage()
+    if (storageRes.code === 200) {
+      storageInfo.value = {
+        used_storage: parseInt(storageRes.data.used_storage),
+        total_storage: parseInt(storageRes.data.total_storage),
+        percentage: parseFloat(storageRes.data.percentage)
+      }
+      // 更新用户信息中的存储数据
+      userInfo.value.storage = storageInfo.value.used_storage
+      userInfo.value.total_storage = storageInfo.value.total_storage
+    }
+  } catch (error) {
+    console.error('获取用户信息失败:', error)
+    // 降级到store中的数据
+    userInfo.value = userStore.userInfo
+  }
 })
 
 // 切换标签页

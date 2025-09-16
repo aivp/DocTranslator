@@ -72,11 +72,11 @@ const constantRoute = [
     meta: { guestOnly: true },
     component: () => import('@/pages/password/forget.vue')
   },
-  // 重置密码
+  // 修改密码（需要登录）
   {
     path: '/reset',
     name: 'reset',
-    meta: { guestOnly: true },
+    meta: { requiresAuth: true },
     component: () => import('@/pages/password/reset.vue')
   },
   // 404 路由，放在最后

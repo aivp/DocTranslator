@@ -29,8 +29,8 @@
               <el-link type="primary" class="forget-link" @click="goToForgot"> 忘记密码? </el-link>
             </div>
             <el-form-item class="center">
-              <el-button type="primary" size="large" class="auth-btn" @click="doLogin">
-                登录
+              <el-button type="primary" size="large" class="auth-btn" @click="doLogin" :loading="loginLoading">
+                {{ loginLoading ? '登录中...' : '登录' }}
               </el-button>
             </el-form-item>
           </el-form>
@@ -87,8 +87,8 @@
               />
             </el-form-item>
             <el-form-item class="center">
-              <el-button type="primary" size="large" class="auth-btn" @click="doRegister">
-                提交
+              <el-button type="primary" size="large" class="auth-btn" @click="doRegister" :loading="registerLoading">
+                {{ registerLoading ? '提交中...' : '提交' }}
               </el-button>
             </el-form-item>
           </el-form>
@@ -108,6 +108,8 @@ const userStore = useUserStore()
 const router = useRouter()
 const activeTab = ref('login')
 const loginFormRef = ref(null)
+const loginLoading = ref(false)
+const registerLoading = ref(false)
 // 登录表单
 const loginForm = reactive({
   email: '',
@@ -166,23 +168,24 @@ const sendCode = async () => {
 
 // 登录
 const doLogin = async () => {
-  // const loginFormRef = loginFormRef.value
-  // if (!loginFormRef) return
-
-  loginFormRef.value.validate((valid) => {
+  loginFormRef.value.validate(async (valid) => {
     if (valid) {
-      login(loginForm)
-        .then((data) => {
-          if (data.code === 200) {
-            userStore.updateToken(data.data.token)
-            router.push({ name: 'home' })
-          } else {
-            ElMessage.error(data.message)
-          }
-        })
-        .catch((error) => {
-          ElMessage.error(error.message)
-        })
+      loginLoading.value = true // 开始loading
+      
+      try {
+        const data = await login(loginForm)
+        if (data.code === 200) {
+          userStore.updateToken(data.data.token)
+          router.push({ name: 'home' })
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (error) {
+        // 错误信息已经在request拦截器中处理了，这里不需要再显示
+        console.error('登录失败:', error)
+      } finally {
+        loginLoading.value = false // 结束loading
+      }
     } else {
       ElMessage.error('请正确填写表单')
     }
@@ -192,24 +195,29 @@ const doLogin = async () => {
 // 注册
 const doRegister = async () => {
   if (!registerFormRef.value) return
-  registerFormRef.value.validate((valid) => {
+  registerFormRef.value.validate(async (valid) => {
     if (valid) {
       if (registerForm.password !== registerForm.password2) {
         ElMessage.error('两次密码输入不一致')
         return
       }
-      register(registerForm)
-        .then((data) => {
-          if (data.code === 200) {
-            ElMessage.success('注册成功')
-            activeTab.value = 'login'
-          } else {
-            ElMessage.error(data.message)
-          }
-        })
-        .catch((error) => {
-          ElMessage.error(error.message)
-        })
+      
+      registerLoading.value = true // 开始loading
+      
+      try {
+        const data = await register(registerForm)
+        if (data.code === 200) {
+          ElMessage.success('注册成功')
+          activeTab.value = 'login'
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (error) {
+        // 错误信息已经在request拦截器中处理了，这里不需要再显示
+        console.error('注册失败:', error)
+      } finally {
+        registerLoading.value = false // 结束loading
+      }
     } else {
       ElMessage.error('请正确填写表单')
     }
