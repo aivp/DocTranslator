@@ -4,7 +4,7 @@
       <div class="auth-header">
         <img src="@/assets/logo.png" alt="Logo" class="auth-logo" />
         <h1 class="auth-title">欢迎回来</h1>
-        <p class="auth-subtitle">请登录或注册以继续</p>
+        <p class="auth-subtitle">请登录以继续</p>
       </div>
       <el-tabs v-model="activeTab" stretch class="auth-tabs">
         <el-tab-pane label="登录" name="login">
@@ -36,7 +36,8 @@
           </el-form>
         </el-tab-pane>
 
-        <el-tab-pane label="注册" name="register">
+        <!-- 暂时注释掉注册功能 -->
+        <!-- <el-tab-pane label="注册" name="register">
           <el-form
             :model="registerForm"
             ref="registerFormRef"
@@ -92,7 +93,7 @@
               </el-button>
             </el-form-item>
           </el-form>
-        </el-tab-pane>
+        </el-tab-pane> -->
       </el-tabs>
     </div>
   </div>
@@ -102,14 +103,17 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { login, register, registerSendEmail } from '@/api/auth'
+import { login } from '@/api/auth'
+// 暂时注释掉注册相关的API导入
+// import { register, registerSendEmail } from '@/api/auth'
 import { useUserStore } from '@/store/user'
 const userStore = useUserStore()
 const router = useRouter()
 const activeTab = ref('login')
 const loginFormRef = ref(null)
 const loginLoading = ref(false)
-const registerLoading = ref(false)
+// 暂时注释掉注册相关的变量
+// const registerLoading = ref(false)
 // 登录表单
 const loginForm = reactive({
   email: '',
@@ -120,51 +124,53 @@ const loginRules = reactive({
   password: [{ required: true, message: '请填写密码', trigger: 'blur' }]
 })
 
+// 暂时注释掉注册表单相关代码
 // 注册表单
-const registerForm = reactive({
-  email: '',
-  code: '',
-  password: '',
-  password2: ''
-})
-const registerRules = reactive({
-  email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
-  code: [{ required: true, message: '请填写邮箱验证码', trigger: 'blur' }],
-  password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
-  password2: [{ required: true, message: '请填写确认密码', trigger: 'blur' }]
-})
-const registerFormRef = ref(null)
+// const registerForm = reactive({
+//   email: '',
+//   code: '',
+//   password: '',
+//   password2: ''
+// })
+// const registerRules = reactive({
+//   email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
+//   code: [{ required: true, message: '请填写邮箱验证码', trigger: 'blur' }],
+//   password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
+//   password2: [{ required: true, message: '请填写确认密码', trigger: 'blur' }]
+// })
+// const registerFormRef = ref(null)
 
+// 暂时注释掉验证码相关代码
 // 验证码相关
-const codeText = ref('发送')
-const codeDisabled = ref(false)
-const sendCode = async () => {
-  if (codeDisabled.value) return
-  if (!registerForm.email.trim()) {
-    ElMessage.error('请填写邮箱地址')
-    return
-  }
+// const codeText = ref('发送')
+// const codeDisabled = ref(false)
+// const sendCode = async () => {
+//   if (codeDisabled.value) return
+//   if (!registerForm.email.trim()) {
+//     ElMessage.error('请填写邮箱地址')
+//     return
+//   }
 
-  try {
-    await registerSendEmail(registerForm.email)
-    ElMessage.success('验证码已发送')
-    codeDisabled.value = true
-    let count = 60
-    codeText.value = `${count}s`
-    const timer = setInterval(() => {
-      if (count <= 0) {
-        clearInterval(timer)
-        codeDisabled.value = false
-        codeText.value = '发送'
-        return
-      }
-      count--
-      codeText.value = `${count}s`
-    }, 1000)
-  } catch (error) {
-    ElMessage.error(error.message)
-  }
-}
+//   try {
+//     await registerSendEmail(registerForm.email)
+//     ElMessage.success('验证码已发送')
+//     codeDisabled.value = true
+//     let count = 60
+//     codeText.value = `${count}s`
+//     const timer = setInterval(() => {
+//       if (count <= 0) {
+//         clearInterval(timer)
+//         codeDisabled.value = false
+//         codeText.value = '发送'
+//         return
+//       }
+//       count--
+//       codeText.value = `${count}s`
+//     }, 1000)
+//   } catch (error) {
+//     ElMessage.error(error.message)
+//   }
+// }
 
 // 登录
 const doLogin = async () => {
@@ -192,37 +198,38 @@ const doLogin = async () => {
   })
 }
 
+// 暂时注释掉注册函数
 // 注册
-const doRegister = async () => {
-  if (!registerFormRef.value) return
-  registerFormRef.value.validate(async (valid) => {
-    if (valid) {
-      if (registerForm.password !== registerForm.password2) {
-        ElMessage.error('两次密码输入不一致')
-        return
-      }
+// const doRegister = async () => {
+//   if (!registerFormRef.value) return
+//   registerFormRef.value.validate(async (valid) => {
+//     if (valid) {
+//       if (registerForm.password !== registerForm.password2) {
+//         ElMessage.error('两次密码输入不一致')
+//         return
+//       }
       
-      registerLoading.value = true // 开始loading
+//       registerLoading.value = true // 开始loading
       
-      try {
-        const data = await register(registerForm)
-        if (data.code === 200) {
-          ElMessage.success('注册成功')
-          activeTab.value = 'login'
-        } else {
-          ElMessage.error(data.message)
-        }
-      } catch (error) {
-        // 错误信息已经在request拦截器中处理了，这里不需要再显示
-        console.error('注册失败:', error)
-      } finally {
-        registerLoading.value = false // 结束loading
-      }
-    } else {
-      ElMessage.error('请正确填写表单')
-    }
-  })
-}
+//       try {
+//         const data = await register(registerForm)
+//         if (data.code === 200) {
+//           ElMessage.success('注册成功')
+//           activeTab.value = 'login'
+//         } else {
+//           ElMessage.error(data.message)
+//         }
+//       } catch (error) {
+//         // 错误信息已经在request拦截器中处理了，这里不需要再显示
+//         console.error('注册失败:', error)
+//       } finally {
+//         registerLoading.value = false // 结束loading
+//       }
+//     } else {
+//       ElMessage.error('请正确填写表单')
+//     }
+//   })
+// }
 
 // 跳转到忘记密码页
 const goToForgot = () => {
