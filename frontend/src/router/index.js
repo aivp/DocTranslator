@@ -65,13 +65,13 @@ const constantRoute = [
     meta: { guestOnly: true },
     component: () => import('@/pages/login/index.vue')
   },
-  // 忘记密码
-  {
-    path: '/forget',
-    name: 'forget',
-    meta: { guestOnly: true },
-    component: () => import('@/pages/password/forget.vue')
-  },
+  // 忘记密码 - 已隐藏
+  // {
+  //   path: '/forget',
+  //   name: 'forget',
+  //   meta: { guestOnly: true },
+  //   component: () => import('@/pages/password/forget.vue')
+  // },
   // 修改密码（需要登录）
   {
     path: '/reset',

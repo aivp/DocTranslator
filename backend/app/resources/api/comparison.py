@@ -303,24 +303,54 @@ class CopyComparisonResource(Resource):
     @jwt_required()
     def post(self, id):
         """复制到我的术语库[^5]"""
-        comparison = Comparison.query.filter_by(
-            id=id,
-            share_flag='Y'
-        ).first_or_404()
+        try:
+            # 查找共享的术语表
+            comparison = Comparison.query.filter_by(
+                id=id,
+                share_flag='Y'
+            ).first_or_404()
 
-        new_comparison = Comparison(
-            title=f"{comparison.title} (副本)",
-            content=comparison.content,
-            origin_lang=comparison.origin_lang,
-            target_lang=comparison.target_lang,
-            customer_id=get_jwt_identity(),
-            share_flag='N'
-        )
-        db.session.add(new_comparison)
-        db.session.commit()
-        return APIResponse.success({
-            'new_id': new_comparison.id
-        })
+            # 创建新的术语表副本
+            new_comparison = Comparison(
+                title=f"{comparison.title} (副本)",
+                content=comparison.content,
+                origin_lang=comparison.origin_lang,
+                target_lang=comparison.target_lang,
+                customer_id=get_jwt_identity(),
+                share_flag='N'
+            )
+            db.session.add(new_comparison)
+            db.session.flush()  # 获取新术语表的ID
+
+            # 复制所有术语数据
+            original_terms = ComparisonSub.query.filter_by(comparison_sub_id=id).all()
+            term_count = 0
+            
+            for term in original_terms:
+                new_term = ComparisonSub(
+                    comparison_sub_id=new_comparison.id,
+                    original=term.original,
+                    comparison_text=term.comparison_text
+                )
+                db.session.add(new_term)
+                term_count += 1
+
+            # 更新术语数量
+            new_comparison.added_count = term_count
+            
+            db.session.commit()
+            
+            logger.info(f"术语表复制成功：原ID {id} -> 新ID {new_comparison.id}，复制了 {term_count} 个术语")
+            
+            return APIResponse.success({
+                'new_id': new_comparison.id,
+                'term_count': term_count
+            })
+            
+        except Exception as e:
+            logger.error(f"复制术语表失败：{str(e)}")
+            db.session.rollback()
+            return APIResponse.error(f"复制术语表失败：{str(e)}", 500)
 
 
 # 收藏/取消收藏

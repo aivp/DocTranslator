@@ -79,7 +79,7 @@
                 </div>
                 <div class="des_box flex_box flex-between">
                   <div class="t_left">{{ item.email }} 被加入{{ item.added_count }}次</div>
-                  <div class="t_right">{{ item.created_at }}</div>
+                  <div class="t_right">{{ formatTime(item.created_at) }}</div>
                 </div>
                 <div class="table_box" v-if="item.content.length > 0">
                   <el-table
@@ -144,7 +144,7 @@
                 </div>
                 <div class="des_box flex_box flex-between">
                   <div class="t_left">{{ item.email }} 被加入{{ item.added_count }}次</div>
-                  <div class="t_right">{{ item.created_at }}</div>
+                  <div class="t_right">{{ formatTime(item.created_at) }}</div>
                 </div>
                 <div class="text_box">
                   <div class="text">{{ item.content }}</div>
@@ -182,6 +182,7 @@ import { store } from '@/store/index'
 import SvgIcon from '@/components/SvgIcon/index.vue'
 import { reactive, ref, computed,  onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatTime } from '@/utils/tools'
 import {
   comparison_share,
   prompt_share,

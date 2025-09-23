@@ -6,9 +6,10 @@
     <el-form-item label="" required prop="password">
       <el-input v-model="user.password" type="password" show-password placeholder="密码" />
     </el-form-item>
-    <div class="flex_right">
+    <!-- 隐藏忘记密码功能 -->
+    <!-- <div class="flex_right">
       <el-text class="forget" @click="doForget">忘记密码?</el-text>
-    </div>
+    </div> -->
     <el-form-item label="" class="center">
       <el-button type="primary" size="large" color="#055CF9" @click="doLogin(form)" style="width: 100%">登录</el-button>
     </el-form-item>
@@ -57,9 +58,10 @@ function doLogin(form) {
     }
   })
 }
-function doForget() {
-  emit('forget')
-}
+// 忘记密码功能已隐藏
+// function doForget() {
+//   emit('forget')
+// }
 </script>
 <style scoped lang="scss">
 .forget {

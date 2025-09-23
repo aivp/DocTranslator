@@ -21,7 +21,7 @@ const DEFAULT_FORM_DATA: CreateOrUpdateCustomerRequestData = {
   id: undefined,
   email: "",
   password: "",
-  level: "common",
+  level: "vip",  // 默认创建为会员用户
   add_storage: 0,
   storage: 0
   // status: true
@@ -123,6 +123,33 @@ const registerSuccess = () => {
   getCustomerData()
 }
 
+// 时间格式化函数 - 转换为GMT+8
+const formatToGMT8 = (dateString: string) => {
+  if (!dateString) return ''
+  
+  try {
+    // 创建Date对象，会自动处理时区
+    const date = new Date(dateString)
+    
+    // 转换为GMT+8时间
+    const gmt8Time = new Date(date.getTime() + (8 * 60 * 60 * 1000))
+    
+    // 格式化输出
+    return gmt8Time.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: 'Asia/Shanghai'
+    })
+  } catch (error) {
+    console.error('时间格式化错误:', error)
+    return dateString
+  }
+}
+
 /** 监听分页参数的变化 */
 watch([() => paginationData.currentPage, () => paginationData.pageSize], getCustomerData, { immediate: true })
 </script>
@@ -167,7 +194,11 @@ watch([() => paginationData.currentPage, () => paginationData.pageSize], getCust
               <el-tag v-else type="danger" effect="plain">禁用</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="注册时间" align="left" />
+          <el-table-column prop="created_at" label="注册时间" align="left">
+            <template #default="{ row }">
+              {{ formatToGMT8(row.created_at) }}
+            </template>
+          </el-table-column>
           <el-table-column fixed="right" label="操作" width="100" align="left">
             <template #default="scope">
               <el-button type="primary" text size="small" @click="handleUpdate(scope.row)">编辑</el-button>
@@ -214,7 +245,7 @@ watch([() => paginationData.currentPage, () => paginationData.pageSize], getCust
         <el-form-item prop="level" label="用户等级">
           <el-select v-model="formData.level" placeholder="">
             <el-option label="会员用户" value="vip" />
-            <el-option label="普通用户" value="common" />
+            <!-- 隐藏普通用户选项 -->
           </el-select>
         </el-form-item>
         <!-- 新增的存储空间字段 -->

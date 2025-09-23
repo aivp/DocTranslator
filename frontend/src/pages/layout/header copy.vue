@@ -113,15 +113,15 @@
         </el-menu>
       </template>
       <template v-if="activeIndex == 1">
-        <login @forget="forgetPwd" @success="loginSuccess"></login>
+        <login @success="loginSuccess"></login>
       </template>
       <template v-else>
         <register @success="registerSuccess"></register>
       </template>
     </el-dialog>
 
-    <!-- 重置密码弹窗 -->
-    <el-dialog
+    <!-- 重置密码弹窗 - 已隐藏 -->
+    <!-- <el-dialog
       v-model="forgetVisible"
       center
       width="90%"
@@ -139,7 +139,7 @@
         </h1>
       </template>
       <forget @return="backToAuth" @success="forgetSuccess"></forget>
-    </el-dialog>
+    </el-dialog> -->
 
     <!-- 修改密码 -->
     <el-dialog
@@ -953,16 +953,17 @@ function windowOpen(url) {
   window.open(url)
 }
 
-function forgetPwd() {
-  authVisible.value = false
-  forgetVisible.value = true
-}
+// 忘记密码功能已隐藏
+// function forgetPwd() {
+//   authVisible.value = false
+//   forgetVisible.value = true
+// }
 
-function backToAuth() {
-  authVisible.value = true
-  forgetVisible.value = false
-  activeIndex.value = 1
-}
+// function backToAuth() {
+//   authVisible.value = true
+//   forgetVisible.value = false
+//   activeIndex.value = 1
+// }
 function cancelLogout() {
   logoutVisible.value = false
 }

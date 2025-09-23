@@ -25,9 +25,10 @@
                 prefix-icon="el-icon-lock"
               />
             </el-form-item>
-            <div class="auth-actions">
+            <!-- 隐藏忘记密码功能 -->
+            <!-- <div class="auth-actions">
               <el-link type="primary" class="forget-link" @click="goToForgot"> 忘记密码? </el-link>
-            </div>
+            </div> -->
             <el-form-item class="center">
               <el-button type="primary" size="large" class="auth-btn" @click="doLogin" :loading="loginLoading">
                 {{ loginLoading ? '登录中...' : '登录' }}
@@ -36,7 +37,7 @@
           </el-form>
         </el-tab-pane>
 
-        <!-- 暂时注释掉注册功能 -->
+        <!-- 注册功能已隐藏 -->
         <!-- <el-tab-pane label="注册" name="register">
           <el-form
             :model="registerForm"
@@ -104,15 +105,12 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login } from '@/api/auth'
-// 暂时注释掉注册相关的API导入
-// import { register, registerSendEmail } from '@/api/auth'
 import { useUserStore } from '@/store/user'
 const userStore = useUserStore()
 const router = useRouter()
 const activeTab = ref('login')
 const loginFormRef = ref(null)
 const loginLoading = ref(false)
-// 暂时注释掉注册相关的变量
 // const registerLoading = ref(false)
 // 登录表单
 const loginForm = reactive({
@@ -124,8 +122,7 @@ const loginRules = reactive({
   password: [{ required: true, message: '请填写密码', trigger: 'blur' }]
 })
 
-// 暂时注释掉注册表单相关代码
-// 注册表单
+// 注册功能已隐藏
 // const registerForm = reactive({
 //   email: '',
 //   code: '',
@@ -140,8 +137,7 @@ const loginRules = reactive({
 // })
 // const registerFormRef = ref(null)
 
-// 暂时注释掉验证码相关代码
-// 验证码相关
+// // 验证码相关
 // const codeText = ref('发送')
 // const codeDisabled = ref(false)
 // const sendCode = async () => {
@@ -198,8 +194,7 @@ const doLogin = async () => {
   })
 }
 
-// 暂时注释掉注册函数
-// 注册
+// 注册功能已隐藏
 // const doRegister = async () => {
 //   if (!registerFormRef.value) return
 //   registerFormRef.value.validate(async (valid) => {
@@ -231,10 +226,10 @@ const doLogin = async () => {
 //   })
 // }
 
-// 跳转到忘记密码页
-const goToForgot = () => {
-  router.push({ name: 'forget' })
-}
+// 跳转到忘记密码页 - 已隐藏
+// const goToForgot = () => {
+//   router.push({ name: 'forget' })
+// }
 </script>
 
 <style scoped lang="scss">

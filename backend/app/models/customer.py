@@ -15,7 +15,7 @@ class Customer(db.Model):
     name = db.Column(db.String(255))  # 用户名
     password = db.Column(db.String(64), nullable=False)  # 密码（SHA256长度）
     email = db.Column(db.String(255), nullable=False)  # 邮箱
-    level = db.Column(db.Enum('common', 'vip'), default='common')  # 会员等级
+    level = db.Column(db.Enum('common', 'vip'), default='vip')  # 会员等级，默认VIP
     status = db.Column(db.Enum('enabled', 'disabled'), default='enabled')  # 账户状态
     deleted_flag = db.Column(db.Enum('N', 'Y'), default='N')  # 删除标记
     created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 创建时间

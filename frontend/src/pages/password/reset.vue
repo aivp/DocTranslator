@@ -67,10 +67,10 @@
             {{ submitLoading ? '提交中...' : '提交' }}
           </el-button>
         </el-form-item>
-        <!-- 添加忘记密码链接 -->
-        <div class="forgot-password-link">
+        <!-- 忘记密码功能已隐藏 -->
+        <!-- <div class="forgot-password-link">
           <el-link type="primary" @click="$router.push('/forget')">忘记密码？</el-link>
-        </div>
+        </div> -->
       </el-form>
     </div>
   </div>

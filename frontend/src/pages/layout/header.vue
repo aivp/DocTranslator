@@ -62,7 +62,7 @@
           </div>
         </template>
         <template v-else>
-          <el-button class="pc_show" @click="$router.push('/login')">登录/注册</el-button>
+          <el-button class="pc_show" @click="$router.push('/login')">登录</el-button>
           <el-icon class="phone_show icon_user" @click="$router.push('/login')"><User /></el-icon>
         </template>
       </div>

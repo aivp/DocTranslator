@@ -4,9 +4,9 @@
       <el-input v-model="user.email" placeholder="请输入邮箱" autocomplete="new-password" />
     </el-form-item>
     <el-form-item prop="level" label="用户等级">
-      <el-select v-model="user.level" placeholder="">
+      <el-select v-model="user.level" placeholder="" disabled>
         <el-option label="会员用户" value="vip" />
-        <el-option label="普通用户" value="common" />
+        <!-- 隐藏普通用户选项 -->
       </el-select>
     </el-form-item>
     <el-form-item prop="password" label="密码">
@@ -39,7 +39,7 @@ const emit = defineEmits(["success"])
 const DEFAULT_FORM_DATA: CreateOrUpdateCustomerRequestData = {
   email: "",
   password: "",
-  level: "common",
+  level: "vip",  // 默认创建为会员用户
   add_storage: 0,
   storage: 0
 }
