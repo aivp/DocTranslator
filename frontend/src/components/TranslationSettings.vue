@@ -58,6 +58,14 @@
             <el-option v-for="term in translateStore.terms" :key="term.id" :label="term.title" :value="term.id" />
           </el-select>
         </el-form-item>
+
+        <!-- PDF翻译方法选择 -->
+        <el-form-item label="PDF翻译方法" width="100%">
+          <el-radio-group v-model="settingsForm.common.pdf_translate_method" @change="handlePdfMethodToggle">
+            <el-radio label="direct">直接翻译（保留PDF格式）</el-radio>
+            <el-radio label="doc2x">Doc2x转换后翻译</el-radio>
+          </el-radio-group>
+        </el-form-item>
       </template>
     </el-form>
 
@@ -224,6 +232,19 @@ const comparison_id_focus = async () => {
   }
 }
 
+// 处理PDF翻译方法切换
+const handlePdfMethodToggle = (value) => {
+  // 当选择直接翻译时，自动禁用Doc2x
+  if (value === 'direct') {
+    settingsForm.value.common.doc2x_flag = 'N'
+    settingsForm.value.common.doc2x_secret_key = ''
+  }
+  // 当选择Doc2x转换时，自动启用Doc2x
+  else if (value === 'doc2x') {
+    settingsForm.value.common.doc2x_flag = 'Y'
+  }
+}
+
 // 获取提示语数据
 const prompt_id_focus = async () => {
   try {
@@ -374,6 +395,7 @@ const formReset = () => {
     common: { 
       ...translateStore.common,
       langs: translateStore.common.langs || ['', '英语'],  // 只针对langs：使用store中的值，如果没有则默认为['', '英语']
+      pdf_translate_method: translateStore.common.pdf_translate_method || 'direct',  // PDF翻译方法，默认为直接翻译
     },
   }
   check_text.value = ''
@@ -465,6 +487,7 @@ const open = () => {
     common: { 
       ...translateStore.common,
       langs: translateStore.common.langs || ['', '英语'],  // 只针对langs：使用store中的值，如果没有则默认为['', '英语']
+      pdf_translate_method: translateStore.common.pdf_translate_method || 'direct',  // PDF翻译方法，默认为直接翻译
     },
   }
   

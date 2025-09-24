@@ -11,10 +11,10 @@
         <machine-translation-settings ref="machineSettingsForm" />
       </el-tab-pane>
 
-      <!-- 通用设置 -->
-      <el-tab-pane label="通用设置" name="common">
+      <!-- 通用设置 - 已隐藏 -->
+      <!-- <el-tab-pane label="通用设置" name="common">
         <common-settings ref="commonSettingsForm" />
-      </el-tab-pane>
+      </el-tab-pane> -->
     </el-tabs>
 
     <!-- <div class="action-buttons">
@@ -27,7 +27,7 @@
 import { ref } from 'vue'
 import AiTranslationSettings from './AiTranslationSettings.vue'
 import MachineTranslationSettings from './MachineTranslationSettings.vue'
-import CommonSettings from './CommonSettings.vue'
+// import CommonSettings from './CommonSettings.vue' // 已隐藏
 const activeTab = ref('ai')
 
 </script>

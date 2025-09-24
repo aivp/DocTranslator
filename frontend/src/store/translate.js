@@ -53,7 +53,8 @@ export const useTranslateStore = defineStore('translate-settings', () => {
     langs: ['', '英语'],  // 硬编码：默认语言数组
     type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 硬编码：默认译文形式
     doc2x_flag: 'N',  // 硬编码：不使用Doc2x
-    doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0'
+    doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0',
+    pdf_translate_method: 'direct'  // PDF翻译方法：direct(直接翻译) 或 doc2x(转换后翻译)
   })
 
   // 模型和语言选项

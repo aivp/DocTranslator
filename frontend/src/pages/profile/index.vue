@@ -17,12 +17,13 @@
               <span>账号安全</span>
             </template>
           </el-menu-item>
-          <el-menu-item index="translation">
+          <!-- 翻译设置 - 已隐藏 -->
+          <!-- <el-menu-item index="translation">
             <template #title>
               <el-icon><Setting /></el-icon>
               <span>翻译设置</span>
             </template>
-          </el-menu-item>
+          </el-menu-item> -->
         </el-menu>
 
         <!-- 右侧内容区 -->
