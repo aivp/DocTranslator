@@ -297,7 +297,7 @@ const form = ref({
   scanned: false, // 添加 scanned 字段
   origin_lang: '', // 添加起始语言字段
   comparison_id: '', //术语id
-  prompt_id: '', //提示语id,
+  prompt_id: '', //提示词id,
   translate_id: null,
   doc2x_secret_key: '',
   server: 'openai',

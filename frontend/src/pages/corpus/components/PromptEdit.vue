@@ -2,12 +2,12 @@
   <el-dialog
     v-model="visible"
     destroy-on-close
-    title="提示语编辑器"
+    title="提示词编辑器"
     width="90%"
     modal-class="term_dialog"
   >
     <template #header="{ close, titleId, titleClass }">
-      <span class="title">提示语编辑器</span>
+      <span class="title">提示词编辑器</span>
       <el-switch v-model="localForm.share_flag" active-value="Y" inactive-value="N" />
       <div class="flag_tips">共享{{ localForm.share_flag == 'Y' ? '开启' : '关闭' }}</div>
     </template>
@@ -20,11 +20,11 @@
     >
       <el-row :gutter="20">
         <el-col :span="24">
-          <el-form-item label="提示语标题" required prop="title" width="100%">
+          <el-form-item label="提示词标题" required prop="title" width="100%">
             <el-input
               v-model="localForm.title"
               type="text"
-              placeholder="请输入提示语标题"
+              placeholder="请输入提示词标题"
               maxlength="50"
             />
           </el-form-item>
@@ -32,7 +32,6 @@
         <el-col :span="24">
           <el-form-item label="角色" required prop="role_content" width="100%">
             <div class="prompt-section">
-              <div class="section-title"># 角色</div>
               <el-input
                 v-model="localForm.role_content"
                 type="textarea"
@@ -49,7 +48,6 @@
         <el-col :span="24">
           <el-form-item label="任务" required prop="task_content" width="100%">
             <div class="prompt-section">
-              <div class="section-title"># 任务</div>
               <el-input
                 v-model="localForm.task_content"
                 type="textarea"
@@ -66,7 +64,6 @@
         <el-col :span="24">
           <el-form-item label="翻译要求" required prop="requirements_content" width="100%">
             <div class="prompt-section">
-              <div class="section-title"># 翻译要求</div>
               <el-input
                 v-model="localForm.requirements_content"
                 type="textarea"
@@ -110,7 +107,7 @@ const props = defineProps({
 })
 
 const rules = {
-  title: [{ required: true, message: '请填写提示语标题', trigger: ['blur', 'change'] }],
+  title: [{ required: true, message: '请填写提示词标题', trigger: ['blur', 'change'] }],
   role_content: [{ required: true, message: '请填写角色内容', trigger: ['blur', 'change'] }],
   task_content: [{ required: true, message: '请填写任务内容', trigger: ['blur', 'change'] }],
   requirements_content: [{ required: true, message: '请填写翻译要求', trigger: ['blur', 'change'] }]
@@ -272,7 +269,7 @@ defineExpose({
       top: 1px;
     }
     
-    // 新增的提示语结构化样式
+    // 新增的提示词结构化样式
     .prompt-section {
       .section-title {
         font-size: 16px;

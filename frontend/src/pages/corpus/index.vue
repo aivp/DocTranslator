@@ -28,7 +28,7 @@
               :type="tab_active == 'prompt' ? 'primary' : ''"
               @click="tabSelect('prompt')"
             >
-              我的提示语
+              我的提示词
             </el-button>
           </el-button-group>
 
@@ -141,7 +141,7 @@
             <div class="text">暂无数据</div>
           </div>
         </div>
-        <!-- 提示语列表 -->
+        <!-- 提示词列表 -->
         <div class="prompt_box" v-if="tab_active == 'prompt'">
           <el-row :gutter="24" v-if="promptData.length > 0">
             <el-col :xs="24" :sm="8" v-for="(item, index) in promptData" :key="index">
@@ -186,7 +186,7 @@
     <!-- 术语弹窗 -->
     <TermEdit ref="termEditRef" :langs="langs" :loading="btnLoad" @confirm="handleTermConfirm" @refresh="getTermList" />
 
-    <!-- 提示语弹窗 -->
+    <!-- 提示词弹窗 -->
     <PromptEdit ref="promptEditRef" :loading="btnLoad" @confirm="handlePromptConfirm" />
   </div>
 </template>
@@ -259,7 +259,7 @@ const getTermList = async () => {
   pageLoad.value = false
 }
 
-// 获取提示语数据
+// 获取提示词数据
 const getPromptList = async () => {
   pageLoad.value = false
   try {
@@ -267,10 +267,10 @@ const getPromptList = async () => {
     if (res.code === 200) {
       // console.log(6666, res.data)
       promptData.value = JSON.parse(JSON.stringify(res.data.data))
-      // 不再添加硬编码的默认提示语
+      // 不再添加硬编码的默认提示词
     }
   } catch (error) {
-    console.error('获取提示语数据失败:', error)
+    console.error('获取提示词数据失败:', error)
   }
   pageLoad.value = false
 }
@@ -278,7 +278,7 @@ const getPromptList = async () => {
 //翻译语言
 const langs = ['中文', '英语', '日语', '俄语', '阿拉伯语', '西班牙语','韩语','德语']
 
-// 处理提示语弹窗保存逻辑
+// 处理提示词弹窗保存逻辑
 const handlePromptConfirm = (val) => {
   const formData = val
   btnLoad.value = true
@@ -394,7 +394,7 @@ function openTerms(item) {
     })
   }
 }
-//打开提示语
+//打开提示词
 function openPrompt(item) {
   promptEditRef.value.open()
   if (item) {
@@ -596,7 +596,7 @@ function upload_before(file) {
   return isXlsx
 }
 
-//提示语 分享状态修改
+//提示词 分享状态修改
 function share_change_prompt(item) {
   pageLoad.value = true
   if (item.id) {
@@ -617,7 +617,7 @@ function share_change_prompt(item) {
   }
 }
 
-//删除提示语
+//删除提示词
 function delPrompt(item) {
   ElMessageBox.confirm('确定要删除？', '提示', {
     confirmButtonText: '确定',

@@ -281,7 +281,7 @@ const handlePdfMethodToggle = (value) => {
   }
 }
 
-// 获取提示语数据
+// 获取提示词数据
 const prompt_id_focus = async () => {
   try {
     const res = await prompt_my()
@@ -290,7 +290,7 @@ const prompt_id_focus = async () => {
       promptData.value = res.data.data
     }
   } catch (error) {
-    console.error('获取提示语数据失败:', error)
+    console.error('获取提示词数据失败:', error)
   }
 }
 
@@ -313,7 +313,7 @@ const rules = {
   ],
 }
 
-// 提示语选择变化
+// 提示词选择变化
 const prompt_id_change = (id) => {
   const selectedPrompt = promptData.value.find((item) => item.id === id)
   if (selectedPrompt) {
@@ -543,7 +543,7 @@ const open = async () => {
       }
     }
   } catch (error) {
-    console.error('获取提示语数据失败:', error)
+    console.error('获取提示词数据失败:', error)
   }
   
   // 添加调试信息

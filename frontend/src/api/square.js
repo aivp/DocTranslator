@@ -9,7 +9,7 @@ export function comparison_share(params) {
   });
 }
 
-//提示语-广场列表
+//提示词-广场列表
 export function prompt_share(params) {
   return request({
       url: `/api/prompt/share`,
@@ -26,7 +26,7 @@ export function comparison_copy(id){
   });
 }
 
-//添加到我的提示语
+//添加到我的提示词
 export function prompt_copy(id){
   return request({
       url: `/api/prompt/copy/${id}`,
@@ -42,7 +42,7 @@ export function comparison_fav(id){
   });
 }
 
-//收藏提示语
+//收藏提示词
 export function prompt_fav(id){
   return request({
       url: `/api/prompt/fav/${id}`,

@@ -29,7 +29,7 @@
               :type="tab_active == 'prompt' ? 'primary' : ''"
               @click="tab_active = 'prompt'"
             >
-              提示语
+              提示词
             </el-button>
           </el-button-group>
           <!-- 术语表过滤条件 -->
@@ -43,7 +43,7 @@
             <el-option value="fav" label="收藏量"></el-option>
             <el-option value="added" label="添加量"></el-option>
           </el-select>
-          <!-- 提示语过滤条件 -->
+          <!-- 提示词过滤条件 -->
           <el-select
             v-if="tab_active == 'prompt'"
             v-model="promptForm.porder"
@@ -121,7 +121,7 @@
             />
           </div>
         </div>
-        <!-- 公共提示语列表 -->
+        <!-- 公共提示词列表 -->
         <div class="prompt_box" v-if="tab_active == 'prompt'">
           <el-row :gutter="24" v-if="promptData.length > 0">
             <el-col :xs="24" :sm="8" v-for="(item, index) in promptData" :key="index">
@@ -131,7 +131,7 @@
                 </div>
                 <div class="btn_box flex_box flex-between">
                   <div class="left">
-                    <el-button type="text" @click="addPrompt(item)">加入我的提示语</el-button>
+                    <el-button type="text" @click="addPrompt(item)">加入我的提示词</el-button>
                   </div>
                   <div class="right">
                     <div
@@ -242,7 +242,7 @@ function termCurrentChange(val) {
   //this.$refs.container_center.scrollTop = 0;
 }
 
-// 获取提示语数据
+// 获取提示词数据
 const getPromptList = async () => {
   pageLoad.value = true
   try {
@@ -251,12 +251,12 @@ const getPromptList = async () => {
       promptData.value = res.data.data
     }
   } catch (error) {
-    console.error('获取提示语数据时出错:', error)
+    console.error('获取提示词数据时出错:', error)
   }
   pageLoad.value = false
 }
 
-//切换提示语分页
+//切换提示词分页
 function promptCurrentChange(val) {
   termForm.value.page = val
   getPromptList()
@@ -282,14 +282,14 @@ function addTerms(item) {
     })
 }
 
-//加入我的提示语
+//加入我的提示词
 function addPrompt(item) {
   pageLoad.value = true
   prompt_copy(item.id)
     .then((data) => {
       pageLoad.value = false
       if (data.code == 200) {
-        ElMessage({ message: '添加成功，请到我的提示语中查看', type: 'success' })
+        ElMessage({ message: '添加成功，请到我的提示词中查看', type: 'success' })
         item.added_count++
       } else {
         ElMessage({ message: data.message, type: 'error' })
@@ -322,7 +322,7 @@ function favTerms(item) {
     })
 }
 
-//收藏 提示语
+//收藏 提示词
 function favPrompt(item) {
   pageLoad.value = true
   prompt_fav(item.id)

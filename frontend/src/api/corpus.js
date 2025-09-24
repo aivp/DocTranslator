@@ -48,7 +48,7 @@ export function comparison_share(id,params){
 }
 
 /**
- * 获取提示语
+ * 获取提示词
  */
 export function prompt_my(){
   return request({
@@ -57,7 +57,7 @@ export function prompt_my(){
   });
 }
 
-//添加提示语
+//添加提示词
 export function prompt_add(params) {
   return request({
       url: `/api/prompt`,
@@ -66,7 +66,7 @@ export function prompt_add(params) {
   });
 }
 
-//编辑提示语
+//编辑提示词
 export function prompt_edit(id,params){
   return request({
       url: `/api/prompt/${id}`,
@@ -75,7 +75,7 @@ export function prompt_edit(id,params){
   });
 }
 
-//更新提示语分享状态
+//更新提示词分享状态
 export function prompt_share(id,params){
   return request({
       url: `/api/prompt/share/${id}`,
@@ -85,7 +85,7 @@ export function prompt_share(id,params){
 }
 
 
-//删除提示语
+//删除提示词
 export function prompt_del(id){
   return request({
       url: `/api/prompt/${id}`,
