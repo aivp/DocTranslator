@@ -24,7 +24,7 @@ class Translate(db.Model):
     target_filesize = db.Column(db.BigInteger, default=0)           # 目标文件大小
     lang = db.Column(db.String(32), default='')                     # 目标语言
     model = db.Column(db.String(64), default='')                    # 使用模型
-    prompt = db.Column(db.String(1024), default='')                 # 提示语内容
+    prompt = db.Column(db.String(1024), default='')                 # 提示词内容
     api_url = db.Column(db.String(255), default='')                 # API地址
     api_key = db.Column(db.String(255), default='')                 # API密钥
     threads = db.Column(db.Integer, default=10)                     # 线程数

@@ -16,7 +16,7 @@ class TranslateLog(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # 上下文参数
-    prompt = db.Column(db.String(1024), default='')  # 实际使用的提示语
+    prompt = db.Column(db.String(1024), default='')  # 实际使用的提示词
     api_url = db.Column(db.String(255), default='')  # 接口地址
     api_key = db.Column(db.String(255), default='')  # 接口密钥
     word_count = db.Column(db.Integer, default=0)  # 字数统计

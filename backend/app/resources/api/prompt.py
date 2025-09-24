@@ -12,12 +12,12 @@ from app.utils.response import APIResponse
 from app.utils.token_checker import require_valid_token
 
 
-# 获取提示语列表
+# 获取提示词列表
 class MyPromptListResource(Resource):
     @require_valid_token  # 先检查token
     @jwt_required()
     def get(self):
-        """获取我的提示语列表[^1]"""
+        """获取我的提示词列表[^1]"""
         # 直接查询所有数据（不解析查询参数）
         query = Prompt.query.filter_by(customer_id=get_jwt_identity(), deleted_flag='N')
         prompts = [{
@@ -39,10 +39,10 @@ class MyPromptListResource(Resource):
 
 
 
-# 获取共享提示语列表
+# 获取共享提示词列表
 class SharedPromptListResource(Resource):
     def get(self):
-        """获取共享提示语列表[^4]"""
+        """获取共享提示词列表[^4]"""
         # 从查询字符串中解析参数
         parser = reqparse.RequestParser()
         parser.add_argument('page', type=int, default=1, location='args')  # 分页参数
@@ -50,7 +50,7 @@ class SharedPromptListResource(Resource):
         parser.add_argument('porder', type=str, default='latest', location='args')  # 排序参数
         args = parser.parse_args()
 
-        # 查询共享的提示语
+        # 查询共享的提示词
         query = db.session.query(
             Prompt,  # 获取完整的 Prompt 信息
             func.count(PromptFav.id).label('fav_count'),  # 动态计算收藏量
@@ -79,7 +79,7 @@ class SharedPromptListResource(Resource):
         prompts = [{
             'id': prompt.id,
             'title': prompt.title,
-            'content': prompt.content,  # 返回完整的提示语内容
+            'content': prompt.content,  # 返回完整的提示词内容
             'email': customer_email if customer_email else '匿名用户',  # 使用查询结果中的 email
             'share_flag': prompt.share_flag,
             'added_count': prompt.added_count,
@@ -97,12 +97,12 @@ class SharedPromptListResource(Resource):
 
 
 
-# 修改提示语内容
+# 修改提示词内容
 class EditPromptResource(Resource):
     @require_valid_token  # 先检查token
     @jwt_required()
     def post(self, id):
-        """修改提示语内容[^3]"""
+        """修改提示词内容[^3]"""
         prompt = Prompt.query.filter_by(
             id=id,
             customer_id=get_jwt_identity(),
@@ -147,7 +147,7 @@ class EditPromptResource(Resource):
             prompt.content = data['content']
 
         db.session.commit()
-        return APIResponse.success(message='提示语更新成功')
+        return APIResponse.success(message='提示词更新成功')
 
 # 更新共享状态
 class SharePromptResource(Resource):
@@ -177,12 +177,12 @@ class SharePromptResource(Resource):
         return APIResponse.success(message='共享状态已更新')
 
 
-# 复制到我的提示语库
+# 复制到我的提示词库
 class CopyPromptResource(Resource):
     @require_valid_token  # 先检查token
     @jwt_required()
     def post(self, id):
-        """复制到我的提示语库[^5]"""
+        """复制到我的提示词库[^5]"""
         original = Prompt.query.filter_by(
             id=id,
             share_flag='Y',
@@ -239,13 +239,13 @@ class FavoritePromptResource(Resource):
         return APIResponse.success(message=f'{action}成功')
 
 
-# 创建新的提示语
+# 创建新的提示词
 
 class CreatePromptResource(Resource):
     @require_valid_token  # 先检查token
     @jwt_required()
     def post(self):
-        """创建新提示语[^7]"""
+        """创建新提示词[^7]"""
         data = request.form
         required_fields = ['title', 'role_content', 'task_content', 'requirements_content']
         if not all(field in data for field in required_fields):
@@ -281,12 +281,12 @@ class CreatePromptResource(Resource):
         })
 
 
-# 删除提示语
+# 删除提示词
 class DeletePromptResource(Resource):
     @require_valid_token  # 先检查token
     @jwt_required()
     def delete(self, id):
-        """删除提示语[^8]"""
+        """删除提示词[^8]"""
         prompt = Prompt.query.filter_by(
             id=id,
             customer_id=get_jwt_identity()
