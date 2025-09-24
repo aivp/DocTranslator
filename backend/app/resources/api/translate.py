@@ -94,12 +94,12 @@ class TranslateStartResource(Resource):
 
             # 生成绝对路径（跨平台兼容）
             def get_absolute_storage_path(filename):
-                # 获取项目根目录的父目录（假设storage目录与项目目录同级）
-                base_dir = Path(current_app.root_path).parent.absolute()
+                # 使用配置文件中的UPLOAD_BASE_DIR（保持与file_utils.py一致）
+                base_dir = Path(current_app.config['UPLOAD_BASE_DIR'])
                 # 按日期创建子目录（如 storage/translate/2024-01-20）
                 date_str = datetime.now().strftime('%Y-%m-%d')
                 # 创建目标目录（如果不存在）
-                target_dir = base_dir / "storage" / "translate" / date_str
+                target_dir = base_dir / "translate" / date_str
                 target_dir.mkdir(parents=True, exist_ok=True)
                 # 返回绝对路径（保持原文件名）
                 return str(target_dir / filename)
