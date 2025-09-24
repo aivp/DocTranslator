@@ -38,6 +38,7 @@ class Translate(db.Model):
     process = db.Column(db.Float(5, 2), default=0.00)               # 进度百分比
     doc2x_flag = db.Column(db.Enum('N', 'Y'), default='N')          # 文档转换标记
     doc2x_secret_key = db.Column(db.String(32))                     # 转换密钥
+    pdf_translate_method = db.Column(db.String(32), default='direct')  # PDF翻译方法：direct(直接翻译) 或 doc2x(转换后翻译)
     prompt_id = db.Column(db.BigInteger, default=0)                 # 提示词ID
     comparison_id = db.Column(db.BigInteger, default=0)             # 对照表ID
     size = db.Column(db.BigInteger, default=0) # 文件大小 字节

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 阿里云Qwen-MT翻译模型集成
 """
@@ -124,9 +125,23 @@ def handle_429_error(attempt, error_msg):
         logging.error("达到429错误最大重试次数 (100)，返回原文")
         return False  # 停止重试
 
-def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, max_retries=10):
+def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10):
     """
     使用阿里云Qwen-MT翻译模型进行翻译
+    
+    根据官方文档，支持两种翻译方式：
+    1. 使用提示词方式：当提供prompt时，将文本插入提示词模板中发送
+    2. 使用translation_options方式：当没有prompt时，使用原有的translation_options参数
+    
+    Args:
+        text: 要翻译的文本
+        target_language: 目标语言（当使用translation_options方式时）
+        source_lang: 源语言，默认为"auto"（当使用translation_options方式时）
+        tm_list: 术语库列表（当使用translation_options方式时）
+        terms: 自定义术语（当使用translation_options方式时）
+        domains: 领域提示（当使用translation_options方式时）
+        prompt: 提示词模板（当使用提示词方式时）
+        max_retries: 最大重试次数
     """
     
     # 输入验证
@@ -158,45 +173,109 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 timeout=60.0  # 增加超时时间
             ) 
             
-            # 设置翻译参数 - 根据官方文档格式
-            translation_options = {
-                "source_lang": source_lang,
-                "target_lang": target_language
-            }
+            # 添加调试日志，查看prompt_id参数的实际值
+            logging.info(f"🔍 调试信息 - prompt_id参数:")
+            logging.info(f"  prompt_id类型: {type(prompt_id)}")
+            logging.info(f"  prompt_id值: {repr(prompt_id)}")
+            logging.info(f"  prompt_id是否为空: {not prompt_id}")
+            logging.info(f"  prompt_id是否大于0: {prompt_id and int(prompt_id) > 0}")
+            logging.info(f"  判断结果 - 是否使用prompt方式: {bool(prompt_id and int(prompt_id) > 0)}")
             
-            # 添加可选参数
-            if tm_list is not None:
-                translation_options["terms"] = tm_list
-                logging.info(f"📚 使用术语库: {len(tm_list)} 个术语")
-            elif terms is not None:
-                translation_options["terms"] = terms
-                logging.info(f"📚 使用自定义术语: {len(terms)} 个术语")
-            
-            # 硬编码domains参数 - 工程车辆和政府文件领域
-            translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
-            logging.info(f"🎯 使用硬编码领域提示: 工程车辆和政府文件")
+            # 根据是否有prompt_id选择翻译方式
+            # 检查prompt_id是否存在且大于0
+            if prompt_id and int(prompt_id) > 0:
+                # 方式一：使用提示词方式（根据官方文档）
+                logging.info(f"🎯 使用提示词方式翻译")
                 
-            # 添加详细的请求参数日志
-            logging.info(f"🔧 Qwen翻译请求参数:")
-            logging.info(f"  model: qwen-mt-plus")
-            logging.info(f"  source_lang: {source_lang}")
-            logging.info(f"  target_lang: {target_language}")
-            logging.info(f"  translation_options: {translation_options}")
-            logging.info(f"  text: {text[:100]}...")
-            
-            # 等待请求间隔
-            wait_for_rate_limit()
-            
-            # 记录API调用开始时间
-            api_start_time = time.time()
-            
-            # 调用API
-            logging.info(f"📡 发送API请求...")
-            completion = client.chat.completions.create(
-                model="qwen-mt-plus",
-                messages=[{"role": "user", "content": text}],
-                extra_body={"translation_options": translation_options}
-            )
+                # 将文本插入提示词模板中
+                final_prompt = prompt.format(text_to_translate=text)
+                
+                # 构建messages
+                messages = [{"role": "user", "content": final_prompt}]
+                
+                # 添加详细的请求参数日志
+                logging.info(f"🔧 Qwen翻译请求参数:")
+                logging.info(f"  model: qwen-mt-plus")
+                logging.info(f"  use_prompt: True")
+                logging.info(f"  prompt_template: {prompt[:100]}...")
+                logging.info(f"  text: {text[:100]}...")
+                
+                # 打印完整的请求内容
+                print("=" * 80)
+                print("🚀 QWEN-MT-PLUS 提示词翻译请求")
+                print("=" * 80)
+                print(f"📝 原始文本: {text}")
+                print(f"📋 提示词模板: {prompt}")
+                print(f"🔗 最终请求内容: {final_prompt}")
+                print(f"📡 API请求参数:")
+                print(f"   - model: qwen-mt-plus")
+                print(f"   - messages: {messages}")
+                print("=" * 80)
+                
+                # 等待请求间隔
+                wait_for_rate_limit()
+                
+                # 记录API调用开始时间
+                api_start_time = time.time()
+                
+                # 调用API（不使用translation_options）
+                logging.info(f"📡 发送API请求...")
+                completion = client.chat.completions.create(
+                    model="qwen-mt-plus",
+                    messages=messages
+                )
+                
+                # 计算API调用用时
+                api_end_time = time.time()
+                api_duration = api_end_time - api_start_time
+            else:
+                # 方式二：使用translation_options方式（原有方式）
+                logging.info(f"🎯 使用translation_options方式翻译")
+                
+                # 设置翻译参数 - 根据官方文档格式
+                translation_options = {
+                    "source_lang": source_lang,
+                    "target_lang": target_language
+                }
+                
+                # 添加可选参数
+                if tm_list is not None:
+                    translation_options["terms"] = tm_list
+                    logging.info(f"📚 使用术语库: {len(tm_list)} 个术语")
+                elif terms is not None:
+                    translation_options["terms"] = terms
+                    logging.info(f"📚 使用自定义术语: {len(terms)} 个术语")
+                
+                # 硬编码domains参数 - 工程车辆和政府文件领域
+                translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
+                logging.info(f"🎯 使用硬编码领域提示: 工程车辆和政府文件")
+                    
+                # 添加详细的请求参数日志
+                logging.info(f"🔧 Qwen翻译请求参数:")
+                logging.info(f"  model: qwen-mt-plus")
+                logging.info(f"  use_prompt: False")
+                logging.info(f"  source_lang: {source_lang}")
+                logging.info(f"  target_lang: {target_language}")
+                logging.info(f"  translation_options: {translation_options}")
+                logging.info(f"  text: {text[:100]}...")
+                
+                # 等待请求间隔
+                wait_for_rate_limit()
+                
+                # 记录API调用开始时间
+                api_start_time = time.time()
+                
+                # 调用API
+                logging.info(f"📡 发送API请求...")
+                completion = client.chat.completions.create(
+                    model="qwen-mt-plus",
+                    messages=[{"role": "user", "content": text}],
+                    extra_body={"translation_options": translation_options}
+                )
+                
+                # 计算API调用用时
+                api_end_time = time.time()
+                api_duration = api_end_time - api_start_time
             
             # 提取翻译结果
             if not completion.choices or len(completion.choices) == 0:
@@ -207,6 +286,16 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             if not translated_text or not translated_text.strip():
                 logging.warning(f"⚠️ 翻译结果为空，跳过此文本: {text[:50]}...")
                 return ""  # 直接返回空字符串，不重试
+            
+            # 打印响应结果
+            if prompt:  # 只有使用提示词时才打印
+                print("=" * 80)
+                print("✅ QWEN-MT-PLUS 提示词翻译响应")
+                print("=" * 80)
+                print(f"📝 原始文本: {text}")
+                print(f"🎯 翻译结果: {translated_text}")
+                print(f"⏱️ API调用用时: {api_duration:.3f}秒")
+                print("=" * 80)
             
             # 检查翻译结果质量（暂时注释掉）
             # if _is_translation_result_abnormal(translated_text):

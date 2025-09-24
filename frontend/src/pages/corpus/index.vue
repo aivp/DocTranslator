@@ -267,13 +267,7 @@ const getPromptList = async () => {
     if (res.code === 200) {
       // console.log(6666, res.data)
       promptData.value = JSON.parse(JSON.stringify(res.data.data))
-      if (store.prompt) {
-        promptData.value.unshift({
-          title: '默认提示语(无法删除)',
-          content: store.prompt,
-          undelete: true
-        })
-      }
+      // 不再添加硬编码的默认提示语
     }
   } catch (error) {
     console.error('获取提示语数据失败:', error)

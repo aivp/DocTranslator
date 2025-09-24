@@ -16,7 +16,7 @@
     </div>
 
     <!-- 重要提醒 -->
-    <div class="important-notice" v-if="!hasValidSettings">
+    <div class="important-notice" v-if="!hasValidSettings && !settingsForm.aiServer.prompt_id">
       <el-alert
         title="重要提醒"
         type="warning"
@@ -39,9 +39,39 @@
 
       <!-- AI翻译设置 -->
       <template v-if="settingsForm.currentService === 'ai'">
+        <!-- 提示词选择 -->
+        <el-form-item label="提示词" width="100%">
+          <el-select
+            v-model="settingsForm.aiServer.prompt_id"
+            placeholder="请选择提示词（可选）"
+            clearable
+            filterable
+            @focus="prompt_id_focus"
+            @change="prompt_id_change">
+            <el-option v-for="prompt in promptData" :key="prompt.id" :label="prompt.title" :value="prompt.id" />
+          </el-select>
+        </el-form-item>
+
+        <!-- 提示词警告 -->
+        <div v-if="settingsForm.aiServer.prompt_id" class="prompt-warning">
+          <el-alert
+            title="重要提醒"
+            type="warning"
+            :closable="false"
+            show-icon>
+            <template #default>
+              <p>选择提示词翻译时其他选项不生效，且提示词中必须包含目标语言！</p>
+            </template>
+          </el-alert>
+        </div>
+
         <!-- 目标语言 -->
         <el-form-item label="目标语言" required width="100%">
-          <el-select v-model="settingsForm.aiServer.lang" placeholder="请选择目标语言" clearable>
+          <el-select 
+            v-model="settingsForm.aiServer.lang" 
+            placeholder="请选择目标语言" 
+            clearable
+            :disabled="!!settingsForm.aiServer.prompt_id">
             <el-option v-for="lang in languageOptions" :key="lang.value" :label="lang.label" :value="lang.value" />
           </el-select>
         </el-form-item>
@@ -54,6 +84,7 @@
             multiple
             clearable
             filterable
+            :disabled="!!settingsForm.aiServer.prompt_id"
             @focus="comparison_id_focus">
             <el-option v-for="term in translateStore.terms" :key="term.id" :label="term.title" :value="term.id" />
           </el-select>
@@ -204,6 +235,11 @@ watch(
 // 检查翻译设置是否完整
 const hasValidSettings = computed(() => {
   if (settingsForm.value.currentService === 'ai') {
+    // 如果选择了提示词，则不需要验证目标语言
+    if (settingsForm.value.aiServer.prompt_id) {
+      return true
+    }
+    // 如果没有选择提示词，则需要验证目标语言
     return settingsForm.value.aiServer.lang && settingsForm.value.aiServer.lang.trim() !== ''
   }
   // 其他翻译服务已隐藏，默认返回true
@@ -252,12 +288,6 @@ const prompt_id_focus = async () => {
     if (res.code === 200) {
       // promptData.value.push(res.data.data)
       promptData.value = res.data.data
-      // 添加默认提示词
-      promptData.value.unshift({
-        id: 0,
-        title: '默认系统提示语',
-        content: settingsStore.system_settings.prompt_template,
-      })
     }
   } catch (error) {
     console.error('获取提示语数据失败:', error)
@@ -265,9 +295,13 @@ const prompt_id_focus = async () => {
 }
 
 const rules = {
-  // 目标语言验证 - AI翻译必选
+  // 目标语言验证 - AI翻译必选（当没有选择提示词时）
   'aiServer.lang': [
-    { required: true, message: '请选择目标语言', trigger: 'blur' }
+    { 
+      required: computed(() => settingsForm.value.currentService === 'ai' && !settingsForm.value.aiServer.prompt_id), 
+      message: '请选择目标语言', 
+      trigger: 'blur' 
+    }
   ],
   // 其他翻译服务的验证规则（已隐藏，保留以防需要）
   to_lang: [
@@ -430,6 +464,8 @@ const formConfim = (formEl) => {
           lang: settingsForm.value.aiServer.lang || '英语',
           type: settingsForm.value.aiServer.type || ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],
           threads: settingsForm.value.aiServer.threads || 30,
+          // 确保prompt_id被正确保存
+          prompt_id: settingsForm.value.aiServer.prompt_id || null,
         })
         
         // 同时更新通用设置
@@ -459,7 +495,7 @@ const formConfim = (formEl) => {
 const formCancel = () => {
   formSetShow.value = false
 }
-const open = () => {
+const open = async () => {
   formSetShow.value = true
   // 初始化表单数据，使用硬编码的默认值
   settingsForm.value = {
@@ -489,6 +525,25 @@ const open = () => {
       langs: translateStore.common.langs || ['', '英语'],  // 只针对langs：使用store中的值，如果没有则默认为['', '英语']
       pdf_translate_method: translateStore.common.pdf_translate_method || 'direct',  // PDF翻译方法，默认为直接翻译
     },
+  }
+  
+  // 预加载提示词数据，确保下拉框显示标题而不是ID
+  try {
+    const res = await prompt_my()
+    if (res.code === 200) {
+      promptData.value = res.data.data
+      
+      // 检查当前选择的prompt_id是否存在于新的提示词列表中
+      if (settingsForm.value.aiServer.prompt_id) {
+        const promptExists = promptData.value.some(prompt => prompt.id === settingsForm.value.aiServer.prompt_id)
+        if (!promptExists) {
+          console.log(`提示词ID ${settingsForm.value.aiServer.prompt_id} 不存在于当前用户的提示词列表中，自动置空`)
+          settingsForm.value.aiServer.prompt_id = null
+        }
+      }
+    }
+  } catch (error) {
+    console.error('获取提示语数据失败:', error)
   }
   
   // 添加调试信息
@@ -648,6 +703,27 @@ h4:contains("Doc2x"),
       margin: 8px 0 0 0;
       color: #606266;
       line-height: 1.5;
+    }
+  }
+}
+
+.prompt-warning {
+  margin-bottom: 20px;
+  
+  .el-alert {
+    border-radius: 8px;
+    border-color: #f56c6c;
+    
+    .el-alert__title {
+      font-weight: 600;
+      color: #f56c6c;
+    }
+    
+    p {
+      margin: 8px 0 0 0;
+      color: #f56c6c;
+      line-height: 1.5;
+      font-weight: 500;
     }
   }
 }

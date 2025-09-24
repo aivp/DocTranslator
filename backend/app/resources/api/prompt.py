@@ -24,6 +24,9 @@ class MyPromptListResource(Resource):
             'id': p.id,
             'title': p.title,
             'content': p.content,# [:100] + '...' if len(p.content) > 100 else p.content
+            'role_content': p.role_content,
+            'task_content': p.task_content,
+            'requirements_content': p.requirements_content,
             'share_flag': p.share_flag,
             'created_at': p.created_at.isoformat() if p.created_at else None
         } for p in query.all()]
@@ -112,7 +115,33 @@ class EditPromptResource(Resource):
                 return APIResponse.error('标题过长', 400)
             prompt.title = data['title']
 
-        if 'content' in data:
+        # 更新结构化字段
+        updated_fields = []
+        if 'role_content' in data:
+            if len(data['role_content']) > 2000:
+                return APIResponse.error('角色内容超过2000字符限制', 400)
+            prompt.role_content = data['role_content']
+            updated_fields.append('role_content')
+            
+        if 'task_content' in data:
+            if len(data['task_content']) > 2000:
+                return APIResponse.error('任务内容超过2000字符限制', 400)
+            prompt.task_content = data['task_content']
+            updated_fields.append('task_content')
+            
+        if 'requirements_content' in data:
+            if len(data['requirements_content']) > 2000:
+                return APIResponse.error('翻译要求内容超过2000字符限制', 400)
+            prompt.requirements_content = data['requirements_content']
+            updated_fields.append('requirements_content')
+
+        # 如果有结构化字段更新，重新拼接完整内容
+        if updated_fields:
+            full_content = f"# 角色\n{prompt.role_content}\n\n# 任务\n{prompt.task_content}\n\n# 翻译要求\n{prompt.requirements_content}\n\n# 待翻译文本\n{{text_to_translate}}"
+            prompt.content = full_content
+
+        # 兼容旧的content字段直接更新（向后兼容）
+        if 'content' in data and not updated_fields:
             if len(data['content']) > 5000:
                 return APIResponse.error('内容超过5000字符限制', 400)
             prompt.content = data['content']
@@ -163,6 +192,9 @@ class CopyPromptResource(Resource):
         new_prompt = Prompt(
             title=f"{original.title} (副本)",
             content=original.content,
+            role_content=original.role_content,
+            task_content=original.task_content,
+            requirements_content=original.requirements_content,
             customer_id=get_jwt_identity(),
             share_flag='N',
             added_count=0
@@ -215,19 +247,28 @@ class CreatePromptResource(Resource):
     def post(self):
         """创建新提示语[^7]"""
         data = request.form
-        required_fields = ['title', 'content']
+        required_fields = ['title', 'role_content', 'task_content', 'requirements_content']
         if not all(field in data for field in required_fields):
             return APIResponse.error('缺少必要参数', 400)
 
         if len(data['title']) > 255:
             return APIResponse.error('标题过长', 400)
-        if len(data['content']) > 5000:
-            return APIResponse.error('内容超过5000字符限制', 400)
+        
+        # 验证各个内容字段长度
+        for field in ['role_content', 'task_content', 'requirements_content']:
+            if len(data[field]) > 2000:
+                return APIResponse.error(f'{field}内容超过2000字符限制', 400)
+
+        # 自动拼接完整内容
+        full_content = f"# 角色\n{data['role_content']}\n\n# 任务\n{data['task_content']}\n\n# 翻译要求\n{data['requirements_content']}\n\n# 待翻译文本\n{{text_to_translate}}"
 
         # 创建时自动设置 created_at 为当前时间
         prompt = Prompt(
             title=data['title'],
-            content=data['content'],
+            content=full_content,  # 拼接后的完整内容
+            role_content=data['role_content'],
+            task_content=data['task_content'],
+            requirements_content=data['requirements_content'],
             customer_id=get_jwt_identity(),
             share_flag=data.get('share_flag', 'N'),
             created_at=date.today()  # 自动设置当前时间

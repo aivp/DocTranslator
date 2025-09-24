@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from flask import Flask
 from .config import get_config
 from .extensions import init_extensions, db, api
@@ -53,8 +54,8 @@ def create_app(config_class=None):
         import traceback
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Unhandled exception: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error("Unhandled exception: " + str(e))
+        logger.error("Traceback: " + traceback.format_exc())
         return {"message": "Internal server error", "code": 500}, 500
 
     # 初始化数据库（带重试机制）
@@ -73,7 +74,7 @@ def create_app(config_class=None):
                     logger.info("数据库连接成功，表创建完成")
                     return True
             except Exception as e:
-                logger.warning(f"数据库连接失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                logger.warning("数据库连接失败 (尝试 " + str(attempt + 1) + "/" + str(max_retries) + "): " + str(e))
                 if attempt < max_retries - 1:
                     time.sleep(retry_interval)
                 else:

@@ -89,6 +89,13 @@ class TranslateEngine:
 
     def _build_trans_config(self, task):
         """构建符合文件处理器要求的 trans 字典"""
+        # 添加调试日志，查看task.prompt_id的值
+        current_app.logger.info(f"🔍 TranslateEngine 调试信息:")
+        current_app.logger.info(f"  task.id: {task.id}")
+        current_app.logger.info(f"  task.prompt_id类型: {type(task.prompt_id)}")
+        current_app.logger.info(f"  task.prompt_id值: {repr(task.prompt_id)}")
+        current_app.logger.info(f"  task.prompt_id是否为空: {not task.prompt_id}")
+        
         config = {
             'id': task.id,  # 任务ID
             'target_lang': task.lang,
@@ -113,7 +120,8 @@ class TranslateEngine:
             'comparison_id': task.comparison_id,
             'prompt_id': task.prompt_id,
             'doc2x_api_key':task.doc2x_secret_key,
-            'extension': os.path.splitext(task.origin_filepath)[1]  # 动态获取文件扩展名
+            'extension': os.path.splitext(task.origin_filepath)[1],  # 动态获取文件扩展名
+            'pdf_translate_method': getattr(task, 'pdf_translate_method', None)  # PDF翻译方法
         }
 
         # 加载术语对照表（支持多个术语库，逗号分隔）

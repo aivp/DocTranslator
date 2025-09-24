@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import time
 import datetime
@@ -13,6 +14,9 @@ import xml.etree.ElementTree as ET
 from threading import Lock
 import re
 import shutil
+import fitz
+import json
+import logging
 
 from ..utils.doc2x import Doc2XService
 
@@ -30,12 +34,12 @@ NUMBERS_PATTERN = re.compile(r'^[\d\s\.,\-\+\*\/\(\)\[\]\{\}]+$')
 def check_docx_quality(docx_path):
     """检查转换后的DOCX文件质量，分析编码和文本内容"""
     try:
-        print(f"\n=== 开始DOCX文件质量检查 ===")
-        print(f"文件路径: {docx_path}")
+        print("\n=== 开始DOCX文件质量检查 ===")
+        print("文件路径: " + docx_path)
         
         # 检查文件基本信息
         file_size = os.path.getsize(docx_path)
-        print(f"文件大小: {file_size} 字节")
+        print("文件大小: " + str(file_size) + " 字节")
         
         if file_size < 1000:  # 小于1KB可能有问题
             print("⚠️  警告: 文件大小异常，可能转换失败")
@@ -170,6 +174,43 @@ def start(trans):
         print(f"开始时间: {start_time}")
         print("=" * 50)
         
+        # 检查PDF翻译方法设置
+        # 优先使用trans中的pdf_translate_method，如果没有则从系统设置中获取
+        pdf_translate_method = trans.get('pdf_translate_method')
+        if not pdf_translate_method:
+            pdf_translate_method = get_pdf_translate_method()
+        print(f"📋 PDF翻译方法: {pdf_translate_method}")
+        
+        # 根据设置选择翻译方法
+        if pdf_translate_method == 'direct':
+            print("🎯 使用直接PDF翻译方法")
+            return start_direct_pdf_translation(trans)
+        else:
+            print("🎯 使用Doc2x转换后翻译方法")
+            return start_doc2x_pdf_translation(trans)
+
+    except Exception as e:
+        # 打印详细错误信息
+        print("❌ PDF翻译过程出错: " + str(e))
+        print("详细错误信息:")
+        traceback.print_exc()
+        # 确保错误状态被正确记录
+        to_translate.error(trans['id'], "PDF翻译过程出错: " + str(e))
+        return False
+
+
+def start_doc2x_pdf_translation(trans):
+    """Doc2x转换后翻译方法（原有逻辑）"""
+    try:
+        # 开始时间
+        start_time = datetime.datetime.now()
+        print(f"=== 开始Doc2x PDF翻译任务 ===")
+        print(f"任务ID: {trans['id']}")
+        print(f"源文件: {trans['file_path']}")
+        print(f"目标文件: {trans['target_file']}")
+        print(f"开始时间: {start_time}")
+        print("=" * 50)
+        
         # 立即更新任务状态为"changing"，设置PDF转换初始进度0%
         try:
             from .to_translate import db
@@ -183,7 +224,7 @@ def start(trans):
         print(f"检查源文件是否存在: {original_path}")
         if not original_path.exists():
             print(f"❌ 源文件不存在: {trans['file_path']}")
-            to_translate.error(trans['id'], f"文件不存在: {trans['file_path']}")
+            to_translate.error(trans['id'], "文件不存在: " + trans['file_path'])
             return False
         print(f"✅ 源文件存在，大小: {os.path.getsize(original_path)} 字节")
 
@@ -325,7 +366,7 @@ def start(trans):
             db.execute("update translate set process='95' where id=%s", trans['id'])
             print("✅ 已更新进度为95%（开始导出）")
         except Exception as e:
-            print(f"⚠️  更新进度失败: {str(e)}")
+            print("⚠️  更新进度失败: " + str(e))
             
         try:
             export_success = Doc2XService.trigger_export(api_key, uid, original_path.stem)
@@ -350,7 +391,7 @@ def start(trans):
             db.execute("update translate set process='98' where id=%s", trans['id'])
             print("✅ 已更新进度为98%（开始下载）")
         except Exception as e:
-            print(f"⚠️  更新进度失败: {str(e)}")
+            print("⚠️  更新进度失败: " + str(e))
             
         try:
             download_url = Doc2XService.check_export_status(api_key, uid)
@@ -371,7 +412,7 @@ def start(trans):
                 db.execute("update translate set process='100' where id=%s", trans['id'])
                 print("✅ 已更新进度为100%（下载完成）")
             except Exception as e:
-                print(f"⚠️  更新进度失败: {str(e)}")
+                print("⚠️  更新进度失败: " + str(e))
             
             # Doc2X所有阶段完成，切换到process状态开始翻译
             try:
@@ -425,7 +466,7 @@ def start(trans):
         # 加载Word文档
         try:
             document = Document(docx_path)
-            print(f"成功加载DOCX文档: {docx_path}")
+            print("成功加载DOCX文档: " + docx_path)
         except Exception as e:
             to_translate.error(trans['id'], f"文档加载失败: {str(e)}")
             return False
@@ -433,7 +474,7 @@ def start(trans):
         # 提取需要翻译的文本
         texts = []
         extract_content_for_translation(document, docx_path, texts)
-        print(f"从DOCX提取了 {len(texts)} 个文本片段")
+        print("从DOCX提取了 " + str(len(texts)) + " 个文本片段")
 
         # 过滤掉特殊符号和纯数字
         filtered_texts = []
@@ -451,18 +492,15 @@ def start(trans):
                 # 限制日志长度，避免输出过多
                 if skipped_count <= 50:  # 只显示前50个跳过的项目
                     display_text = text[:50] + "..." if len(text) > 50 else text
-                    print(f"跳过翻译: '{display_text}' - 原因: {reason}")
+                    print("跳过翻译: '" + display_text + "' - 原因: " + reason)
                 elif skipped_count == 51:
-                    print(f"... 还有更多跳过的项目，不再显示详细原因 ...")
+                    print("... 还有更多跳过的项目，不再显示详细原因 ...")
 
-        print(f"过滤后需要翻译的文本片段: {len(filtered_texts)}")
-        print(f"跳过的文本片段: {skipped_count}")
+        print("过滤后需要翻译的文本片段: " + str(len(filtered_texts)))
+        print("跳过的文本片段: " + str(skipped_count))
 
-        # 多线程翻译 - 使用Okapi方案而不是传统run方式
-        print("🔄 使用 Okapi Framework 进行PDF翻译...")
-        
-        # 开始Okapi翻译，进度从0%开始
-        print("🔄 开始Okapi翻译，进度从0%开始")
+        # 使用Okapi进行XLIFF转换，然后Qwen翻译
+        print("🔄 使用Okapi进行XLIFF转换，然后Qwen翻译...")
         
         try:
             # 导入 Okapi 集成模块
@@ -473,9 +511,13 @@ def start(trans):
                 print("❌ Okapi 安装验证失败，回退到传统方法")
                 run_translation(docx_trans, filtered_texts, max_threads=30)
             else:
-                print("✅ Okapi 安装验证成功，使用Okapi方案")
+                print("✅ Okapi 安装验证成功，使用XLIFF转换方案")
                 
-                # 如果用户选择了qwen-mt-plus，设置server为qwen
+                # 创建 Okapi 翻译器
+                translator = OkapiWordTranslator()
+                print("✅ Okapi 翻译器创建成功")
+                
+                # 设置翻译服务（Qwen）
                 if docx_trans.get('model') == 'qwen-mt-plus':
                     docx_trans['server'] = 'qwen'
                     print("✅ 设置翻译服务为 Qwen")
@@ -483,18 +525,14 @@ def start(trans):
                 # 预加载术语库
                 comparison_id = docx_trans.get('comparison_id')
                 if comparison_id:
-                    print(f"📚 开始预加载术语库: {comparison_id}")
+                    print("📚 开始预加载术语库: " + str(comparison_id))
                     from .main import get_comparison
                     preloaded_terms = get_comparison(comparison_id)
                     if preloaded_terms:
-                        print(f"📚 术语库预加载成功: {len(preloaded_terms)} 个术语")
+                        print("📚 术语库预加载成功: " + str(len(preloaded_terms)) + " 个术语")
                         docx_trans['preloaded_terms'] = preloaded_terms
                     else:
-                        print(f"📚 术语库预加载失败: {comparison_id}")
-                
-                # 创建 Okapi 翻译器
-                translator = OkapiWordTranslator()
-                print("✅ Okapi 翻译器创建成功")
+                        print("📚 术语库预加载失败: " + str(comparison_id))
                 
                 # 设置翻译服务
                 translator.set_translation_service(docx_trans)
@@ -530,11 +568,11 @@ def start(trans):
                 source_lang = "auto"  # 写死为auto，让API自动检测源语言
                 target_lang = map_language_to_qwen_format(docx_trans.get('lang', '英语'))
                 
-                print(f"🔍 语言映射调试:")
-                print(f"  原始目标语言: {docx_trans.get('lang', '英语')}")
-                print(f"  映射后目标语言: {target_lang}")
+                print("🔍 语言映射调试:")
+                print("  原始目标语言: " + str(docx_trans.get('lang', '英语')))
+                print("  映射后目标语言: " + target_lang)
                 
-                # 执行翻译
+                # 执行翻译：Okapi转换XLIFF，Qwen翻译，然后合并
                 success = translator.translate_document(
                     docx_path,
                     target_file,
@@ -543,14 +581,14 @@ def start(trans):
                 )
                 
                 if success:
-                    print("✅ Okapi PDF翻译完成")
+                    print("✅ Okapi XLIFF转换 + Qwen翻译完成")
                     
                     # 更新进度为100%（翻译完成）
                     try:
                         db.execute("update translate set process='100' where id=%s", trans['id'])
                         print("✅ 已更新进度为100%（翻译完成）")
                     except Exception as e:
-                        print(f"⚠️  更新进度失败: {str(e)}")
+                        print("⚠️  更新进度失败: " + str(e))
                     
                     # 完成处理
                     end_time = datetime.datetime.now()
@@ -562,26 +600,26 @@ def start(trans):
                     if docx_trans['run_complete']:
                         to_translate.complete(docx_trans, text_count, spend_time)
                     
-                    print(f"✅ Okapi PDF翻译完成，用时: {spend_time}")
+                    print("✅ Okapi XLIFF转换 + Qwen翻译完成，用时: " + spend_time)
                     return True
                 else:
-                    print("❌ Okapi PDF翻译失败，回退到传统方法")
+                    print("❌ Okapi XLIFF转换 + Qwen翻译失败，回退到传统方法")
                     run_translation(docx_trans, filtered_texts, max_threads=30)
                     
         except Exception as e:
-            print(f"❌ Okapi PDF翻译出错: {e}，回退到传统方法")
+            print("❌ Okapi XLIFF转换 + Qwen翻译出错: " + str(e) + "，回退到传统方法")
             run_translation(docx_trans, filtered_texts, max_threads=30)
 
         # 写入翻译结果（完全保留原始格式）
         text_count = apply_translations(document, texts)
-        print(f"应用了 {text_count} 个翻译结果")
+        print("应用了 " + str(text_count) + " 个翻译结果")
 
         # 保存文档
         try:
             document.save(target_file)
-            print(f"翻译后的文档保存成功: {target_file}")
+            print("翻译后的文档保存成功: " + target_file)
         except Exception as e:
-            to_translate.error(trans['id'], f"保存文档失败: {str(e)}")
+            to_translate.error(trans['id'], "保存文档失败: " + str(e))
             return False
 
         # 处理批注等特殊元素
@@ -596,20 +634,20 @@ def start(trans):
             db.execute("update translate set process='100' where id=%s", trans['id'])
             print("✅ 已更新进度为100%（传统方法翻译完成）")
         except Exception as e:
-            print(f"⚠️  更新进度失败: {str(e)}")
+            print("⚠️  更新进度失败: " + str(e))
         
         if trans['run_complete']:
             to_translate.complete(trans, text_count, spend_time)
-        print(f"PDF翻译任务完成: {trans['id']}")
+        print("PDF翻译任务完成: " + str(trans['id']))
         return True
 
     except Exception as e:
         # 打印详细错误信息
-        print(f"❌ PDF翻译过程出错: {str(e)}")
+        print("❌ PDF翻译过程出错: " + str(e))
         print("详细错误信息:")
         traceback.print_exc()
         # 确保错误状态被正确记录
-        to_translate.error(trans['id'], f"PDF翻译过程出错: {str(e)}")
+        to_translate.error(trans['id'], "PDF翻译过程出错: " + str(e))
         return False
 
 
@@ -1239,3 +1277,588 @@ def update_special_elements(docx_path, texts):
 def check_text(text):
     """检查文本是否有效（非空且非纯标点）"""
     return text and len(text) > 0 and not common.is_all_punc(text)
+
+
+def get_pdf_translate_method():
+    """获取PDF翻译方法设置"""
+    try:
+        from app.models.setting import Setting
+        pdf_method_setting = Setting.query.filter_by(
+            group='other_setting',
+            alias='pdf_translate_method',
+            deleted_flag='N'
+        ).first()
+        return pdf_method_setting.value if pdf_method_setting else 'direct'
+    except Exception as e:
+        logging.warning(f"获取PDF翻译方法设置失败: {e}")
+        return 'direct'  # 默认使用直接翻译
+
+
+def start_direct_pdf_translation(trans):
+    """直接PDF翻译方法"""
+    try:
+        print("🚀 开始直接PDF翻译流程")
+        
+        # 更新任务状态为处理中
+        try:
+            from .to_translate import db
+            db.execute("update translate set status='process', process='10' where id=%s", trans['id'])
+            print("✅ 已更新任务状态为process，进度10%")
+        except Exception as e:
+            print(f"⚠️ 更新任务状态失败: {str(e)}")
+        
+        # 检查文件是否存在
+        original_path = Path(trans['file_path'])
+        if not original_path.exists():
+            print(f"❌ 源文件不存在: {trans['file_path']}")
+            to_translate.error(trans['id'], "文件不存在: " + trans['file_path'])
+            return False
+        
+        # 确保目标目录存在
+        target_dir = os.path.dirname(trans['target_file'])
+        os.makedirs(target_dir, exist_ok=True)
+        
+        # 创建翻译函数
+        def translate_func(text):
+            """翻译函数，使用现有的翻译逻辑"""
+            try:
+                # 使用现有的翻译逻辑
+                from .to_translate import translate_text
+                return translate_text(trans, text)
+            except Exception as e:
+                logging.warning("翻译失败，使用原文: " + str(e))
+                return text
+        
+        # 创建直接PDF翻译器
+        translator = DirectPDFTranslator(
+            input_pdf_path=str(original_path),
+            target_lang=trans.get('target_lang', 'zh')
+        )
+        
+        # 执行完整翻译流程
+        result_file = translator.run_complete_translation(
+            trans=trans,
+            output_file=trans['target_file']
+        )
+        
+        if result_file and os.path.exists(result_file):
+            print(f"✅ 直接PDF翻译完成: {result_file}")
+            
+            # 更新任务状态为完成
+            try:
+                from .to_translate import db
+                db.execute("update translate set status='done', process='100' where id=%s", trans['id'])
+                print("✅ 已更新任务状态为done，进度100%")
+            except Exception as e:
+                print(f"⚠️ 更新任务状态失败: {str(e)}")
+            
+            return True
+        else:
+            print(f"❌ 直接PDF翻译失败")
+            to_translate.error(trans['id'], "直接PDF翻译失败")
+            return False
+            
+    except Exception as e:
+        print(f"❌ 直接PDF翻译异常: {str(e)}")
+        to_translate.error(trans['id'], "直接PDF翻译异常: " + str(e))
+        return False
+
+
+class DirectPDFTranslator:
+    """
+    直接PDF翻译器 - 支持中文字符显示，保持原始样式，无背景覆盖
+    基于pdf-translator-final项目集成
+    """
+    
+    def __init__(self, input_pdf_path, target_lang='zh'):
+        self.input_pdf_path = input_pdf_path
+        self.target_lang = target_lang
+        self.doc = None
+        self.extracted_texts = []
+        
+    def step1_split_pdf(self, output_dir):
+        """步骤1: 拆分PDF为文本JSON和无文本PDF"""
+        print("=" * 60)
+        print("步骤1: 拆分PDF为文本JSON和无文本PDF")
+        print("=" * 60)
+        
+        try:
+            # 1. 打开PDF
+            print("1. 打开PDF...")
+            self.doc = fitz.open(self.input_pdf_path)
+            print(f"   打开了 {self.doc.page_count} 页的PDF")
+            
+            # 2. 提取文本信息
+            print("\n2. 提取文本信息...")
+            self.extracted_texts = []
+            
+            for page_num in range(self.doc.page_count):
+                page = self.doc[page_num]
+                print(f"   处理第 {page_num + 1} 页...")
+                
+                # 提取文本块
+                text_blocks = page.get_text("dict", flags=fitz.TEXTFLAGS_TEXT)["blocks"]
+                page_texts = []
+                
+                for block in text_blocks:
+                    if "lines" in block:
+                        for line in block["lines"]:
+                            for span in line["spans"]:
+                                text = span["text"].strip()
+                                if text:
+                                    text_info = {
+                                        "text": text,
+                                        "bbox": span["bbox"],
+                                        "size": span["size"],
+                                        "color": span["color"],
+                                        "font": span["font"]
+                                    }
+                                    page_texts.append(text_info)
+                
+                page_data = {
+                    "page_number": page_num,
+                    "texts": page_texts
+                }
+                self.extracted_texts.append(page_data)
+                print(f"   提取了 {len(page_texts)} 个文本块")
+            
+            # 3. 保存提取的文本
+            print("\n3. 保存提取的文本...")
+            extracted_texts_file = os.path.join(output_dir, "extracted_texts.json")
+            with open(extracted_texts_file, 'w', encoding='utf-8') as f:
+                json.dump(self.extracted_texts, f, ensure_ascii=False, indent=2)
+            print(f"✅ 提取的文本已保存到: {extracted_texts_file}")
+            
+            # 4. 创建无文本PDF
+            print("\n4. 创建无文本PDF...")
+            no_text_doc = fitz.open()
+            
+            for page_num in range(self.doc.page_count):
+                page = self.doc[page_num]
+                new_page = no_text_doc.new_page(width=page.rect.width, height=page.rect.height)
+                
+                # 复制页面内容（图片、背景等）
+                new_page.show_pdf_page(page.rect, self.doc, page_num)
+                
+                # 使用精确方法删除所有文本
+                text_blocks = page.get_text("dict", flags=fitz.TEXTFLAGS_TEXT)["blocks"]
+                text_count = 0
+                
+                for block in text_blocks:
+                    if "lines" in block:
+                        for line in block["lines"]:
+                            for span in line["spans"]:
+                                bbox = span["bbox"]
+                                text = span["text"].strip()
+                                if text:
+                                    try:
+                                        # 使用add_redact_annot但不填充，避免白色遮挡
+                                        redact_annot = new_page.add_redact_annot(bbox, fill=None)
+                                        text_count += 1
+                                    except Exception as e:
+                                        logging.warning(f"删除文本失败: {e}")
+                                        # 如果失败，尝试用透明填充
+                                        try:
+                                            redact_annot = new_page.add_redact_annot(bbox, fill=(0, 0, 0, 0))
+                                            text_count += 1
+                                        except Exception as e2:
+                                            logging.warning(f"透明填充也失败: {e2}")
+                
+                # 应用删除操作
+                try:
+                    new_page.apply_redactions()
+                    print(f"   第 {page_num + 1} 页删除了 {text_count} 个文本块")
+                except Exception as e:
+                    logging.warning(f"应用删除操作失败: {e}")
+                    print(f"   ⚠️ 第 {page_num + 1} 页应用删除操作失败: {e}")
+            
+            no_text_pdf_file = os.path.join(output_dir, "no_text.pdf")
+            no_text_doc.save(no_text_pdf_file)
+            no_text_doc.close()
+            print(f"✅ 无文本PDF已保存到: {no_text_pdf_file}")
+            
+            return extracted_texts_file, no_text_pdf_file
+            
+        except Exception as e:
+            logging.error(f"拆分PDF时出错: {e}")
+            raise
+    
+    def step2_translate_texts(self, extracted_texts_file, trans, output_dir):
+        """步骤2: 使用多线程翻译JSON中的文本"""
+        print("\n" + "=" * 60)
+        print("步骤2: 使用多线程翻译JSON中的文本")
+        print("=" * 60)
+        
+        try:
+            # 1. 加载提取的文本
+            print("1. 加载提取的文本...")
+            with open(extracted_texts_file, 'r', encoding='utf-8') as f:
+                extracted_texts = json.load(f)
+            
+            print("   加载了 " + str(len(extracted_texts)) + " 页的文本数据")
+            
+            # 2. 准备多线程翻译数据
+            print("\n2. 准备多线程翻译数据...")
+            texts_for_translation = []
+            text_mapping = {}  # 用于映射翻译结果回原始位置
+            
+            for page_idx, page_data in enumerate(extracted_texts):
+                page_num = page_data["page_number"]
+                for text_idx, text_info in enumerate(page_data["texts"]):
+                    original_text = text_info["text"]
+                    if original_text and original_text.strip():
+                        # 创建翻译任务
+                        translation_task = {
+                            'text': original_text,
+                            'complete': False,
+                            'page_idx': page_idx,
+                            'text_idx': text_idx,
+                            'original_info': text_info
+                        }
+                        texts_for_translation.append(translation_task)
+                        text_mapping[(page_idx, text_idx)] = translation_task
+            
+            print("   准备翻译 " + str(len(texts_for_translation)) + " 个文本片段")
+            
+            # 3. 使用多线程翻译
+            print("\n3. 开始多线程翻译...")
+            if texts_for_translation:
+                # 使用现有的多线程翻译系统
+                run_translation(trans, texts_for_translation, max_threads=30)
+                print("   多线程翻译完成")
+            else:
+                print("   没有需要翻译的文本")
+            
+            # 4. 重新组织翻译结果
+            print("\n4. 重新组织翻译结果...")
+            translated_texts = []
+            
+            for page_data in extracted_texts:
+                page_num = page_data["page_number"]
+                translated_page_data = {"page_number": page_num, "texts": []}
+                
+                for text_idx, text_info in enumerate(page_data["texts"]):
+                    original_text = text_info["text"]
+                    if original_text and original_text.strip():
+                        # 获取翻译结果
+                        translation_task = text_mapping.get((extracted_texts.index(page_data), text_idx))
+                        if translation_task and translation_task.get('complete'):
+                            translated_text = translation_task.get('text', original_text)
+                            print("   ✅ 翻译: '" + original_text[:20] + "...' -> '" + translated_text[:20] + "...'")
+                        else:
+                            translated_text = original_text
+                            print("   ⚠️ 翻译失败，使用原文: '" + original_text[:20] + "...'")
+                        
+                        # 创建翻译后的文本信息
+                        translated_text_info = text_info.copy()
+                        translated_text_info["text"] = translated_text
+                        translated_text_info["original_text"] = original_text
+                        translated_page_data["texts"].append(translated_text_info)
+                    else:
+                        translated_page_data["texts"].append(text_info)
+                
+                translated_texts.append(translated_page_data)
+            
+            # 5. 保存翻译后的文本
+            print("\n5. 保存翻译后的文本...")
+            translated_texts_file = os.path.join(output_dir, "translated_texts.json")
+            with open(translated_texts_file, 'w', encoding='utf-8') as f:
+                json.dump(translated_texts, f, ensure_ascii=False, indent=2)
+            print("✅ 翻译后的文本已保存到: " + translated_texts_file)
+            
+            return translated_texts_file
+            
+        except Exception as e:
+            logging.error("翻译文本时出错: " + str(e))
+            raise
+    
+    def step3_fill_translated_texts(self, translated_texts_file, no_text_pdf_file, output_file):
+        """步骤3: 使用insert_htmlbox回填翻译后的文本"""
+        print("\n" + "=" * 60)
+        print("步骤3: 使用insert_htmlbox回填翻译后的文本")
+        print("=" * 60)
+        
+        try:
+            # 1. 加载翻译后的文本
+            print("1. 加载翻译后的文本...")
+            with open(translated_texts_file, 'r', encoding='utf-8') as f:
+                translated_texts = json.load(f)
+            
+            print(f"   加载了 {len(translated_texts)} 页的翻译文本数据")
+            
+            # 2. 打开无文本PDF
+            print("\n2. 打开无文本PDF...")
+            doc = fitz.open(no_text_pdf_file)
+            print(f"   打开了 {doc.page_count} 页的PDF")
+            
+            # 3. 回填翻译文本
+            print("\n3. 回填翻译文本...")
+            
+            for page_data in translated_texts:
+                page_num = page_data["page_number"]
+                page = doc[page_num]
+                print(f"   处理第 {page_num + 1} 页...")
+                
+                for text_info in page_data["texts"]:
+                    text = text_info["text"]
+                    if text and text.strip():
+                        bbox = text_info["bbox"]
+                        font_size = text_info["size"]
+                        color = text_info["color"]
+                        
+                        # 标准化颜色
+                        if isinstance(color, (int, float)):
+                            if color == 0:
+                                color = (0, 0, 0)  # 黑色
+                            elif color == 16777215:
+                                color = (1, 1, 1)  # 白色
+                            else:
+                                # 转换为RGB
+                                r = ((color >> 16) & 0xFF) / 255.0
+                                g = ((color >> 8) & 0xFF) / 255.0
+                                b = (color & 0xFF) / 255.0
+                                color = (r, g, b)
+                        elif isinstance(color, (list, tuple)) and len(color) >= 3:
+                            color = tuple(color[:3])
+                        else:
+                            color = (0, 0, 0)  # 默认黑色
+                        
+                        # 使用insert_htmlbox方法（支持中文，避免背景覆盖）
+                        try:
+                            # 创建文本框
+                            textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                            
+                            # 构建HTML文本，使用完全透明的背景
+                            html_text = f"""
+                            <div style="
+                                font-size: {font_size}px;
+                                color: rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)});
+                                font-family: sans-serif;
+                                line-height: 1.0;
+                                margin: 0;
+                                padding: 0;
+                                background: none;
+                                background-color: transparent;
+                                background-image: none;
+                                border: none;
+                                outline: none;
+                                box-shadow: none;
+                            ">
+                                {text}
+                            </div>
+                            """
+                            
+                            # 使用insert_htmlbox插入文本
+                            page.insert_htmlbox(textbox, html_text)
+                            logging.info(f"✅ 文本插入成功: '{text[:20]}...'")
+                            print(f"   ✅ 文本插入成功: '{text[:20]}...'")
+                        except Exception as e:
+                            logging.error(f"文本插入失败: {e}")
+                            print(f"   ❌ 文本插入失败: '{text[:20]}...' - {e}")
+                    else:
+                        logging.warning(f"文本为空，跳过: '{text}'")
+            
+            # 4. 保存最终PDF
+            print("\n4. 保存最终PDF...")
+            doc.save(output_file)
+            doc.close()
+            print(f"✅ 最终翻译后的PDF已保存到: {output_file}")
+            
+            return output_file
+            
+        except Exception as e:
+            logging.error(f"回填PDF时出错: {e}")
+            raise
+    
+    def run_complete_translation(self, trans, output_file):
+        """运行完整的翻译流程"""
+        print("🚀 开始完整的PDF翻译流程")
+        print("=" * 60)
+        
+        # 临时文件列表，用于最后清理
+        temp_files = []
+        
+        try:
+            # 创建输出目录
+            output_dir = os.path.dirname(output_file)
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # 步骤1: 拆分PDF
+            extracted_texts_file, no_text_pdf_file = self.step1_split_pdf(output_dir)
+            temp_files.extend([extracted_texts_file, no_text_pdf_file])
+            
+            # 步骤2: 翻译文本
+            translated_texts_file = self.step2_translate_texts(extracted_texts_file, trans, output_dir)
+            temp_files.append(translated_texts_file)
+            
+            # 步骤3: 回填翻译文本
+            final_pdf_file = self.step3_fill_translated_texts(translated_texts_file, no_text_pdf_file, output_file)
+            
+            # 步骤4: 压缩PDF文件
+            print("\n" + "=" * 60)
+            print("步骤4: 压缩PDF文件")
+            print("=" * 60)
+            
+            # 生成压缩后的文件名
+            base_name = os.path.splitext(output_file)[0]
+            compressed_pdf_file = base_name + "_compressed.pdf"
+            
+            # 压缩PDF
+            optimized_pdf_file = self._optimize_pdf_size(final_pdf_file, compressed_pdf_file)
+            
+            if optimized_pdf_file and os.path.exists(optimized_pdf_file):
+                # 删除原始合成PDF，只保留压缩后的PDF
+                try:
+                    os.remove(final_pdf_file)
+                    print("✅ 已删除原始合成PDF: " + os.path.basename(final_pdf_file))
+                except Exception as e:
+                    logging.warning("删除原始PDF失败: " + str(e))
+                    print("⚠️ 删除原始PDF失败: " + str(e))
+                
+                # 将压缩后的PDF重命名为最终输出文件
+                try:
+                    os.rename(optimized_pdf_file, output_file)
+                    print("✅ 压缩后的PDF已重命名为最终输出文件")
+                    final_pdf_file = output_file
+                except Exception as e:
+                    logging.warning("重命名压缩PDF失败: " + str(e))
+                    print("⚠️ 重命名压缩PDF失败: " + str(e))
+                    final_pdf_file = optimized_pdf_file
+            else:
+                print("⚠️ PDF压缩失败，使用原始PDF")
+                final_pdf_file = final_pdf_file
+            
+            print("\n" + "=" * 60)
+            print("🎉 完整PDF翻译流程完成!")
+            print("=" * 60)
+            print(f"📄 输入文件: {self.input_pdf_path}")
+            print(f"📝 提取文本: {extracted_texts_file}")
+            print(f"🔄 翻译文本: {translated_texts_file}")
+            print(f"📄 无文本PDF: {no_text_pdf_file}")
+            print(f"🎯 最终输出: {final_pdf_file}")
+            print("=" * 60)
+            
+            # 清理临时文件
+            self._cleanup_temp_files(temp_files)
+            
+            return final_pdf_file
+            
+        except Exception as e:
+            logging.error(f"完整翻译流程失败: {e}")
+            # 即使出错也要清理临时文件
+            self._cleanup_temp_files(temp_files)
+            raise
+        finally:
+            if self.doc:
+                self.doc.close()
+    
+    def _optimize_pdf_size(self, input_pdf_path, output_pdf_path=None):
+        """优化PDF文件大小"""
+        print("\n" + "=" * 60)
+        print("PDF文件大小优化")
+        print("=" * 60)
+        
+        if not os.path.exists(input_pdf_path):
+            print("❌ 文件不存在: " + input_pdf_path)
+            return None
+        
+        # 获取原始文件大小
+        original_size = os.path.getsize(input_pdf_path)
+        print("原始文件大小: " + str(original_size) + " 字节 (" + str(original_size/1024/1024) + " MB)")
+        
+        try:
+            # 打开PDF
+            print("\n1. 打开PDF...")
+            doc = fitz.open(input_pdf_path)
+            print("   打开了 " + str(doc.page_count) + " 页的PDF")
+            
+            # 设置输出文件名
+            if output_pdf_path is None:
+                base_name = os.path.splitext(input_pdf_path)[0]
+                output_pdf_path = base_name + "_optimized.pdf"
+            
+            # 优化选项
+            print("\n2. 应用优化选项...")
+            
+            # 方法1: 使用压缩选项保存
+            print("   方法1: 使用压缩选项...")
+            doc.save(
+                output_pdf_path,
+                garbage=4,        # 垃圾回收
+                deflate=True,     # 压缩
+                clean=True,       # 清理
+                encryption=fitz.PDF_ENCRYPT_NONE  # 无加密
+            )
+            
+            # 检查优化后的文件大小
+            optimized_size = os.path.getsize(output_pdf_path)
+            print("   优化后文件大小: " + str(optimized_size) + " 字节 (" + str(optimized_size/1024/1024) + " MB)")
+            
+            # 计算压缩率
+            compression_ratio = (1 - optimized_size / original_size) * 100
+            print("   压缩率: " + str(compression_ratio) + "%")
+            
+            # 方法2: 如果还是太大，尝试更激进的优化
+            if optimized_size > 800000:  # 如果还是超过800KB
+                print("\n   方法2: 应用更激进的优化...")
+                aggressive_output = os.path.splitext(output_pdf_path)[0] + "_aggressive.pdf"
+                
+                # 重新打开并应用更激进的优化
+                doc2 = fitz.open(input_pdf_path)
+                doc2.save(
+                    aggressive_output,
+                    garbage=4,
+                    deflate=True,
+                    clean=True,
+                    encryption=fitz.PDF_ENCRYPT_NONE,
+                    # 更激进的优化选项
+                    ascii=False,      # 二进制模式
+                    expand=0,         # 不展开
+                    no_new_id=True,   # 不生成新ID
+                )
+                doc2.close()
+                
+                # 检查激进优化后的文件大小
+                aggressive_size = os.path.getsize(aggressive_output)
+                print("   激进优化后文件大小: " + str(aggressive_size) + " 字节 (" + str(aggressive_size/1024/1024) + " MB)")
+                
+                aggressive_ratio = (1 - aggressive_size / original_size) * 100
+                print("   激进压缩率: " + str(aggressive_ratio) + "%")
+                
+                # 选择更小的文件
+                if aggressive_size < optimized_size:
+                    print("   ✅ 激进优化效果更好，使用: " + aggressive_output)
+                    output_pdf_path = aggressive_output
+                    optimized_size = aggressive_size
+            
+            doc.close()
+            
+            print("\n✅ 优化完成! 输出文件: " + output_pdf_path)
+            print("📊 文件大小对比:")
+            print("   原始: " + str(original_size) + " 字节 (" + str(original_size/1024/1024) + " MB)")
+            print("   优化: " + str(optimized_size) + " 字节 (" + str(optimized_size/1024/1024) + " MB)")
+            print("   节省: " + str(original_size - optimized_size) + " 字节 (" + str((1 - optimized_size/original_size)*100) + "%)")
+            
+            return output_pdf_path
+            
+        except Exception as e:
+            logging.error("优化PDF时出错: " + str(e))
+            print("❌ 优化PDF时出错: " + str(e))
+            raise
+
+    def _cleanup_temp_files(self, temp_files):
+        """清理临时文件"""
+        print("\n🧹 开始清理临时文件...")
+        cleaned_count = 0
+        
+        for temp_file in temp_files:
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                    print("✅ 已删除临时文件: " + os.path.basename(temp_file))
+                    cleaned_count += 1
+                except Exception as e:
+                    logging.warning("删除临时文件失败: " + temp_file + " - " + str(e))
+                    print("⚠️ 删除临时文件失败: " + os.path.basename(temp_file) + " - " + str(e))
+        
+        print("🧹 临时文件清理完成，共清理 " + str(cleaned_count) + " 个文件")

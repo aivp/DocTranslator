@@ -158,7 +158,7 @@
             </div>
             <div :class="item.status == 'done' ? 'table_li' : 'table_li pc_show'">
               <span class="phone_show">语言:</span>
-              {{ item.lang ? item.lang : '--' }}
+              {{ item.prompt_id ? '提示词翻译' : (item.lang ? item.lang : '--') }}
             </div>
             <!-- 操作 -->
             <div class="table_li">
@@ -1353,10 +1353,29 @@ async function downAllTransFile() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (userStore.token) {
     getTranslatesData(1)
     form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
+    
+    // 检查提示词的有效性
+    if (form.value.prompt_id) {
+      try {
+        const { prompt_my } = await import('@/api/corpus')
+        const res = await prompt_my()
+        if (res.code === 200) {
+          const promptExists = res.data.data.some(prompt => prompt.id === form.value.prompt_id)
+          if (!promptExists) {
+            console.log(`提示词ID ${form.value.prompt_id} 不存在于当前用户的提示词列表中，自动置空`)
+            form.value.prompt_id = ''
+            // 同时更新store中的数据
+            translateStore.updateAIServerSettings({ prompt_id: null })
+          }
+        }
+      } catch (error) {
+        console.error('检查提示词有效性失败:', error)
+      }
+    }
     
     // 添加调试信息
     console.log('页面初始化 - 翻译设置:', translateStore.aiServer)

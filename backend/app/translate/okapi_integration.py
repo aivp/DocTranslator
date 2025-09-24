@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Okapi Framework 集成模块
 

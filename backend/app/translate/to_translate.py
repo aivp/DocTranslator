@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # import tiktoken
 import datetime
 import hashlib
@@ -355,7 +356,9 @@ def translate_text(trans, text, source_lang="auto", target_lang="en"):
             return qwen_translate(
                 text=text,
                 target_language=qwen_target_lang,
-                source_lang="auto"
+                source_lang="auto",
+                prompt=trans.get('prompt'),
+                prompt_id=trans.get('prompt_id')
             )
         else:
             # OpenAI 翻译 (兼容新旧版本)
@@ -396,7 +399,9 @@ def translate_text(trans, text, source_lang="auto", target_lang="en"):
                     return qwen_translate(
                         text=text,
                         target_language=target_lang,
-                        source_lang="auto"
+                        source_lang="auto",
+                        prompt=trans.get('prompt'),
+                        prompt_id=trans.get('prompt_id')
                     )
                 except:
                     return text  # 最后返回原文
@@ -434,6 +439,14 @@ def get(trans, event, texts, index):
     # ==========================================
     
     prompt = trans['prompt']
+    
+    # 添加调试日志，查看prompt字段的值
+    logging.info(f"🔍 to_translate.py 调试信息:")
+    logging.info(f"  trans['prompt']类型: {type(prompt)}")
+    logging.info(f"  trans['prompt']值: {repr(prompt)}")
+    logging.info(f"  trans['prompt']是否为空: {not prompt}")
+    logging.info(f"  trans['prompt']长度: {len(prompt) if prompt else 0}")
+    
     extension = trans['extension'].lower()
     text = texts[index]
     api_key = trans['api_key']
@@ -672,7 +685,7 @@ def get(trans, event, texts, index):
 
                 elif extension == ".md":
                     if model == 'qwen-mt-plus':
-                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list)
+                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'))
                     else:
                         content = req(text['text'], target_lang, model, prompt, True)
                 else:
@@ -680,13 +693,13 @@ def get(trans, event, texts, index):
                     if 'context_text' in text and text.get('context_type') == 'body':
                         # 正文段落：使用带上下文的文本
                         if model == 'qwen-mt-plus':
-                            content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list)
+                            content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'))
                         else:
                             content = req(text['context_text'], target_lang, model, prompt, False)
                     else:
                         # 其他内容：使用原始文本
                         if model == 'qwen-mt-plus':
-                            content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list)
+                            content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'))
                         else:
                             content = req(text['text'], target_lang, model, prompt, False)
                     # print("content", text['content'])

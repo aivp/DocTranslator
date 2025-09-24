@@ -109,10 +109,27 @@ class TranslateStartResource(Resource):
             # 生成翻译结果绝对路径
             target_abs_path = get_absolute_storage_path(origin_filename)
 
-            # 如果是pdf，需要改成docx-----------
+            # 根据PDF翻译方法处理PDF文件
             if origin_filename.lower().endswith('.pdf'):
-                origin_filename = origin_filename + '.docx'
-                target_abs_path = target_abs_path + '.docx'
+                # 优先使用前端传入的PDF翻译方法，如果没有则从系统设置中获取
+                pdf_translate_method = data.get('pdf_translate_method')
+                if not pdf_translate_method:
+                    pdf_method_setting = Setting.query.filter_by(
+                        group='other_setting',
+                        alias='pdf_translate_method',
+                        deleted_flag='N'
+                    ).first()
+                    pdf_translate_method = pdf_method_setting.value if pdf_method_setting else 'direct'
+                
+                print(f"📋 使用的PDF翻译方法: {pdf_translate_method}")
+                
+                # 如果使用Doc2x转换方法，需要改成docx
+                if pdf_translate_method == 'doc2x':
+                    origin_filename = origin_filename + '.docx'
+                    target_abs_path = target_abs_path + '.docx'
+                    print(f"🔄 使用Doc2x方法，文件名改为: {origin_filename}")
+                else:
+                    print(f"🎯 使用直接翻译方法，保持原文件名: {origin_filename}")
 
             # 获取翻译类型（取最后一个type值）
             translate_type = data.get('type[2]', 'trans_all_only_inherit')
@@ -196,8 +213,21 @@ class TranslateStartResource(Resource):
             translate.comparison_id = comparison_id if comparison_id else None
             prompt_id = data.get('prompt_id', '0')
             translate.prompt_id = int(prompt_id) if prompt_id else None
+            
+            # 如果选择了提示词，获取提示词内容并保存到prompt字段
+            if prompt_id and int(prompt_id) > 0:
+                from app.models.prompt import Prompt
+                prompt_obj = Prompt.query.get(int(prompt_id))
+                if prompt_obj:
+                    translate.prompt = prompt_obj.content
+                    current_app.logger.info(f"设置提示词内容: {prompt_obj.title}")
+                else:
+                    current_app.logger.warning(f"未找到ID为 {prompt_id} 的提示词")
+            else:
+                translate.prompt = ''  # 清空提示词内容
             translate.doc2x_flag = data.get('doc2x_flag', 'N')
             translate.doc2x_secret_key = data.get('doc2x_secret_key', 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0')
+            translate.pdf_translate_method = data.get('pdf_translate_method', 'direct')
             if data['server'] == 'baidu':
                 translate.lang = data['to_lang']
                 translate.comparison_id = 1 if data.get('needIntervene', False) else None  # 使用术语库
@@ -281,9 +311,21 @@ class TranslateListResource(Resource):
                 # 格式化完成时间（精确到秒）
                 end_at_str = t.end_at.strftime('%Y-%m-%d %H:%M:%S') if t.end_at else "--"
                 origin_filename=t.origin_filename
-                # 如果是pdf，需要改成docx-----------
-                if t.origin_filename.lower().endswith('.pdf') and t.server == 'doc2x':
-                    origin_filename = t.origin_filename + '.docx'
+                # 根据PDF翻译方法处理文件名显示
+                if t.origin_filename.lower().endswith('.pdf'):
+                    # 优先使用记录中的PDF翻译方法，如果没有则从系统设置中获取
+                    pdf_translate_method = getattr(t, 'pdf_translate_method', None)
+                    if not pdf_translate_method:
+                        pdf_method_setting = Setting.query.filter_by(
+                            group='other_setting',
+                            alias='pdf_translate_method',
+                            deleted_flag='N'
+                        ).first()
+                        pdf_translate_method = pdf_method_setting.value if pdf_method_setting else 'direct'
+                    
+                    # 如果使用Doc2x转换方法，显示为docx
+                    if pdf_translate_method == 'doc2x':
+                        origin_filename = t.origin_filename + '.docx'
                 data.append({
                     'id': t.id,
                     'file_type': file_type,
@@ -296,6 +338,7 @@ class TranslateListResource(Resource):
                     'start_at': t.start_at.strftime('%Y-%m-%d %H:%M:%S') if t.start_at else "--",
                     # 开始时间
                     'lang': get_unified_lang_name(t.lang),  # 标准输出语言中文名称
+                    'prompt_id': t.prompt_id,  # 提示词ID
                     'target_filepath': t.target_filepath,
                     'uuid': t.uuid,
                     'server': t.server,
@@ -457,6 +500,8 @@ class TranslateSettingResource(Resource):
                 config['prompt_template'] = value
             elif setting.alias == 'threads':
                 config['max_threads'] = int(value) if value.isdigit() else 10  # 默认10线程
+            elif setting.alias == 'pdf_translate_method':
+                config['pdf_translate_method'] = value
 
         # 设置默认值（如果数据库中没有相关配置）
         config.setdefault('models', ['gpt-3.5-turbo', 'gpt-4'])
@@ -466,6 +511,7 @@ class TranslateSettingResource(Resource):
         config.setdefault('api_key', '')
         config.setdefault('prompt_template', '请将以下内容翻译为{target_lang}')
         config.setdefault('max_threads', 5)
+        config.setdefault('pdf_translate_method', 'direct')  # 默认使用直接翻译方法
 
         return config
 

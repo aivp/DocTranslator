@@ -25,22 +25,20 @@
               v-model="localForm.title"
               type="text"
               placeholder="请输入提示语标题"
-              maxlength="150"
-              show-word-limit
+              maxlength="50"
             />
           </el-form-item>
         </el-col>
         <el-col :span="24">
-          <el-form-item label="# 角色" required prop="role_content" width="100%">
+          <el-form-item label="角色" required prop="role_content" width="100%">
             <div class="prompt-section">
+              <div class="section-title"># 角色</div>
               <el-input
                 v-model="localForm.role_content"
                 type="textarea"
-                :rows="4"
+                :rows="3"
                 resize="none"
                 placeholder="请输入翻译专家的角色描述"
-                maxlength="150"
-                show-word-limit
               />
               <div class="example-text">
                 示例：你是一名专业的法律翻译专家,精通中文和英文,尤其擅长处理商业合同和法律文件。
@@ -49,16 +47,15 @@
           </el-form-item>
         </el-col>
         <el-col :span="24">
-          <el-form-item label="# 任务" required prop="task_content" width="100%">
+          <el-form-item label="任务" required prop="task_content" width="100%">
             <div class="prompt-section">
+              <div class="section-title"># 任务</div>
               <el-input
                 v-model="localForm.task_content"
                 type="textarea"
-                :rows="4"
+                :rows="3"
                 resize="none"
                 placeholder="请输入具体的翻译任务"
-                maxlength="150"
-                show-word-limit
               />
               <div class="example-text">
                 示例：我需要你将以下中文法律文本翻译成专业、精准、正式的英文。
@@ -67,16 +64,15 @@
           </el-form-item>
         </el-col>
         <el-col :span="24">
-          <el-form-item label="# 翻译要求" required prop="requirements_content" width="100%">
+          <el-form-item label="翻译要求" required prop="requirements_content" width="100%">
             <div class="prompt-section">
+              <div class="section-title"># 翻译要求</div>
               <el-input
                 v-model="localForm.requirements_content"
                 type="textarea"
-                :rows="4"
+                :rows="5"
                 resize="none"
                 placeholder="请输入翻译的具体要求"
-                maxlength="500"
-                show-word-limit
               />
               <div class="example-text">
                 示例：<br/>
@@ -208,28 +204,12 @@ defineExpose({
       overflow-y: auto;
     }
     .el-form-item {
-      margin-bottom: 20px;
       .el-form-item__label {
         justify-content: flex-start;
         color: #111111;
-        font-weight: 500;
-        margin-bottom: 8px;
       }
       .el-input-number .el-input__inner {
         text-align: left;
-      }
-      .el-input, .el-textarea {
-        width: 100%;
-        .el-input__inner, .el-textarea__inner {
-          width: 100%;
-          border-radius: 6px;
-          border: 1px solid #dcdfe6;
-          transition: border-color 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
-          &:focus {
-            border-color: #055cf9;
-            outline: none;
-          }
-        }
       }
     }
     .btn_box {
