@@ -177,17 +177,25 @@ def start_with_okapi(trans, start_time):
                 logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程（硬编码30）")
                 
                 # 进度更新相关变量
-                completed_count = 0
                 total_count = len(texts)
                 progress_lock = threading.Lock()
                 
                 def update_progress():
                     """更新翻译进度"""
-                    nonlocal completed_count
                     with progress_lock:
-                        completed_count += 1
-                        progress_percentage = min((completed_count / total_count) * 100, 100.0)
-                        logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+                        # 重新计算实际完成的文本数量，而不是累加计数
+                        actual_completed = sum(1 for i, text in enumerate(texts) if translated_texts[i] is not None)
+                        
+                        # 确保进度不会超过100%，也不会在完成时少于100%
+                        if actual_completed >= total_count:
+                            # 所有任务完成，强制设置为100%
+                            actual_completed = total_count
+                            progress_percentage = 100.0
+                        else:
+                            # 正常计算进度
+                            progress_percentage = min((actual_completed / total_count) * 100, 100.0)
+                        
+                        logger.info(f"翻译进度: {actual_completed}/{total_count} ({progress_percentage:.1f}%)")
                         
                         # 更新数据库进度
                         try:
@@ -1424,17 +1432,25 @@ def run_translation(trans, texts, max_threads):
         logger.info(f"翻译服务: {trans.get('server', 'unknown')}")  # 确认使用的翻译服务
 
     # 进度更新相关变量
-    completed_count = 0
     total_count = len(texts)
     progress_lock = threading.Lock()
     
     def update_progress():
         """更新翻译进度"""
-        nonlocal completed_count
         with progress_lock:
-            completed_count += 1
-            progress_percentage = min((completed_count / total_count) * 100, 100.0)
-            logger.info(f"翻译进度: {completed_count}/{total_count} ({progress_percentage:.1f}%)")
+            # 重新计算实际完成的文本数量，而不是累加计数
+            actual_completed = sum(1 for text in texts if text.get('complete', False))
+            
+            # 确保进度不会超过100%，也不会在完成时少于100%
+            if actual_completed >= total_count:
+                # 所有任务完成，强制设置为100%
+                actual_completed = total_count
+                progress_percentage = 100.0
+            else:
+                # 正常计算进度
+                progress_percentage = min((actual_completed / total_count) * 100, 100.0)
+            
+            logger.info(f"翻译进度: {actual_completed}/{total_count} ({progress_percentage:.1f}%)")
             
             # 更新数据库进度
             try:
@@ -1469,6 +1485,14 @@ def run_translation(trans, texts, max_threads):
 
     with print_lock:
         logger.info("所有翻译任务已完成")
+        
+        # 最终进度确认，确保设置为100%
+        try:
+            from .to_translate import db
+            db.execute("update translate set process='100.0' where id=%s", trans['id'])
+            logger.info("✅ 最终进度已设置为100%")
+        except Exception as e:
+            logger.error(f"设置最终进度失败: {str(e)}")
 
 
 def calculate_adaptive_font_size(original_text, translated_text, original_font_size):
@@ -2442,6 +2466,3 @@ def convert_chinese_punctuation_to_english(text):
         logger.info(f"标点符号转换: '{text}' -> '{converted_text}'")
     
     return converted_text
-
-
-
