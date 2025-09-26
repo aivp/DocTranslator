@@ -30,6 +30,54 @@ SPECIAL_SYMBOLS_PATTERN = re.compile(
 # 纯数字和简单标点的正则表达式
 NUMBERS_PATTERN = re.compile(r'^[\d\s\.,\-\+\*\/\(\)\[\]\{\}]+$')
 
+def wrap_text_for_pdf(text, chars_per_line):
+    """
+    为PDF文本换行处理
+    根据每行字符数将文本分割成多行，使用<br>标签连接
+    """
+    if not text or chars_per_line <= 0:
+        return text
+    
+    # 如果文本长度不超过单行容量，直接返回
+    if len(text) <= chars_per_line:
+        return text
+    
+    lines = []
+    current_line = ""
+    
+    # 按单词分割（优先在单词边界换行）
+    words = text.split()
+    
+    for word in words:
+        # 如果当前行加上新单词不超过限制
+        if len(current_line + " " + word) <= chars_per_line:
+            if current_line:
+                current_line += " " + word
+            else:
+                current_line = word
+        else:
+            # 如果当前行不为空，保存它
+            if current_line:
+                lines.append(current_line)
+                current_line = word
+            else:
+                # 如果单个单词就超过限制，强制分割
+                if len(word) > chars_per_line:
+                    # 按字符强制分割
+                    while len(word) > chars_per_line:
+                        lines.append(word[:chars_per_line])
+                        word = word[chars_per_line:]
+                    current_line = word
+                else:
+                    current_line = word
+    
+    # 添加最后一行
+    if current_line:
+        lines.append(current_line)
+    
+    # 用<br>标签连接所有行
+    return "<br>".join(lines)
+
 
 def check_docx_quality(docx_path):
     """检查转换后的DOCX文件质量，分析编码和文本内容"""
@@ -1628,6 +1676,20 @@ class DirectPDFTranslator:
                             # 创建文本框
                             textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
                             
+                            # 计算文本长度和box宽度，决定是否需要换行
+                            box_width = bbox[2] - bbox[0]
+                            box_height = bbox[3] - bbox[1]
+                            
+                            # 估算每行字符数（根据字体大小）
+                            chars_per_line = max(1, int(box_width / (font_size * 0.6)))  # 0.6是经验值
+                            
+                            # 如果文本长度超过单行容量，进行换行处理
+                            if len(text) > chars_per_line:
+                                wrapped_text = wrap_text_for_pdf(text, chars_per_line)
+                                print(f"   🔄 文本换行处理: {len(text)} 字符 -> {len(wrapped_text.split('<br>'))} 行")
+                            else:
+                                wrapped_text = text
+                            
                             # 构建HTML文本，使用完全透明的背景
                             html_text = f"""
                             <div style="
@@ -1643,8 +1705,10 @@ class DirectPDFTranslator:
                                 border: none;
                                 outline: none;
                                 box-shadow: none;
+                                word-wrap: break-word;
+                                overflow-wrap: break-word;
                             ">
-                                {text}
+                                {wrapped_text}
                             </div>
                             """
                             
@@ -1683,12 +1747,19 @@ class DirectPDFTranslator:
             output_dir = os.path.dirname(output_file)
             os.makedirs(output_dir, exist_ok=True)
             
+            # 为每个翻译任务创建唯一的临时目录，避免批量翻译时文件冲突
+            import uuid
+            temp_dir_name = f"temp_{uuid.uuid4().hex[:8]}"
+            temp_dir = os.path.join(output_dir, temp_dir_name)
+            os.makedirs(temp_dir, exist_ok=True)
+            print(f"📁 创建临时目录: {temp_dir}")
+            
             # 步骤1: 拆分PDF
-            extracted_texts_file, no_text_pdf_file = self.step1_split_pdf(output_dir)
+            extracted_texts_file, no_text_pdf_file = self.step1_split_pdf(temp_dir)
             temp_files.extend([extracted_texts_file, no_text_pdf_file])
             
             # 步骤2: 翻译文本
-            translated_texts_file = self.step2_translate_texts(extracted_texts_file, trans, output_dir)
+            translated_texts_file = self.step2_translate_texts(extracted_texts_file, trans, temp_dir)
             temp_files.append(translated_texts_file)
             
             # 步骤3: 回填翻译文本
@@ -1738,15 +1809,15 @@ class DirectPDFTranslator:
             print(f"🎯 最终输出: {final_pdf_file}")
             print("=" * 60)
             
-            # 清理临时文件
-            self._cleanup_temp_files(temp_files)
+            # 清理临时文件和目录
+            self._cleanup_temp_files(temp_files, temp_dir)
             
             return final_pdf_file
             
         except Exception as e:
             logging.error(f"完整翻译流程失败: {e}")
-            # 即使出错也要清理临时文件
-            self._cleanup_temp_files(temp_files)
+            # 即使出错也要清理临时文件和目录
+            self._cleanup_temp_files(temp_files, temp_dir)
             raise
         finally:
             if self.doc:
@@ -1846,11 +1917,12 @@ class DirectPDFTranslator:
             print("❌ 优化PDF时出错: " + str(e))
             raise
 
-    def _cleanup_temp_files(self, temp_files):
-        """清理临时文件"""
+    def _cleanup_temp_files(self, temp_files, temp_dir=None):
+        """清理临时文件和目录"""
         print("\n🧹 开始清理临时文件...")
         cleaned_count = 0
         
+        # 清理临时文件
         for temp_file in temp_files:
             if temp_file and os.path.exists(temp_file):
                 try:
@@ -1861,4 +1933,15 @@ class DirectPDFTranslator:
                     logging.warning("删除临时文件失败: " + temp_file + " - " + str(e))
                     print("⚠️ 删除临时文件失败: " + os.path.basename(temp_file) + " - " + str(e))
         
-        print("🧹 临时文件清理完成，共清理 " + str(cleaned_count) + " 个文件")
+        # 清理临时目录
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                import shutil
+                shutil.rmtree(temp_dir)
+                print("✅ 已删除临时目录: " + os.path.basename(temp_dir))
+                cleaned_count += 1
+            except Exception as e:
+                logging.warning("删除临时目录失败: " + temp_dir + " - " + str(e))
+                print("⚠️ 删除临时目录失败: " + os.path.basename(temp_dir) + " - " + str(e))
+        
+        print("🧹 临时文件清理完成，共清理 " + str(cleaned_count) + " 个文件/目录")

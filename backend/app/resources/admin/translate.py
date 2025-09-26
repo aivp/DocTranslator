@@ -215,6 +215,8 @@ class AdminTranslateRestartResource(Resource):
             record.start_at = None
             record.end_at = None
             record.failed_reason = None
+            record.process = 0  # 重置进度为0
+            record.failed_count = 0  # 重置失败次数
             db.session.commit()
             return APIResponse.success(message='任务已重启')
         except Exception as e:

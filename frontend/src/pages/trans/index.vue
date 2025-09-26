@@ -64,6 +64,8 @@
                 type="text"
                 class="phone_show"
                 @click="downAllTransFile"
+                :loading="downloadAllButtonState.isLoading"
+                :disabled="downloadAllButtonState.disabled"
                 v-if="editionInfo !== 'community' && translatesData.length > 0">
                 全部下载
               </el-button>
@@ -80,7 +82,12 @@
           <div class="t_right">
             <span class="storage">存储空间({{ storageTotal }}M)</span>
             <el-progress class="translated-process" :percentage="storagePercentage" color="#055CF9" />
-            <el-button class="pc_show all_down" @click="downAllTransFile" v-if="translatesData.length > 0">
+            <el-button 
+              class="pc_show all_down" 
+              @click="downAllTransFile" 
+              :loading="downloadAllButtonState.isLoading"
+              :disabled="downloadAllButtonState.disabled"
+              v-if="translatesData.length > 0">
               全部下载
             </el-button>
             <el-button class="pc_show" @click="delAllTransFile" v-if="translatesData.length > 0">全部删除</el-button>
@@ -150,7 +157,7 @@
             </div>
             <div :class="item.status == 'done' ? 'table_li' : 'table_li pc_show'">
               <span class="phone_show">用时:</span>
-              {{ item.spend_time ? item.spend_time : '--' }}
+              {{ (item.status == 'done' && item.spend_time) ? item.spend_time : '-:-' }}
             </div>
             <div :class="item.status == 'done' ? 'table_li' : 'table_li pc_show'">
               <span class="phone_show">完成时间:</span>
@@ -315,6 +322,12 @@ const translationQueue = ref({
 
 // 翻译按钮状态管理
 const translateButtonState = ref({
+  isLoading: false,
+  disabled: false
+})
+
+// 全部下载按钮状态管理
+const downloadAllButtonState = ref({
   isLoading: false,
   disabled: false
 })
@@ -1322,6 +1335,10 @@ async function downAllTransFile() {
       return
     }
     
+    // 设置按钮为加载状态
+    downloadAllButtonState.value.isLoading = true
+    downloadAllButtonState.value.disabled = true
+    
     // 直接使用fetch下载文件，不使用request工具
     const response = await fetch('/api/api/translate/download/all', {
       headers: {
@@ -1350,6 +1367,10 @@ async function downAllTransFile() {
   } catch (error) {
     console.error('下载失败:', error)
     ElMessage.error('文件下载失败，请稍后重试')
+  } finally {
+    // 恢复按钮状态
+    downloadAllButtonState.value.isLoading = false
+    downloadAllButtonState.value.disabled = false
   }
 }
 

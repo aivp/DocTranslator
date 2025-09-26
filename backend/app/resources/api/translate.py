@@ -613,13 +613,15 @@ class TranslateDownloadResource(Resource):
 
 
 class TranslateDownloadAllResource(Resource):
-    # @jwt_required()
+    @require_valid_token  # 先检查token
+    @jwt_required()
     def get(self):
         """批量下载所有翻译结果文件[^6]"""
-        # 查询当前用户的所有翻译记录
+        # 查询当前用户的所有已完成翻译记录
         records = Translate.query.filter_by(
-            # customer_id=get_jwt_identity(),  # 注释掉用户身份验证
-            deleted_flag='N'  # 只下载未删除的记录
+            customer_id=get_jwt_identity(),  # 只下载当前用户的任务
+            deleted_flag='N',  # 只下载未删除的记录
+            status='done'  # 只下载已完成的任务
         ).all()
 
         # 生成内存 ZIP 文件
