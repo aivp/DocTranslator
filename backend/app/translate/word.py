@@ -237,19 +237,49 @@ def start_with_okapi(trans, start_time):
                                 # 创建临时翻译配置，包含筛选后的术语库
                                 temp_trans = self.trans.copy()
                                 temp_trans['filtered_terms'] = filtered_terms
-                                translated = to_translate.translate_text(
-                                    temp_trans, text, "auto", target_lang
-                                )
+                                # 直接调用 qwen_translate 函数，传递 texts 和 index 参数
+                                if self.trans.get('model') == 'qwen-mt-plus':
+                                    from .qwen_translate import qwen_translate
+                                    translated = qwen_translate(
+                                        text, target_lang, "auto", 
+                                        prompt=temp_trans.get('prompt'),
+                                        prompt_id=temp_trans.get('prompt_id'),
+                                        texts=texts, index=index
+                                    )
+                                else:
+                                    translated = to_translate.translate_text(
+                                        temp_trans, text, "auto", target_lang
+                                    )
                             else:
                                 logger.debug(f"文本 {index} 没有找到相关术语")
+                                # 直接调用 qwen_translate 函数，传递 texts 和 index 参数
+                                if self.trans.get('model') == 'qwen-mt-plus':
+                                    from .qwen_translate import qwen_translate
+                                    translated = qwen_translate(
+                                        text, target_lang, "auto", 
+                                        prompt=self.trans.get('prompt'),
+                                        prompt_id=self.trans.get('prompt_id'),
+                                        texts=texts, index=index
+                                    )
+                                else:
+                                    translated = to_translate.translate_text(
+                                        self.trans, text, "auto", target_lang
+                                    )
+                        else:
+                            logger.debug(f"文本 {index} 未使用术语库")
+                            # 直接调用 qwen_translate 函数，传递 texts 和 index 参数
+                            if self.trans.get('model') == 'qwen-mt-plus':
+                                from .qwen_translate import qwen_translate
+                                translated = qwen_translate(
+                                    text, target_lang, "auto", 
+                                    prompt=self.trans.get('prompt'),
+                                    prompt_id=self.trans.get('prompt_id'),
+                                    texts=texts, index=index
+                                )
+                            else:
                                 translated = to_translate.translate_text(
                                     self.trans, text, "auto", target_lang
                                 )
-                        else:
-                            logger.debug(f"文本 {index} 未使用术语库")
-                            translated = to_translate.translate_text(
-                                self.trans, text, "auto", target_lang
-                            )
                         
                         logger.debug(f"文本 {index} 翻译完成: {text[:50]}... -> {translated[:50]}...")
                         

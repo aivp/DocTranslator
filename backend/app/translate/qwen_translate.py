@@ -5,10 +5,34 @@
 import logging
 import os
 import time
+import re
 from openai import OpenAI
 
 # 从环境变量获取API密钥
 dashscope_key = os.environ.get('DASH_SCOPE_KEY', '')
+
+def is_pure_symbol(text: str) -> bool:
+    """
+    检查文本是否为纯符号（不包含有意义的文字内容）
+    """
+    if not text or not text.strip():
+        return True
+    
+    # 去除空白字符
+    cleaned_text = text.strip()
+    
+    # 如果文本长度很短且只包含符号，认为是纯符号
+    if len(cleaned_text) <= 3:
+        # 检查是否只包含常见符号
+        symbol_pattern = r'^[^\w\u4e00-\u9fff]+$'  # 不包含字母、数字、中文字符
+        if re.match(symbol_pattern, cleaned_text):
+            return True
+    
+    # 检查是否只包含单个符号
+    if len(cleaned_text) == 1 and not cleaned_text.isalnum() and not '\u4e00' <= cleaned_text <= '\u9fff':
+        return True
+    
+    return False
 
 # 请求频率控制 - 线程安全版本
 import threading
@@ -125,7 +149,7 @@ def handle_429_error(attempt, error_msg):
         logging.error("达到429错误最大重试次数 (100)，返回原文")
         return False  # 停止重试
 
-def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10):
+def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10, texts=None, index=None):
     """
     使用阿里云Qwen-MT翻译模型进行翻译
     
@@ -143,6 +167,10 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
         prompt: 提示词模板（当使用提示词方式时）
         max_retries: 最大重试次数
     """
+    
+    # 添加明显的调试信息
+    logging.info("🚀 QWEN_TRANSLATE 函数被调用")
+    logging.info(f"📝 参数信息: texts={texts is not None}, index={index}, prompt_id={prompt_id}")
     
     # 输入验证
     if not text or not text.strip():
@@ -187,8 +215,109 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 # 方式一：使用提示词方式（根据官方文档）
                 logging.info(f"🎯 使用提示词方式翻译")
                 
-                # 将文本插入提示词模板中
-                final_prompt = prompt.format(text_to_translate=text)
+                # 检查待翻译文本是否为纯符号，如果是则跳过
+                if is_pure_symbol(text):
+                    logging.info(f"⚠️ 待翻译文本为纯符号，跳过翻译: {repr(text)}")
+                    return text
+                
+                logging.info(f"🔍 上下文功能调试 - 开始处理")
+                
+                # 添加上下文信息（如果提供了texts和index）
+                context_info = ""
+                logging.info(f"🔍 上下文处理调试信息:")
+                logging.info(f"  texts参数: {texts is not None}")
+                logging.info(f"  index参数: {index}")
+                logging.info(f"  texts长度: {len(texts) if texts else 'None'}")
+                
+                if texts and index is not None:
+                    context_before = ""
+                    context_after = ""
+                    
+                    # 获取前文
+                    if index > 0:
+                        prev_text_item = texts[index-1]
+                        logging.info(f"🔍 前文调试: index-1={index-1}, 前文项类型={type(prev_text_item)}")
+                        
+                        # 处理字符串类型的前文项
+                        if isinstance(prev_text_item, str) and prev_text_item.strip():
+                            if not is_pure_symbol(prev_text_item):
+                                context_before = prev_text_item.strip()[:200]  # 限制长度200字符
+                                logging.info(f"📖 获取前文上下文: {context_before[:50]}...")
+                            else:
+                                logging.info(f"📝 前文为纯符号，跳过: {repr(prev_text_item.strip())}")
+                        # 处理字典类型的前文项
+                        elif isinstance(prev_text_item, dict) and 'text' in prev_text_item and prev_text_item['text']:
+                            if not is_pure_symbol(prev_text_item['text']):
+                                context_before = prev_text_item['text'][:200]  # 限制长度200字符
+                                logging.info(f"📖 获取前文上下文: {context_before[:50]}...")
+                            else:
+                                logging.info(f"📝 前文为纯符号，跳过: {repr(prev_text_item['text'])}")
+                        else:
+                            logging.info(f"📝 前文无有效内容")
+                    else:
+                        logging.info(f"📝 当前是第一个文本，无前文")
+                    
+                    # 获取后文  
+                    if index < len(texts)-1:
+                        next_text_item = texts[index+1]
+                        logging.info(f"🔍 后文调试: index+1={index+1}, 后文项类型={type(next_text_item)}")
+                        
+                        # 处理字符串类型的后文项
+                        if isinstance(next_text_item, str) and next_text_item.strip():
+                            if not is_pure_symbol(next_text_item):
+                                context_after = next_text_item.strip()[:200]  # 限制长度200字符
+                                logging.info(f"📖 获取后文上下文: {context_after[:50]}...")
+                            else:
+                                logging.info(f"📝 后文为纯符号，跳过: {repr(next_text_item.strip())}")
+                        # 处理字典类型的后文项
+                        elif isinstance(next_text_item, dict) and 'text' in next_text_item and next_text_item['text']:
+                            if not is_pure_symbol(next_text_item['text']):
+                                context_after = next_text_item['text'][:200]  # 限制长度200字符
+                                logging.info(f"📖 获取后文上下文: {context_after[:50]}...")
+                            else:
+                                logging.info(f"📝 后文为纯符号，跳过: {repr(next_text_item['text'])}")
+                        else:
+                            logging.info(f"📝 后文无有效内容")
+                    else:
+                        logging.info(f"📝 当前是最后一个文本，无后文")
+                    
+                    # 构建上下文信息并硬编码到prompt后面
+                    if context_before or context_after:
+                        if context_before and context_after:
+                            # 既有上文又有下文
+                            context_info = f"\n# 上下文参考\n1. **参考上文**：{context_before}\n2. **下文**：{context_after}"
+                            logging.info(f"🔗 添加上下文信息（前文+后文）到prompt后面，当前文本索引: {index}")
+                        elif context_before:
+                            # 只有上文
+                            context_info = f"\n# 上下文参考\n1. **参考上文**：{context_before}"
+                            logging.info(f"🔗 添加上下文信息（仅前文）到prompt后面，当前文本索引: {index}")
+                        elif context_after:
+                            # 只有下文
+                            context_info = f"\n# 上下文参考\n1. **请参考下文**：{context_after}"
+                            logging.info(f"🔗 添加上下文信息（仅后文）到prompt后面，当前文本索引: {index}")
+                    else:
+                        logging.info(f"📝 无上下文信息，当前文本索引: {index}")
+                else:
+                    logging.info("📝 未提供texts或index，跳过上下文处理")
+                
+                # 将上下文信息插入到待翻译文本之前
+                if context_info:
+                    # 构建包含上下文的待翻译文本，每个部分都有独立的#标题
+                    enhanced_text = context_info + "\n\n# 待翻译文本\n" + text
+                    final_prompt = prompt.format(text_to_translate=enhanced_text)
+                else:
+                    # 没有上下文，直接使用原始文本
+                    final_prompt = prompt.format(text_to_translate=text)
+                
+                # 添加调试日志显示最终的提示词内容
+                if context_info:
+                    logging.info(f"🔗 最终提示词包含上下文:")
+                    logging.info(f"  上下文部分: {context_info[:100]}...")
+                    logging.info(f"  原始文本: {text[:100]}...")
+                    logging.info(f"  增强文本: {enhanced_text[:200]}...")
+                    logging.info(f"  完整内容: {final_prompt[:200]}...")
+                else:
+                    logging.info(f"📝 最终提示词不包含上下文: {final_prompt[:200]}...")
                 
                 # 构建messages
                 messages = [{"role": "user", "content": final_prompt}]
@@ -206,6 +335,14 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 print("=" * 80)
                 print(f"📝 原始文本: {text}")
                 print(f"📋 提示词模板: {prompt}")
+                
+                # 明确显示上下文信息
+                if context_info:
+                    print(f"🔗 上下文信息:")
+                    print(f"   - 前文: {context_before[:100] if 'context_before' in locals() and context_before else '♂'}")
+                    print(f"   - 后文: {context_after[:100] if 'context_after' in locals() and context_after else '♂'}")
+                    print(f"   - 上下文信息: {context_info}")
+                
                 print(f"🔗 最终请求内容: {final_prompt}")
                 print(f"📡 API请求参数:")
                 print(f"   - model: qwen-mt-plus")
