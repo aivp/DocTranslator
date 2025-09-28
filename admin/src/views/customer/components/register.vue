@@ -66,7 +66,7 @@ const doRegister = () => {
       })
       .catch((error) => {
         console.error("注册失败:", error)
-        ElMessage.error("注册失败，请重试")
+        // 错误信息已经由 service.ts 中的拦截器处理，这里不需要重复显示
       })
       .finally(() => {
         loading.value = false

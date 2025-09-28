@@ -21,7 +21,7 @@ const DEFAULT_FORM_DATA: CreateOrUpdateCustomerRequestData = {
   id: undefined,
   email: "",
   password: "",
-  level: "vip",  // 默认创建为会员用户
+  level: "common",
   add_storage: 0,
   storage: 0
   // status: true
@@ -245,7 +245,7 @@ watch([() => paginationData.currentPage, () => paginationData.pageSize], getCust
         <el-form-item prop="level" label="用户等级">
           <el-select v-model="formData.level" placeholder="">
             <el-option label="会员用户" value="vip" />
-            <!-- 隐藏普通用户选项 -->
+            <el-option label="普通用户" value="common" />
           </el-select>
         </el-form-item>
         <!-- 新增的存储空间字段 -->

@@ -46,18 +46,29 @@ function createService() {
           // Token 过期时
           return logout()
         default:
-          // return apiData
-          // 不是正确的 code
-          ElMessage.error(apiData.message || 'Error')
-          return Promise.reject(new Error('Error'))
+          // 不是正确的 code，直接返回错误数据，由全局错误处理
+          return Promise.reject({
+            ...apiData,
+            isHandled: true  // 标记为已处理
+          })
       }
     },
     (error) => {
       // status 是 HTTP 状态码
       const status = get(error, 'response.status')
+      
+      // 检查是否已经由响应拦截器处理过
+      if (error.isHandled) {
+        // 业务错误，显示错误信息
+        ElMessage.error(error.message || 'Error')
+        return Promise.reject(error)
+      }
+      
       switch (status) {
         case 400:
-          error.message = '请求错误'
+          // 优先显示后端返回的具体错误信息
+          const backendMessage = get(error, 'response.data.message')
+          error.message = backendMessage || '请求错误'
           break
         case 401:
           // Token 过期时
