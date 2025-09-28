@@ -691,7 +691,15 @@ def get(trans, event, texts, index):
                 # ---------------这里实现不同模型格式的请求--------------
 
                 elif extension == ".md":
-                    if model == 'qwen-mt-plus':
+                    # 检查是否是表格元素，如果是则跳过翻译
+                    element_type = text.get('element_type', 'unknown')
+                    preserve = text.get('preserve', False)
+                    logging.info(f"MD元素检查: element_type={element_type}, preserve={preserve}, content={repr(text['text'][:50])}")
+                    
+                    if preserve or element_type == 'table_separator':
+                        content = text['text']  # 直接使用原文，不翻译
+                        logging.info(f"✅ 跳过表格分隔行翻译: {element_type}, 内容: {repr(text['text'])}")
+                    elif model == 'qwen-mt-plus':
                         logging.info(f"🔍 调用 qwen_translate (MD文件): texts={texts is not None}, index={index}")
                         content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), texts=texts, index=index)
                     else:
@@ -850,7 +858,16 @@ def get11(trans, event, texts, index):
             #         time.sleep(0.1)
             # ---------------这里实现不同模型格式的请求--------------
             elif extension == ".md":
-                content = req(text['text'], target_lang, model, prompt, True)
+                # 检查是否是表格元素，如果是则跳过翻译
+                element_type = text.get('element_type', 'unknown')
+                preserve = text.get('preserve', False)
+                logging.info(f"MD元素检查: element_type={element_type}, preserve={preserve}, content={repr(text['text'][:50])}")
+                
+                if preserve or element_type == 'table_separator':
+                    content = text['text']  # 直接使用原文，不翻译
+                    logging.info(f"✅ 跳过表格分隔行翻译: {element_type}, 内容: {repr(text['text'])}")
+                else:
+                    content = req(text['text'], target_lang, model, prompt, True)
             else:
                 content = req(text['text'], target_lang, model, prompt, False)
                 # print("content", text['content'])

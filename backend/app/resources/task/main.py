@@ -4,7 +4,7 @@ from app.extensions import db
 from app.models.comparison import Comparison
 from app.models.prompt import Prompt
 from app.models.translate import Translate
-from app.translate import word, excel, powerpoint, pdf, txt, csv_handle, md, to_translate
+from app.translate import word, excel, powerpoint, pdf, txt, csv_handle, md, md_separator_fix, to_translate
 
 
 def main_wrapper(task_id, config, origin_path):
@@ -36,7 +36,7 @@ def main_wrapper(task_id, config, origin_path):
             ('.pdf',): pdf,
             ('.txt',): txt,
             ('.csv',): csv_handle,
-            ('.md',): md
+            ('.md',): md_separator_fix
         }
 
         # 查找匹配的处理器

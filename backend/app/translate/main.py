@@ -13,6 +13,7 @@ from . import pdf
 from . import txt
 from . import csv_handle
 from . import md
+from . import md_separator_fix
 import pymysql
 from . import db
 from . import common
@@ -100,7 +101,8 @@ def main():
         elif extension == '.csv':
             status=csv_handle.start(trans)
         elif extension == '.md':
-            status=md.start(trans)
+            # 使用专门修复表格分隔行的markdown翻译逻辑
+            status=md_separator_fix.start(trans)
         if status:
             print("success")
             #before_active_count=threading.activeCount()
