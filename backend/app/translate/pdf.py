@@ -30,53 +30,53 @@ SPECIAL_SYMBOLS_PATTERN = re.compile(
 # 纯数字和简单标点的正则表达式
 NUMBERS_PATTERN = re.compile(r'^[\d\s\.,\-\+\*\/\(\)\[\]\{\}]+$')
 
-def wrap_text_for_pdf(text, chars_per_line):
-    """
-    为PDF文本换行处理
-    根据每行字符数将文本分割成多行，使用<br>标签连接
-    """
-    if not text or chars_per_line <= 0:
-        return text
-    
-    # 如果文本长度不超过单行容量，直接返回
-    if len(text) <= chars_per_line:
-        return text
-    
-    lines = []
-    current_line = ""
-    
-    # 按单词分割（优先在单词边界换行）
-    words = text.split()
-    
-    for word in words:
-        # 如果当前行加上新单词不超过限制
-        if len(current_line + " " + word) <= chars_per_line:
-            if current_line:
-                current_line += " " + word
-            else:
-                current_line = word
-        else:
-            # 如果当前行不为空，保存它
-            if current_line:
-                lines.append(current_line)
-                current_line = word
-            else:
-                # 如果单个单词就超过限制，强制分割
-                if len(word) > chars_per_line:
-                    # 按字符强制分割
-                    while len(word) > chars_per_line:
-                        lines.append(word[:chars_per_line])
-                        word = word[chars_per_line:]
-                    current_line = word
-                else:
-                    current_line = word
-    
-    # 添加最后一行
-    if current_line:
-        lines.append(current_line)
-    
-    # 用<br>标签连接所有行
-    return "<br>".join(lines)
+# def wrap_text_for_pdf(text, chars_per_line):
+#     """
+#     为PDF文本换行处理
+#     根据每行字符数将文本分割成多行，使用<br>标签连接
+#     """
+#     if not text or chars_per_line <= 0:
+#         return text
+#     
+#     # 如果文本长度不超过单行容量，直接返回
+#     if len(text) <= chars_per_line:
+#         return text
+#     
+#     lines = []
+#     current_line = ""
+#     
+#     # 按单词分割（优先在单词边界换行）
+#     words = text.split()
+#     
+#     for word in words:
+#         # 如果当前行加上新单词不超过限制
+#         if len(current_line + " " + word) <= chars_per_line:
+#             if current_line:
+#                 current_line += " " + word
+#             else:
+#                 current_line = word
+#         else:
+#             # 如果当前行不为空，保存它
+#             if current_line:
+#                 lines.append(current_line)
+#                 current_line = word
+#             else:
+#                 # 如果单个单词就超过限制，强制分割
+#                 if len(word) > chars_per_line:
+#                     # 按字符强制分割
+#                     while len(word) > chars_per_line:
+#                         lines.append(word[:chars_per_line])
+#                         word = word[chars_per_line:]
+#                     current_line = word
+#                 else:
+#                     current_line = word
+#     
+#     # 添加最后一行
+#     if current_line:
+#         lines.append(current_line)
+#     
+#     # 用<br>标签连接所有行
+#     return "<br>".join(lines)
 
 
 def check_docx_quality(docx_path):
@@ -1683,12 +1683,13 @@ class DirectPDFTranslator:
                             # 估算每行字符数（根据字体大小）
                             chars_per_line = max(1, int(box_width / (font_size * 0.6)))  # 0.6是经验值
                             
-                            # 如果文本长度超过单行容量，进行换行处理
-                            if len(text) > chars_per_line:
-                                wrapped_text = wrap_text_for_pdf(text, chars_per_line)
-                                print(f"   🔄 文本换行处理: {len(text)} 字符 -> {len(wrapped_text.split('<br>'))} 行")
-                            else:
-                                wrapped_text = text
+                            # 注释掉换行处理，直接使用原始文本
+                            # if len(text) > chars_per_line:
+                            #     wrapped_text = wrap_text_for_pdf(text, chars_per_line)
+                            #     print(f"   🔄 文本换行处理: {len(text)} 字符 -> {len(wrapped_text.split('<br>'))} 行")
+                            # else:
+                            #     wrapped_text = text
+                            wrapped_text = text
                             
                             # 构建HTML文本，使用完全透明的背景
                             html_text = f"""
@@ -1705,8 +1706,8 @@ class DirectPDFTranslator:
                                 border: none;
                                 outline: none;
                                 box-shadow: none;
-                                word-wrap: break-word;
-                                overflow-wrap: break-word;
+                                # word-wrap: break-word;
+                                # overflow-wrap: break-word;
                             ">
                                 {wrapped_text}
                             </div>
