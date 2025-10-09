@@ -1347,11 +1347,11 @@ def start_direct_pdf_translation(trans):
     try:
         print("🚀 开始直接PDF翻译流程")
         
-        # 更新任务状态为处理中
+        # 更新任务状态为处理中，但不设置初始进度
         try:
             from .to_translate import db
-            db.execute("update translate set status='process', process='10' where id=%s", trans['id'])
-            print("✅ 已更新任务状态为process，进度10%")
+            db.execute("update translate set status='process', process='0' where id=%s", trans['id'])
+            print("✅ 已更新任务状态为process，进度0%（开始PDF处理）")
         except Exception as e:
             print(f"⚠️ 更新任务状态失败: {str(e)}")
         
