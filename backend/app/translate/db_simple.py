@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 class SimpleConnectionPool:
     def __init__(self):
         self.connection_params = {
-            'host': os.getenv('DB_HOST', 'dt-mysql'),
+            'host': os.getenv('DB_HOST', 'mysql'),
             'port': int(os.getenv('DB_PORT', 3306)),
-            'user': os.getenv('DB_USERNAME', 'dtuser'),
-            'password': os.getenv('DB_PASSWORD', 'dtpwd'),
-            'database': os.getenv('DB_DATABASE', 'doctranslator'),
+            'user': os.getenv('DB_USERNAME', 'root'),
+            'password': os.getenv('DB_PASSWORD', 'kbqa123'),
+            'database': os.getenv('DB_DATABASE', 'doctranslator_prod'),
             'charset': 'utf8mb4',
             'autocommit': True
         }
