@@ -35,9 +35,9 @@ class FileUploadResource(Resource):
                 f"仅支持以下格式：{', '.join(current_app.config['ALLOWED_EXTENSIONS'])}", 400)
 
         # 验证文件大小
-        if not self.validate_file_size(file.stream):
-            return APIResponse.error(
-                f"文件大小超过{current_app.config['MAX_FILE_SIZE'] // (1024 * 1024)}MB", 400)
+        # if not self.validate_file_size(file.stream):
+        #     return APIResponse.error(
+        #         f"文件大小超过{current_app.config['MAX_FILE_SIZE'] // (1024 * 1024)}MB", 400)
 
         # 获取用户存储信息
         user_id = get_jwt_identity()

@@ -1706,8 +1706,6 @@ class DirectPDFTranslator:
                                 border: none;
                                 outline: none;
                                 box-shadow: none;
-                                # word-wrap: break-word;
-                                # overflow-wrap: break-word;
                             ">
                                 {wrapped_text}
                             </div>

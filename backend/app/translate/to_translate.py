@@ -421,7 +421,7 @@ def translate_text(trans, text, source_lang="auto", target_lang="en"):
 def get(trans, event, texts, index):
     if event.is_set():
         exit(0)
-    # 硬编码线程数为30，忽略前端传入的配置
+    # 恢复线程数为30，提高翻译效率
     max_threads = 30
     translate_id = trans['id']
     target_lang = trans['lang']
@@ -474,9 +474,8 @@ def get(trans, event, texts, index):
     # ============== 百度翻译处理 ==============
     if server == 'baidu':
         try:
-            oldtrans = db.get("select * from translate_logs where md5_key=%s", md5_key)
             if not text['complete']:
-                content = oldtrans['content'] if oldtrans else baidu_translate(
+                content = baidu_translate(
                     text=old_text,
                     appid=app_id,
                     app_key=app_key,
@@ -487,16 +486,6 @@ def get(trans, event, texts, index):
                 text['count'] = count_text(text['text'])
                 if check_translated(content):
                     text['text'] = content  # 百度翻译无需过滤<think>标签
-                    if not oldtrans:
-                        db.execute("INSERT INTO translate_logs set api_url=%s,api_key=%s,"
-                                   + "backup_model=%s ,created_at=%s ,prompt=%s,  "
-                                   + "model=%s,target_lang=%s,source=%s,content=%s,md5_key=%s",
-                                   str(api_url), str(api_key),
-                                   str(backup_model),
-                                   datetime.datetime.now(), str(prompt), str(model),
-                                   str(target_lang),
-                                   str(old_text),
-                                   str(content), str(md5_key))
                 text['complete'] = True
         except Exception as e:
             logging.error(f"百度翻译错误: {str(e)}")
@@ -512,7 +501,6 @@ def get(trans, event, texts, index):
     # ============== AI翻译处理 ==============
     elif server == 'openai' or server == 'doc2x' or server == 'qwen':
         try:
-            oldtrans = db.get("select * from translate_logs where md5_key=%s", md5_key)
             # mredis.set("threading_count",threading_num+1)
             # 目标语言映射处理
             LANGUAGE_MAPPING = {
@@ -675,9 +663,7 @@ def get(trans, event, texts, index):
 
             if text['complete'] == False:
                 content = ''
-                if oldtrans:
-                    content = oldtrans['content']
-                    # 特别处理PDF类型
+                # 特别处理PDF类型
 
                 # elif extension == ".pdf":
                 #     return handle_pdf(trans, event, texts, index)
@@ -689,8 +675,7 @@ def get(trans, event, texts, index):
                 #         content = get_content_by_image(text['text'], target_lang)
                 #         time.sleep(0.1)
                 # ---------------这里实现不同模型格式的请求--------------
-
-                elif extension == ".md":
+                if extension == ".md":
                     # 检查是否是表格元素，如果是则跳过翻译
                     element_type = text.get('element_type', 'unknown')
                     preserve = text.get('preserve', False)
@@ -732,16 +717,6 @@ def get(trans, event, texts, index):
                     # 清理上下文标记
                     # cleaned_content = clean_translation_result(cleaned_content)
                     text['text'] = cleaned_content
-                    if oldtrans is None:
-                        db.execute("INSERT INTO translate_logs set api_url=%s,api_key=%s,"
-                                   + "backup_model=%s ,created_at=%s ,prompt=%s,  "
-                                   + "model=%s,target_lang=%s,source=%s,content=%s,md5_key=%s",
-                                   str(api_url), str(api_key),
-                                   str(backup_model),
-                                   datetime.datetime.now(), str(prompt), str(model),
-                                   str(target_lang),
-                                   str(old_text),
-                                   str(content), str(md5_key))
                     text['complete'] = True
                 else:
                     # 翻译失败，记录警告但继续处理
@@ -818,7 +793,7 @@ def get(trans, event, texts, index):
 def get11(trans, event, texts, index):
     if event.is_set():
         exit(0)
-    # 硬编码线程数为30，忽略前端传入的配置
+    # 恢复线程数为30，提高翻译效率
     max_threads = 30
     # mredis=rediscon.get_conn()
     # threading_num=get_threading_num(mredis)
@@ -839,13 +814,10 @@ def get11(trans, event, texts, index):
         str(api_key) + str(api_url) + str(old_text) + str(prompt) + str(backup_model) + str(
             model) + str(target_lang))
     try:
-        oldtrans = db.get("select * from translate_logs where md5_key=%s", md5_key)
         # mredis.set("threading_count",threading_num+1)
         if text['complete'] == False:
             content = ''
-            if oldtrans:
-                content = oldtrans['content']
-                # 特别处理PDF类型
+            # 特别处理PDF类型
 
             # elif extension == ".pdf":
             #     return handle_pdf(trans, event, texts, index)
@@ -857,7 +829,7 @@ def get11(trans, event, texts, index):
             #         content = get_content_by_image(text['text'], target_lang)
             #         time.sleep(0.1)
             # ---------------这里实现不同模型格式的请求--------------
-            elif extension == ".md":
+            if extension == ".md":
                 # 检查是否是表格元素，如果是则跳过翻译
                 element_type = text.get('element_type', 'unknown')
                 preserve = text.get('preserve', False)
@@ -875,15 +847,6 @@ def get11(trans, event, texts, index):
             if check_translated(content):
                 # 过滤deepseek思考过程
                 text['text'] = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
-                if oldtrans is None:
-                    db.execute("INSERT INTO translate_logs set api_url=%s,api_key=%s,"
-                               + "backup_model=%s ,created_at=%s ,prompt=%s,  "
-                               + "model=%s,target_lang=%s,source=%s,content=%s,md5_key=%s",
-                               str(api_url), str(api_key),
-                               str(backup_model),
-                               datetime.datetime.now(), str(prompt), str(model), str(target_lang),
-                               str(old_text),
-                               str(content), str(md5_key))
             text['complete'] = True
     except openai.AuthenticationError as e:
         # set_threading_num(mredis)

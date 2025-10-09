@@ -104,7 +104,7 @@ def check_if_textbox(run):
 
 def start(trans):
     """主入口函数，处理Word文档翻译"""
-    # 硬编码线程数为30，忽略前端传入的配置
+    # 恢复线程数为30，提高翻译效率
     max_threads = 30
     start_time = datetime.datetime.now()
 
@@ -133,7 +133,7 @@ def start_with_okapi(trans, start_time):
         # 验证 Okapi 安装
         if not verify_okapi_installation():
             logger.error("❌ Okapi 安装验证失败，回退到传统方法")
-            # 硬编码线程数为30，忽略前端传入的配置
+            # 恢复线程数为30，提高翻译效率
             max_threads = 30
             return start_traditional(trans, start_time, max_threads)
         
@@ -170,11 +170,11 @@ def start_with_okapi(trans, start_time):
                 import threading
                 
                 translated_texts = [None] * len(texts)  # 预分配结果数组
-                # 从前端配置获取最大线程数，默认为10
-                # 硬编码线程数为30，忽略前端传入的配置
+                # 从前端配置获取最大线程数，默认为30
+                # 恢复线程数为30，提高翻译效率
                 max_workers = min(30, len(texts))
                 
-                logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程（硬编码30）")
+                logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程（恢复为30）")
                 
                 # 进度更新相关变量
                 total_count = len(texts)

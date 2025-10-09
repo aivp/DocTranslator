@@ -14,6 +14,8 @@ from app.resources.admin.users import AdminUserListResource, AdminCreateUserReso
     AdminUserDetailResource, AdminUpdateUserResource, AdminDeleteUserResource
 from app.resources.api.AccountResource import ChangePasswordResource, EmailChangePasswordResource, \
     StorageInfoResource, UserInfoResource, SendChangeCodeResource
+from flask_restful import Resource
+from app.translate.db import health_check
 from app.resources.api.AuthResource import SendRegisterCodeResource, UserRegisterResource, \
     UserLoginResource, SendResetCodeResource, ResetPasswordResource, UserLogoutResource
 from app.resources.api.comparison import MyComparisonListResource, SharedComparisonListResource, \
@@ -38,6 +40,25 @@ from app.resources.api.translate import TranslateListResource, TranslateSettingR
 
 
 def register_routes(api):
+    # 🏥 健康检查端点 - 使用Flask-RESTful方式注册
+    class HealthCheckResource(Resource):
+        def get(self):
+            try:
+                db_health = health_check()
+                return {
+                    'status': 'ok',
+                    'database': db_health['status'],
+                    'message': 'DocTranslator服务运行正常'
+                }, 200
+            except Exception as e:
+                return {
+                    'status': 'error',
+                    'database': 'unhealthy',
+                    'message': f'服务异常: {str(e)}'
+                }, 500
+    
+    api.add_resource(HealthCheckResource, '/health')
+    
     # 基础测试路由
     api.add_resource(SendRegisterCodeResource, '/api/register/send')
     api.add_resource(UserRegisterResource, '/api/register')
