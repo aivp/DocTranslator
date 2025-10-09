@@ -37,6 +37,8 @@ from app.resources.api.translate import TranslateListResource, TranslateSettingR
     TranslateFinishCountResource, TranslateRandDeleteAllResource, TranslateRandDeleteResource, \
     TranslateRandDownloadResource, Doc2xCheckResource, TranslateStartResource, \
     TranslateDownloadAllResource, TranslateProgressResource
+from app.resources.api.video import VideoUploadResource, VideoTranslateResource, VideoStatusResource, \
+    VideoListResource, VideoDeleteResource, VideoLanguagesResource, VideoWebhookResource, VideoTokenInfoResource
 
 
 def register_routes(api):
@@ -127,6 +129,16 @@ def register_routes(api):
     api.add_resource(FavoritePromptResource, '/api/prompt/fav/<int:id>')
     api.add_resource(CreatePromptResource, '/api/prompt')
     api.add_resource(DeletePromptResource, '/api/prompt/<int:id>')
+
+    # 视频翻译接口
+    api.add_resource(VideoUploadResource, '/api/video/upload')
+    api.add_resource(VideoTranslateResource, '/api/video/translate')
+    api.add_resource(VideoStatusResource, '/api/video/status/<int:video_id>')
+    api.add_resource(VideoListResource, '/api/video/list')
+    api.add_resource(VideoDeleteResource, '/api/video/<int:video_id>')
+    api.add_resource(VideoLanguagesResource, '/api/video/languages')
+    api.add_resource(VideoWebhookResource, '/api/video/webhook')
+    api.add_resource(VideoTokenInfoResource, '/api/video/token-info')
 
 
 # -------admin-----------

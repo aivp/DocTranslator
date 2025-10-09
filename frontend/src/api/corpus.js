@@ -3,7 +3,7 @@ import request from '@/utils/request'
 //术语-添加对照数据
 export function comparison(params) {
   return request({
-      url: `/api/comparison`,
+      url: `/comparison`,
       method: 'POST',
       data: params
   });
@@ -12,7 +12,7 @@ export function comparison(params) {
 //编辑对照数据
 export function comparison_edit(id,params){
   return request({
-      url: `/api/comparison/${id}`,
+      url: `/comparison/${id}`,
       method: 'POST',
       data:params
   });
@@ -21,7 +21,7 @@ export function comparison_edit(id,params){
 //删除对照数据
 export function comparison_del(id){
   return request({
-      url: `/api/comparison/${id}`,
+      url: `/comparison/${id}`,
       method: 'delete'
   });
 }
@@ -32,7 +32,7 @@ export function comparison_del(id){
  */
 export function comparison_my(){
   return request({
-      url: '/api/comparison/my',
+      url: '/comparison/my',
       method: 'get',
   });
 }
@@ -41,7 +41,7 @@ export function comparison_my(){
 //更新分享状态
 export function comparison_share(id,params){
   return request({
-      url: `/api/comparison/share/${id}`,
+      url: `/comparison/share/${id}`,
       method: 'POST',
       data:params
   });
@@ -52,7 +52,7 @@ export function comparison_share(id,params){
  */
 export function prompt_my(){
   return request({
-      url: '/api/prompt/my',
+      url: '/prompt/my',
       method: 'get',
   });
 }
@@ -60,7 +60,7 @@ export function prompt_my(){
 //添加提示词
 export function prompt_add(params) {
   return request({
-      url: `/api/prompt`,
+      url: `/prompt`,
       method: 'POST',
       data: params
   });
@@ -69,7 +69,7 @@ export function prompt_add(params) {
 //编辑提示词
 export function prompt_edit(id,params){
   return request({
-      url: `/api/prompt/${id}`,
+      url: `/prompt/${id}`,
       method: 'POST',
       data:params
   });
@@ -78,7 +78,7 @@ export function prompt_edit(id,params){
 //更新提示词分享状态
 export function prompt_share(id,params){
   return request({
-      url: `/api/prompt/share/${id}`,
+      url: `/prompt/share/${id}`,
       method: 'POST',
       data:params
   });
@@ -88,7 +88,7 @@ export function prompt_share(id,params){
 //删除提示词
 export function prompt_del(id){
   return request({
-      url: `/api/prompt/${id}`,
+      url: `/prompt/${id}`,
       method: 'delete'
   });
 }

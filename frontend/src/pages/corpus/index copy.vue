@@ -349,7 +349,7 @@ import {
 } from '@/api/corpus'
 
 const router = useRouter()
-const uploadUrl = ref(import.meta.env.VITE_API_URL + '/api/comparison/import?token=' + store.token)
+const uploadUrl = ref(import.meta.env.VITE_API_URL + '/comparison/import?token=' + store.token)
 const pageLoad = ref(false)
 const termsData = ref([])
 const promptData = ref([])
@@ -574,7 +574,7 @@ function share_change(item) {
     .then((data) => {
       pageLoad.value = false
       if (data.code == 200) {
-        ElMessage({ message: '操作成功', type: 'success' })
+        ElMessage({ message: '分享状态已更新', type: 'success' })
       } else {
         ElMessage({ message: data.message, type: 'error' })
         item.share_flag == 'Y' ? (item.share_flag = 'N') : (item.share_flag = 'Y')
@@ -589,19 +589,19 @@ function share_change(item) {
 //导出单个术语表
 function export_terms(item) {
   window.open(
-    import.meta.env.VITE_API_URL + '/api/comparison/export/' + item.id + '?token=' + store.token
+    import.meta.env.VITE_API_URL + '/comparison/export/' + item.id + '?token=' + store.token
   )
 }
 
 //导出所有术语表
 function export_terms_all() {
-  window.open(import.meta.env.VITE_API_URL + '/api/comparison/export/all?token=' + store.token)
+  window.open(import.meta.env.VITE_API_URL + '/comparison/export/all?token=' + store.token)
 }
 
 //术语表模板下载
 function command_terms(type) {
   if (type == 'down') {
-    window.open(import.meta.env.VITE_API_URL + '/api/comparison/template?token=' + store.token)
+    window.open(import.meta.env.VITE_API_URL + '/comparison/template?token=' + store.token)
   }
 }
 
@@ -711,7 +711,7 @@ function share_change_prompt(item) {
       .then((data) => {
         pageLoad.value = false
         if (data.code == 200) {
-          ElMessage({ message: '操作成功', type: 'success' })
+          ElMessage({ message: '分享状态已更新', type: 'success' })
         } else {
           ElMessage({ message: data.message, type: 'error' })
           item.share_flag == 'Y' ? (item.share_flag = 'N') : (item.share_flag = 'Y')

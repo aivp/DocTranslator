@@ -5,14 +5,14 @@ import request from '@/utils/request'
 // 版本信息
 export function getVersionSetting() {
   return request({
-    url: '/api/common/version',
+    url: '/common/version',
     method: 'GET',
   });
 }
 // 获取系统设置
 export function getSystemSetting() {
   return request({
-    url: '/api/common/all_settings',
+    url: '/common/all_settings',
     method: 'GET',
   });
 }
@@ -21,7 +21,7 @@ export function getSystemSetting() {
  */
 export function getTranslateSetting() {
   return request({
-    url: '/api/translate/setting',
+    url: '/translate/setting',
     method: 'get',
   });
 }

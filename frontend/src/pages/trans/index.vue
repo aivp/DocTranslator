@@ -171,7 +171,7 @@
             <div class="table_li">
               <!-- 翻译成功图标：进度100%且状态为已完成时才显示 -->
               <template v-if="item.status === 'done' && Number(item.process) >= 100">
-                <el-link class="icon_down" :href="API_URL + '/api/translate/download/' + item.id" target="_blank">
+                <el-link class="icon_down" :href="API_URL + '/translate/download/' + item.id" target="_blank">
                   <span class="icon_handle"><DownloadIcon /></span>
                   <!-- <img src="@assets/icon_down.png" alt="" /> -->
                 </el-link>
@@ -262,7 +262,7 @@ const result = ref({})
 const target_count = ref('')
 const target_time = ref('')
 const target_url = ref('')
-const upload_url = API_URL + '/api/upload'
+const upload_url = API_URL + '/upload'
 
 const translatesData = ref([])
 const translatesTotal = ref(0)
@@ -1340,7 +1340,7 @@ async function downAllTransFile() {
     downloadAllButtonState.value.disabled = true
     
     // 直接使用fetch下载文件，不使用request工具
-    const response = await fetch('/api/api/translate/download/all', {
+    const response = await fetch(API_URL + '/translate/download/all', {
       headers: {
         'Authorization': 'Bearer ' + userStore.token
       }
@@ -1373,6 +1373,7 @@ async function downAllTransFile() {
     downloadAllButtonState.value.disabled = false
   }
 }
+
 
 onMounted(async () => {
   if (userStore.token) {
@@ -1875,6 +1876,7 @@ onUnmounted(() => {
     width: 90% !important;
   }
 }
+
 .icon_handle {
   margin-right: 10px;
   cursor: pointer; /* 鼠标悬停时显示手型 */

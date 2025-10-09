@@ -3,7 +3,7 @@ import request from '@/utils/request'
 // 修改密码
 export function changePassword(data) {
     return request({
-        url: '/api/change',
+        url: '/change',
         method: 'POST',
         data
     });
@@ -14,7 +14,7 @@ export function changePassword(data) {
  */
 export function storage() {
     return request({
-        url: '/api/storage',
+        url: '/storage',
         method: 'GET'
     });
 }
@@ -24,7 +24,7 @@ export function storage() {
  */
 export function authInfo() {
     return request({
-        url: '/api/user-info',
+        url: '/user-info',
         method: 'GET',
     });
 }

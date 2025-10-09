@@ -3,7 +3,7 @@ import request from '@/utils/request'
 //术语-广场列表
 export function comparison_share(params) {
   return request({
-      url: `/api/comparison/share`,
+      url: `/comparison/share`,
       method: 'get',
       params: params
   });
@@ -12,7 +12,7 @@ export function comparison_share(params) {
 //提示词-广场列表
 export function prompt_share(params) {
   return request({
-      url: `/api/prompt/share`,
+      url: `/prompt/share`,
       method: 'get',
       params: params
   });
@@ -21,7 +21,7 @@ export function prompt_share(params) {
 //添加到我的术语
 export function comparison_copy(id){
   return request({
-      url: `/api/comparison/copy/${id}`,
+      url: `/comparison/copy/${id}`,
       method: 'POST'
   });
 }
@@ -29,7 +29,7 @@ export function comparison_copy(id){
 //添加到我的提示词
 export function prompt_copy(id){
   return request({
-      url: `/api/prompt/copy/${id}`,
+      url: `/prompt/copy/${id}`,
       method: 'POST'
   });
 }
@@ -37,7 +37,7 @@ export function prompt_copy(id){
 //收藏术语
 export function comparison_fav(id){
   return request({
-      url: `/api/comparison/fav/${id}`,
+      url: `/comparison/fav/${id}`,
       method: 'POST'
   });
 }
@@ -45,7 +45,7 @@ export function comparison_fav(id){
 //收藏提示词
 export function prompt_fav(id){
   return request({
-      url: `/api/prompt/fav/${id}`,
+      url: `/prompt/fav/${id}`,
       method: 'POST'
   });
 }

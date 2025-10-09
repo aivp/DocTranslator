@@ -3,7 +3,7 @@ import request from '@/utils/request'
 // 检查是否可用
 export function checkOpenAI(params) {
     return request({
-        url: `/api/check/openai`,
+        url: `/check/openai`,
         method: 'POST',
         data: params
     });
@@ -12,7 +12,7 @@ export function checkOpenAI(params) {
 // 检查是否可用
 export function checkDocx(params) {
     return request({
-        url: `/api/check/doc2x`,
+        url: `/check/doc2x`,
         method: 'POST',
         data: params
     });
@@ -21,7 +21,7 @@ export function checkDocx(params) {
 // 检查pdf是否是扫描件
 export function checkPdf(file_path) {
     return request({
-        url: `/api/check/pdf`,
+        url: `/check/pdf`,
         method: 'POST',
         data: { file_path }
     });
@@ -29,7 +29,7 @@ export function checkPdf(file_path) {
 
 export function delFile(data) {
     return request({
-        url: `/api/delFile`,
+        url: `/delFile`,
         method: 'POST',
         data: data
     });
@@ -38,7 +38,7 @@ export function delFile(data) {
 
 export function transalteFile(params) {
     return request({
-        url: `/api/translate`,
+        url: `/translate`,
         method: 'POST',
         data: params
     });
@@ -46,7 +46,7 @@ export function transalteFile(params) {
 // 进度查询
 export function transalteProcess(params) {
     return request({
-        url: `/api/process`,
+        url: `/process`,
         method: 'POST',
         data: params
     });
@@ -55,7 +55,7 @@ export function transalteProcess(params) {
 // 专门的进度查询API（只返回进度信息，不返回完整任务信息）
 export function getTranslateProgress(params) {
     return request({
-        url: `/api/translate/progress`,
+        url: `/translate/progress`,
         method: 'POST',
         data: params
     });
@@ -66,7 +66,7 @@ export function getTranslateProgress(params) {
  */
 export function translates(params) {
     return request({
-        url: `/api/translates`,
+        url: `/translates`,
         method: 'get',
         params
     });
@@ -76,7 +76,7 @@ export function translates(params) {
 
 export function delTranslate(id) {
     return request({
-        url: `/api/translate/${id}`,
+        url: `/translate/${id}`,
         method: 'delete'
     });
 }
@@ -86,7 +86,7 @@ export function delTranslate(id) {
  */
 export function delAllTranslate() {
     return request({
-        url: '/api/translate/all',
+        url: '/translate/all',
         method: 'delete'
     });
 }
@@ -96,7 +96,7 @@ export function delAllTranslate() {
  */
 export function downAllTranslate() {
     return request({
-        url: '/api/translate/download/all',
+        url: '/translate/download/all',
         method: 'get'
     });
 }
@@ -107,7 +107,7 @@ export function downAllTranslate() {
  */
 export function getFinishCount() {
     return request({
-        url: '/api/translate/finish/count',
+        url: '/translate/finish/count',
         method: 'get'
     });
 }
@@ -115,7 +115,7 @@ export function getFinishCount() {
 // doc2x 启动pdf翻译
 export function doc2xStartService(data) {
     return request({
-        url: '/api/doc2x/start',
+        url: '/doc2x/start',
         method: 'post',
         data
     });
@@ -124,7 +124,7 @@ export function doc2xStartService(data) {
 // doc2x查询任务状态
 export function doc2xQueryStatusService(data) {
     return request({
-        url: '/api/doc2x/status',
+        url: '/doc2x/status',
         method: 'post',
         data: data
     });

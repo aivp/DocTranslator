@@ -213,7 +213,7 @@ import {
   prompt_del
 } from '@/api/corpus'
 const userStore = useUserStore()
-const uploadUrl = ref(import.meta.env.VITE_API_URL + '/api/comparison/import')
+const uploadUrl = ref(import.meta.env.VITE_API_URL + '/comparison/import')
 const pageLoad = ref(false)
 const termsData = ref([])
 const promptData = ref([])
@@ -434,7 +434,7 @@ function share_change(item) {
     .then((data) => {
       pageLoad.value = false
       if (data.code == 200) {
-        ElMessage({ message: '操作成功', type: 'success' })
+        ElMessage({ message: '分享状态已更新', type: 'success' })
       } else {
         ElMessage({ message: data.message, type: 'error' })
         item.share_flag == 'Y' ? (item.share_flag = 'N') : (item.share_flag = 'Y')
@@ -454,7 +454,7 @@ async function export_terms(item) {
     
     // 发起 fetch 请求
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL}/api/comparison/export/${item.id}`,
+      `${import.meta.env.VITE_API_URL}/comparison/export/${item.id}`,
       {
         headers: {
           Authorization: `Bearer ${userStore.token}`
@@ -497,7 +497,7 @@ async function export_terms_all() {
     // 设置loading状态
     exportAllLoading.value = true
     
-    const response = await fetch(import.meta.env.VITE_API_URL + '/api/comparison/export/all', {
+    const response = await fetch(import.meta.env.VITE_API_URL + '/comparison/export/all', {
       headers: {
         Authorization: `Bearer ${userStore.token}`
       }
@@ -533,7 +533,7 @@ async function export_terms_all() {
 //术语表模板下载
 function command_terms(type) {
   if (type == 'down') {
-    window.open(import.meta.env.VITE_API_URL + '/api/comparison/template')
+    window.open(import.meta.env.VITE_API_URL + '/comparison/template')
   }
 }
 
@@ -604,7 +604,7 @@ function share_change_prompt(item) {
       .then((data) => {
         pageLoad.value = false
         if (data.code == 200) {
-          ElMessage({ message: '操作成功', type: 'success' })
+          ElMessage({ message: '分享状态已更新', type: 'success' })
         } else {
           ElMessage({ message: data.message, type: 'error' })
           item.share_flag == 'Y' ? (item.share_flag = 'N') : (item.share_flag = 'Y')

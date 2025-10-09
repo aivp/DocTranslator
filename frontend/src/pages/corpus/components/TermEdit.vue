@@ -309,11 +309,11 @@ const fetchTermsList = async () => {
       params.search = searchKeyword.value.trim()
     }
     
-    const url = `/api/comparison/${localForm.value.id}/terms?${new URLSearchParams(params)}`
+    const url = `/comparison/${localForm.value.id}/terms?${new URLSearchParams(params)}`
     console.log('请求URL:', url)
     
     const response = await request({
-      url: `/api/comparison/${localForm.value.id}/terms`,
+      url: `/comparison/${localForm.value.id}/terms`,
       method: 'get',
       params: params
     })
@@ -472,7 +472,7 @@ const addTerm = async () => {
         ElMessage.info('正在保存术语库，请稍候...')
         
         const response = await request({
-          url: '/api/comparison',
+          url: '/comparison',
           method: 'post',
           data: {
             title: localForm.value.title,
@@ -527,7 +527,7 @@ const confirmEditTerm = async () => {
     if (editTermForm.value.id) {
       // 编辑操作
       const response = await request({
-        url: `/api/comparison/term/${editTermForm.value.id}`,
+        url: `/comparison/term/${editTermForm.value.id}`,
         method: 'put',
         data: {
           original: editTermForm.value.original,
@@ -553,7 +553,7 @@ const confirmEditTerm = async () => {
       }
       
       const response = await request({
-        url: `/api/comparison/${localForm.value.id}/terms`,
+        url: `/comparison/${localForm.value.id}/terms`,
         method: 'post',
         data: {
           original: editTermForm.value.original,
@@ -594,7 +594,7 @@ const deleteTerm = (row) => {
   ).then(async () => {
     try {
       const response = await request({
-        url: `/api/comparison/term/${row.id}`,
+        url: `/comparison/term/${row.id}`,
         method: 'delete'
       })
       

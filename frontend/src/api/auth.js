@@ -3,7 +3,7 @@ import request from '@/utils/request'
 // 注册时发送邮箱验证码
 export function registerSendEmail(email) {
     return request({
-        url: `/api/register/send`,
+        url: `/register/send`,
         method: 'POST',
         data: {email}
     });
@@ -11,7 +11,7 @@ export function registerSendEmail(email) {
 
 export function register(params) {
     return request({
-        url: `/api/register`,
+        url: `/register`,
         method: 'POST',
         data: params
     });
@@ -19,7 +19,7 @@ export function register(params) {
 
 export function login(params) {
     return request({
-        url: `/api/login`,
+        url: `/login`,
         method: 'POST',
         data: params
     });
@@ -28,7 +28,7 @@ export function login(params) {
 // 忘记密码发送邮箱验证码
 export function forgetSendEmail(email) {
     return request({
-        url: `/api/find/send`,
+        url: `/find/send`,
         method: 'POST',
         data: {email}
     });
@@ -36,7 +36,7 @@ export function forgetSendEmail(email) {
 
 export function forget(data) {
     return request({
-        url: `/api/find`,
+        url: `/find`,
         method: 'POST',
         data: data
     });
@@ -45,7 +45,7 @@ export function forget(data) {
 // 退出登录
 export function logout() {
     return request({
-        url: `/api/logout`,
+        url: `/logout`,
         method: 'POST'
     });
 }

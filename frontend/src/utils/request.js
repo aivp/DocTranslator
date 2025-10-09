@@ -73,12 +73,8 @@ service.interceptors.response.use(
       if (data && typeof data === 'object' && 'code' in data) {
         return data // 如果数据部分包含业务状态码，直接返回
       }
-      // 如果数据部分不包含业务状态码，构造一个标准响应
-      return {
-        code: 200,
-        message: '操作成功',
-        data: data
-      }
+      // 如果数据部分不包含业务状态码，直接返回数据
+      return data
     }
     
     // 如果不是元组格式，按原来的逻辑处理

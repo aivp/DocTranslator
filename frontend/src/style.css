@@ -12,3 +12,18 @@ body *{
 button{
   outline: none!important;
 }
+
+/* 确保成功消息显示为绿色 */
+.el-message--success {
+  background-color: #f0f9ff !important;
+  border-color: #b3d8ff !important;
+  color: #409eff !important;
+}
+
+.el-message--success .el-message__icon {
+  color: #67c23a !important;
+}
+
+.el-message--success .el-message__closeBtn {
+  color: #409eff !important;
+}

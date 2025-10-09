@@ -29,6 +29,16 @@ const constantRoute = [
           noCache: true,
           requiresAuth: true
         }
+      },
+      {
+        path: '/video',
+        component: () => import('@/pages/video/index.vue'),
+        name: 'video',
+        meta: {
+          title: '视频翻译',
+          noCache: true,
+          requiresAuth: true
+        }
       }
     ]
   },

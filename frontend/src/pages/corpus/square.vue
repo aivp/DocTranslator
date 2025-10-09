@@ -307,7 +307,7 @@ function favTerms(item) {
     .then((data) => {
       pageLoad.value = false
       if (data.code == 200) {
-        ElMessage({ message: '操作成功', type: 'success' })
+        ElMessage({ message: '收藏成功', type: 'success' })
         if (item.faved == 1) {
           item.faved = 0
         } else {
@@ -329,7 +329,7 @@ function favPrompt(item) {
     .then((data) => {
       pageLoad.value = false
       if (data.code == 200) {
-        ElMessage({ message: '操作成功', type: 'success' })
+        ElMessage({ message: '收藏成功', type: 'success' })
         if (item.faved == 1) {
           item.faved = 0
         } else {
