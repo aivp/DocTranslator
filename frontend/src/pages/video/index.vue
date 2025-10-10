@@ -58,13 +58,6 @@
               <i class="el-icon-magic-stick" style="margin-right: 8px;"></i>
               生成翻译 >
             </el-button>
-            <el-button 
-              size="large"
-              class="proofread-btn"
-              @click="generateProofread">
-              <i class="el-icon-document" style="margin-right: 8px;"></i>
-              生成校对文件
-            </el-button>
           </div>
         </div>
       </div>
@@ -90,11 +83,11 @@
         </div>
 
         <el-table :data="videoList" v-loading="loading" class="video-table">
-          <el-table-column prop="filename" label="文件名" min-width="200">
+          <el-table-column prop="original_filename" label="文件名" min-width="200">
             <template #default="scope">
               <div class="filename-cell">
                 <i class="el-icon-video-camera" style="margin-right: 8px; color: #409EFF;"></i>
-                {{ scope.row.filename }}
+                {{ scope.row.original_filename || scope.row.filename }}
               </div>
             </template>
           </el-table-column>
@@ -144,12 +137,20 @@
             </template>
           </el-table-column>
           
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="250" fixed="right">
             <template #default="scope">
+              <el-button 
+                v-if="scope.row.status_info?.can_download"
+                type="success" 
+                size="mini"
+                @click="previewVideo(scope.row)">
+                预览
+              </el-button>
               <el-button 
                 v-if="scope.row.status_info?.can_download"
                 type="primary" 
                 size="mini"
+                :loading="scope.row.downloading"
                 @click="downloadVideo(scope.row)">
                 下载
               </el-button>
@@ -166,6 +167,14 @@
                 size="mini"
                 @click="editVideo(scope.row)">
                 编辑
+              </el-button>
+              <el-button 
+                v-if="scope.row.status === 'processing'"
+                type="warning" 
+                size="mini"
+                :loading="scope.row.refreshing"
+                @click="refreshVideoStatus(scope.row)">
+                刷新状态
               </el-button>
               <el-button 
                 type="danger" 
@@ -260,7 +269,7 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/store/user'
 import { videoApi } from '@/api/video'
@@ -387,10 +396,6 @@ export default {
       translateDialogVisible.value = true
     }
     
-    // 生成校对文件
-    const generateProofread = () => {
-      ElMessage.info('校对文件功能开发中...')
-    }
     
     // 格式化文件大小
     const formatFileSize = (bytes) => {
@@ -423,6 +428,11 @@ export default {
           resetForm()
           currentVideo.value = null
           uploadRef.value.clearFiles()
+          
+          // 启动自动刷新
+          setTimeout(() => {
+            startAutoRefresh()
+          }, 1000)
         } else {
           ElMessage.error(response.message || '启动翻译失败')
         }
@@ -449,6 +459,14 @@ export default {
         if (response.code === 200) {
           videoList.value = response.data.videos
           total.value = response.data.total
+          
+          // 检查是否有处理中的视频，启动或停止自动刷新
+          const processingVideos = videoList.value.filter(video => video.status === 'processing')
+          if (processingVideos.length > 0) {
+            startAutoRefresh()
+          } else {
+            stopAutoRefresh()
+          }
         } else {
           ElMessage.error(response.message || '获取视频列表失败')
         }
@@ -494,9 +512,55 @@ export default {
       }
     }
     
-    const downloadVideo = (video) => {
+    const previewVideo = (video) => {
       if (video.translated_video_url) {
         window.open(video.translated_video_url, '_blank')
+      } else {
+        ElMessage.warning('翻译视频不存在')
+      }
+    }
+    
+    const downloadVideo = async (video) => {
+      if (video.translated_video_url) {
+        try {
+          // 设置loading状态
+          video.downloading = true
+          
+          ElMessage.info('正在准备下载...')
+          
+          // 使用后端代理接口下载
+          const response = await videoApi.downloadVideo(video.id)
+          
+          if (response instanceof Blob) {
+            // 创建下载链接
+            const url = window.URL.createObjectURL(response)
+            const link = document.createElement('a')
+            link.href = url
+            
+            // 设置下载文件名
+            const filename = video.original_filename || video.filename || 'translated_video.mp4'
+            const finalFilename = filename.endsWith('.mp4') ? filename : `${filename}.mp4`
+            link.download = finalFilename
+            
+            // 添加到DOM并触发下载
+            document.body.appendChild(link)
+            link.click()
+            
+            // 清理DOM和URL
+            document.body.removeChild(link)
+            window.URL.revokeObjectURL(url)
+            
+            ElMessage.success('视频下载已开始')
+          } else {
+            throw new Error('下载响应格式错误')
+          }
+        } catch (error) {
+          console.error('下载失败:', error)
+          ElMessage.error('下载失败，请重试')
+        } finally {
+          // 清除loading状态
+          video.downloading = false
+        }
       } else {
         ElMessage.warning('翻译视频不存在')
       }
@@ -571,6 +635,41 @@ export default {
       }
     }
     
+    const refreshVideoStatus = async (video) => {
+      if (!video.akool_task_id) {
+        ElMessage.warning('无法获取任务状态，缺少任务ID')
+        return
+      }
+      
+      try {
+        // 设置刷新状态
+        video.refreshing = true
+        
+        // 调用后端接口获取最新状态
+        const response = await videoApi.getVideoStatus(video.id)
+        
+        if (response.code === 200) {
+          // 更新视频状态
+          const updatedVideo = response.data
+          Object.assign(video, updatedVideo)
+          
+          ElMessage.success('状态已更新')
+          
+          // 如果状态变为已完成，刷新整个列表
+          if (updatedVideo.status === 'completed' || updatedVideo.status === 'failed') {
+            loadVideoList()
+          }
+        } else {
+          ElMessage.error('获取状态失败')
+        }
+      } catch (error) {
+        console.error('刷新状态失败:', error)
+        ElMessage.error('刷新状态失败')
+      } finally {
+        video.refreshing = false
+      }
+    }
+    
     const handlePageChange = (page) => {
       currentPage.value = page
       loadVideoList()
@@ -620,10 +719,70 @@ export default {
       return date.toLocaleString('zh-CN')
     }
     
+    // 自动刷新定时器
+    let autoRefreshTimer = null
+    
+    // 自动刷新处理中的视频状态
+    const startAutoRefresh = () => {
+      // 清除现有定时器
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer)
+      }
+      
+      // 检查是否有处理中的视频
+      const processingVideos = videoList.value.filter(video => video.status === 'processing')
+      
+      if (processingVideos.length > 0) {
+        console.log(`发现 ${processingVideos.length} 个处理中的视频，启动自动刷新`)
+        
+        autoRefreshTimer = setInterval(async () => {
+          try {
+            // 刷新所有处理中的视频状态
+            for (const video of processingVideos) {
+              if (video.status === 'processing' && video.akool_task_id) {
+                console.log(`自动刷新视频 ${video.id} 状态`)
+                await refreshVideoStatus(video)
+              }
+            }
+            
+            // 重新加载视频列表以获取最新状态
+            await loadVideoList()
+            
+            // 检查是否还有处理中的视频
+            const stillProcessing = videoList.value.filter(video => video.status === 'processing')
+            if (stillProcessing.length === 0) {
+              console.log('所有视频处理完成，停止自动刷新')
+              stopAutoRefresh()
+            }
+          } catch (error) {
+            console.error('自动刷新失败:', error)
+          }
+        }, 20000) // 20秒刷新一次
+      }
+    }
+    
+    // 停止自动刷新
+    const stopAutoRefresh = () => {
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer)
+        autoRefreshTimer = null
+        console.log('自动刷新已停止')
+      }
+    }
+    
     // 生命周期
     onMounted(() => {
       loadLanguages()
       loadVideoList()
+      
+      // 延迟启动自动刷新，确保视频列表已加载
+      setTimeout(() => {
+        startAutoRefresh()
+      }, 2000)
+    })
+    
+    onUnmounted(() => {
+      stopAutoRefresh()
     })
     
     return {
@@ -656,13 +815,16 @@ export default {
       delUploadFile,
       resetForm,
       openTranslateDialog,
-      generateProofread,
       startTranslate,
       loadVideoList,
+      previewVideo,
       downloadVideo,
       renewVideo,
       editVideo,
       deleteVideo,
+      refreshVideoStatus,
+      startAutoRefresh,
+      stopAutoRefresh,
       handlePageChange,
       getLanguageName,
       getStatusType,
@@ -830,21 +992,6 @@ export default {
   box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
 }
 
-.proofread-btn {
-  background: #6c757d;
-  border: none;
-  color: white;
-  font-weight: 500;
-  border-radius: 8px;
-  padding: 12px 24px;
-  font-size: 16px;
-  transition: all 0.3s ease;
-}
-
-.proofread-btn:hover {
-  background: #5a6268;
-  transform: translateY(-2px);
-}
 
 .settings-container {
   margin-bottom: 24px;

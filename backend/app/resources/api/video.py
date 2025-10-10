@@ -54,12 +54,13 @@ class VideoUploadResource(Resource):
         
         try:
             # 生成存储路径
-            save_dir = self._get_upload_dir()
-            filename = secure_filename(file.filename)
+            save_dir = self._get_upload_dir(user_id)
+            original_filename = secure_filename(file.filename)
             
-            # 生成唯一文件名
-            name, ext = os.path.splitext(filename)
-            unique_filename = f"{name}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+            # 生成唯一文件名：yyyyMMddhhmmss + 毫秒 + 扩展名
+            ext = os.path.splitext(original_filename)[1]
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]  # 毫秒级时间戳
+            unique_filename = f"{timestamp}{ext}"
             save_path = os.path.join(save_dir, unique_filename)
             
             # 检查路径是否安全
@@ -73,12 +74,13 @@ class VideoUploadResource(Resource):
             file_md5 = self._calculate_md5(save_path)
             
             # 生成视频访问URL
-            video_url = self._generate_video_url(unique_filename)
+            video_url = self._generate_video_url(unique_filename, user_id)
             
             # 创建视频翻译记录
             video_record = VideoTranslate(
                 customer_id=user_id,
                 filename=unique_filename,
+                original_filename=original_filename,
                 filepath=os.path.abspath(save_path),
                 video_url=video_url,
                 file_size=file_size,
@@ -95,6 +97,7 @@ class VideoUploadResource(Resource):
             return APIResponse.success({
                 'id': video_record.id,
                 'filename': unique_filename,
+                'original_filename': original_filename,
                 'file_size': file_size,
                 'video_url': video_url,
                 'message': '视频上传成功'
@@ -121,10 +124,10 @@ class VideoUploadResource(Resource):
         return int(os.getenv('MAX_VIDEO_SIZE', 300)) * 1024 * 1024  # 300MB
     
     @staticmethod
-    def _get_upload_dir():
+    def _get_upload_dir(user_id):
         """获取视频上传目录"""
         base_dir = Path(current_app.config['UPLOAD_BASE_DIR'])
-        upload_dir = base_dir / 'videos' / datetime.now().strftime('%Y-%m-%d')
+        upload_dir = base_dir / 'videos' / datetime.now().strftime('%Y-%m-%d') / str(user_id)
         
         if not upload_dir.exists():
             upload_dir.mkdir(parents=True, exist_ok=True)
@@ -148,10 +151,12 @@ class VideoUploadResource(Resource):
         return file_path.is_relative_to(base_dir)
     
     @staticmethod
-    def _generate_video_url(filename):
+    def _generate_video_url(filename, user_id):
         """生成视频访问URL"""
         base_url = os.getenv('VIDEO_BASE_URL', 'https://yourdomain.com')
-        return f"{base_url}/videos/{filename}"
+        # 生成包含日期和用户ID目录的完整URL路径
+        date_dir = datetime.now().strftime('%Y-%m-%d')
+        return f"{base_url}/videos/{date_dir}/{user_id}/{filename}"
 
 
 class VideoTranslateResource(Resource):
@@ -161,19 +166,42 @@ class VideoTranslateResource(Resource):
     @jwt_required()
     def post(self):
         """启动视频翻译"""
-        data = request.get_json()
+        # 支持JSON和表单数据
+        if request.is_json:
+            data = request.get_json()
+        else:
+            data = request.form.to_dict()
+            # 转换字符串值为适当类型
+            if 'video_id' in data:
+                data['video_id'] = int(data['video_id'])
+            if 'speaker_num' in data:
+                data['speaker_num'] = int(data['speaker_num'])
+            if 'lipsync_enabled' in data:
+                data['lipsync_enabled'] = data['lipsync_enabled'].lower() in ('true', '1', 'yes')
         
         required_fields = ['video_id', 'source_language', 'target_language']
         if not all(field in data for field in required_fields):
+            current_app.logger.error(f"缺少必要参数，请求数据: {data}")
             return APIResponse.error('缺少必要参数', 400)
         
         try:
+            current_app.logger.info(f"开始处理翻译请求，数据: {data}")
+            current_app.logger.info(f"请求头: {dict(request.headers)}")
+            current_app.logger.info(f"请求方法: {request.method}")
+            current_app.logger.info(f"Content-Type: {request.content_type}")
+            
             # 查询视频记录
             video = VideoTranslate.query.filter_by(
                 id=data['video_id'],
                 customer_id=get_jwt_identity(),
                 deleted_flag='N'
-            ).first_or_404()
+            ).first()
+            
+            if not video:
+                current_app.logger.error(f"视频记录不存在，video_id: {data['video_id']}, customer_id: {get_jwt_identity()}")
+                return APIResponse.error('视频记录不存在', 404)
+            
+            current_app.logger.info(f"找到视频记录: {video.id}, 状态: {video.status}")
             
             if video.status != 'uploaded':
                 return APIResponse.error('视频状态不允许翻译', 400)
@@ -184,10 +212,11 @@ class VideoTranslateResource(Resource):
             if not client_id or not client_secret:
                 return APIResponse.error('Akool认证信息未配置', 500)
             
+            current_app.logger.info(f"初始化Akool服务，Client ID: {client_id[:10]}...")
             akool_service = AkoolVideoService(client_id, client_secret)
             
             # 生成Webhook URL
-            webhook_url = self._generate_webhook_url()
+            webhook_url = self._generate_webhook_url(video.id)
             
             # 调用Akool API
             result = akool_service.create_translation(
@@ -223,10 +252,10 @@ class VideoTranslateResource(Resource):
             return APIResponse.error('启动翻译失败', 500)
     
     @staticmethod
-    def _generate_webhook_url():
+    def _generate_webhook_url(video_id):
         """生成Webhook URL"""
         base_url = os.getenv('WEBHOOK_BASE_URL', 'https://yourdomain.com')
-        return f"{base_url}/api/video/webhook"
+        return f"{base_url}/api/video/webhook/{video_id}"
 
 
 class VideoStatusResource(Resource):
@@ -366,6 +395,56 @@ class VideoDeleteResource(Resource):
             return APIResponse.error('删除失败', 500)
 
 
+class VideoDownloadResource(Resource):
+    """视频下载代理接口"""
+    
+    @require_valid_token
+    @jwt_required()
+    def get(self, video_id):
+        """代理下载视频文件"""
+        try:
+            video = VideoTranslate.query.filter_by(
+                id=video_id,
+                customer_id=get_jwt_identity(),
+                deleted_flag='N'
+            ).first_or_404()
+            
+            if not video.translated_video_url:
+                return APIResponse.error('翻译视频不存在', 404)
+            
+            # 使用requests获取视频数据
+            import requests
+            response = requests.get(video.translated_video_url, stream=True)
+            response.raise_for_status()
+            
+            # 设置响应头
+            from flask import Response
+            filename = video.original_filename or video.filename or 'translated_video.mp4'
+            if not filename.endswith('.mp4'):
+                filename += '.mp4'
+            
+            def generate():
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        yield chunk
+            
+            return Response(
+                generate(),
+                mimetype='video/mp4',
+                headers={
+                    'Content-Disposition': f'attachment; filename="{filename}"',
+                    'Content-Type': 'video/mp4',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET',
+                    'Access-Control-Allow-Headers': 'Authorization'
+                }
+            )
+            
+        except Exception as e:
+            current_app.logger.error(f"下载视频失败：{str(e)}")
+            return APIResponse.error('下载视频失败', 500)
+
+
 class VideoLanguagesResource(Resource):
     """支持语言列表接口"""
     
@@ -450,13 +529,21 @@ class VideoTokenInfoResource(Resource):
 class VideoWebhookResource(Resource):
     """Webhook回调接口"""
     
-    def post(self):
+    def post(self, video_id):
         """处理Akool回调"""
         try:
             data = request.get_json()
+            current_app.logger.info(f"Webhook回调数据: {data}")
             
             if not data:
                 return APIResponse.error('无效的请求数据', 400)
+            
+            # 检查是否是加密数据格式
+            if 'dataEncrypt' in data:
+                current_app.logger.info("检测到加密数据格式，尝试解密...")
+                # TODO: 实现Akool数据解密逻辑
+                # 目前先返回成功，避免重复回调
+                return APIResponse.success({'message': 'Webhook received'})
             
             task_id = data.get('_id') or data.get('task_id')
             video_status = data.get('video_status')
@@ -467,11 +554,12 @@ class VideoWebhookResource(Resource):
             
             # 查找对应的视频记录
             video = VideoTranslate.query.filter_by(
+                id=video_id,
                 akool_task_id=task_id
             ).first()
             
             if not video:
-                current_app.logger.warning(f"未找到任务ID对应的视频记录: {task_id}")
+                current_app.logger.warning(f"未找到视频ID {video_id} 和任务ID {task_id} 对应的视频记录")
                 return APIResponse.error('视频记录不存在', 404)
             
             # 更新视频状态

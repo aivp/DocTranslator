@@ -47,6 +47,15 @@ export const videoApi = {
     })
   },
 
+  // 下载视频
+  downloadVideo: (videoId) => {
+    return request({
+      url: `/video/${videoId}/download`,
+      method: 'get',
+      responseType: 'blob'
+    })
+  },
+
   // 获取支持的语言列表
   getLanguages: () => {
     return request({

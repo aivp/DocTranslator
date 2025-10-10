@@ -39,7 +39,7 @@ service.interceptors.request.use(
     config.headers['withCredentials']=true  // 携带凭据（如 Cookies）
     
     // 设置Content-Type为application/x-www-form-urlencoded
-    if (config.data && !(config.data instanceof FormData)) {
+    if (config.data && !(config.data instanceof FormData) && !config.headers['Content-Type']) {
       config.headers['Content-Type'] = 'application/x-www-form-urlencoded'
     }
     

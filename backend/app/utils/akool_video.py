@@ -82,6 +82,7 @@ class AkoolVideoService:
         }
         
         try:
+            current_app.logger.info(f"Akool API请求: {method} {url}")
             if method.upper() == 'GET':
                 response = requests.get(url, headers=headers, params=data)
             elif method.upper() == 'POST':
@@ -89,6 +90,7 @@ class AkoolVideoService:
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
+            current_app.logger.info(f"Akool API响应状态: {response.status_code}")
             response.raise_for_status()
             return response.json()
             
@@ -149,7 +151,9 @@ class AkoolVideoService:
             data['webhookUrl'] = webhook_url
             
         try:
+            current_app.logger.info(f"创建翻译任务，数据: {data}")
             result = self._make_request('POST', '/content/video/createbytranslate', data)
+            current_app.logger.info(f"翻译任务创建响应: {result}")
             if result.get('code') == 1000:
                 return result.get('data', {})
             else:
