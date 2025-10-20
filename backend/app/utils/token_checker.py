@@ -18,7 +18,10 @@ def check_token_validity():
     try:
         # 获取Authorization header
         auth_header = request.headers.get('Authorization')
+        logger.info(f"Authorization header: {auth_header}")
+        
         if not auth_header or not auth_header.startswith('Bearer '):
+            logger.warning("Authorization header缺失或格式错误")
             return False, "Missing Authorization Header", 401
         
         # 提取token
@@ -74,7 +77,8 @@ def require_valid_token(f):
         
         if not is_valid:
             logger.warning(f"Token验证失败: {error_message}")
-            return {"message": error_message, "code": status_code}, status_code
+            # 返回与APIResponse.error一致的格式
+            return {"code": status_code, "message": error_message}, status_code
         
         # token有效，继续执行
         logger.info("Token验证通过，继续执行接口")

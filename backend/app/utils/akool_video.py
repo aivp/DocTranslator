@@ -135,27 +135,145 @@ class AkoolVideoService:
             current_app.logger.error(f"获取语言列表异常: {str(e)}")
             return []
 
+    def get_ai_voices(self, language_code: str = None, page: int = 1, size: int = 100) -> Dict:
+        """获取AI语音列表"""
+        try:
+            current_app.logger.info(f"正在获取AI语音列表，语言代码: {language_code}")
+            
+            # 构建查询参数
+            params = {
+                'page': page,
+                'size': size
+            }
+            if language_code:
+                params['language_code'] = language_code
+            
+            # 使用v4版本的语音API
+            url = f"https://openapi.akool.com/api/open/v4/voice/videoTranslation"
+            headers = {
+                'Authorization': f'Bearer {self.access_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(url, headers=headers, params=params)
+            current_app.logger.info(f"AI语音API响应状态: {response.status_code}")
+            response.raise_for_status()
+            result = response.json()
+            
+            if result.get('code') == 1000:
+                current_app.logger.info(f"成功获取AI语音列表，共{result.get('data', {}).get('count', 0)}个语音")
+                return result.get('data', {})
+            else:
+                error_msg = result.get('msg', 'Unknown error')
+                current_app.logger.error(f"获取AI语音列表失败: {error_msg}")
+                return {}
+        except Exception as e:
+            current_app.logger.error(f"获取AI语音列表异常: {str(e)}")
+            return {}
+
     def create_translation(self, video_url: str, source_language: str, 
-                          target_language: str, lipsync: bool = False, 
-                          webhook_url: str = None, speaker_num: int = 0) -> Dict:
-        """创建视频翻译任务"""
+                          target_languages: List[str], lipsync: bool = False, 
+                          webhook_url: str = None, speaker_num: int = 0,
+                          voice_id: str = None, voices_map: Dict = None, 
+                          terminology_ids: List = None, style: str = 'professional') -> Dict:
+        """创建视频翻译任务（支持多语言和语音映射）"""
+        # 如果target_languages是字符串，转换为列表
+        if isinstance(target_languages, str):
+            target_languages = [target_languages]
+        
+        # 构建基础数据
         data = {
             'url': video_url,
             'source_language': source_language,
-            'language': target_language,
+            'language': ','.join(target_languages),  # 转换为逗号分隔的字符串
             'lipsync': lipsync,
-            'speaker_num': speaker_num
+            'speaker_num': speaker_num,
+            'remove_bgm': True,  # 添加背景音乐移除参数
+            'caption_type': 2,  # 添加字幕类型参数
+            'caption_url': ''  # 添加字幕URL参数
         }
         
+        # 添加studio_voice参数
+        data['studio_voice'] = {
+            'no_translate_words': [],
+            'fixed_words': {},
+            'pronounced_words': {},
+            'style': style
+        }
+        
+        # 处理术语库（fixed_words）
+        if terminology_ids and isinstance(terminology_ids, list):
+            try:
+                from app.models.comparison import Comparison
+                fixed_words = {}
+                
+                for term_id in terminology_ids:
+                    if isinstance(term_id, str) and term_id.isdigit():
+                        term_id = int(term_id)
+                    
+                    # 获取术语库内容
+                    comparison = Comparison.query.filter_by(
+                        id=term_id,
+                        deleted_flag='N'
+                    ).first()
+                    
+                    if comparison:
+                        # 获取术语库的术语列表（ComparisonSub 没有 deleted_flag 字段）
+                        terms = comparison.terms.all()
+                        for term in terms:
+                            source = term.original.strip() if term.original else ""
+                            target = term.comparison_text.strip() if term.comparison_text else ""
+                            if source and target:
+                                fixed_words[source] = target
+                
+                if fixed_words:
+                    data['studio_voice']['fixed_words'] = fixed_words
+                    current_app.logger.info("加载术语库，固定词汇数量: {}".format(len(fixed_words)))
+                    
+            except Exception as e:
+                current_app.logger.error("处理术语库异常: {}".format(str(e)))
+        
+        # 添加语音映射（如果提供）
+        if voices_map and isinstance(voices_map, dict):
+            # 构建voices_map对象，格式为: { "lang_code": { "voice_id": "xxx" } }
+            formatted_voices_map = {}
+            for lang_code, voice_id in voices_map.items():
+                # 添加所有语音映射，包括空字符串
+                formatted_voices_map[lang_code] = {
+                    'voice_id': voice_id or ""  # 确保即使是None也转换为空字符串
+                }
+            
+            if formatted_voices_map:
+                data['voices_map'] = formatted_voices_map
+        
+        # 添加单个语音ID（如果提供且没有voices_map）
+        elif voice_id:
+            data['voice_id'] = voice_id
+        
+        # 添加Webhook URL（如果提供）
         if webhook_url:
             data['webhookUrl'] = webhook_url
             
         try:
-            current_app.logger.info(f"创建翻译任务，数据: {data}")
+            current_app.logger.info("创建翻译任务，数据: {}".format(data))
+            current_app.logger.info("请求URL: {}/content/video/createbytranslate".format(self.base_url))
+            
             result = self._make_request('POST', '/content/video/createbytranslate', data)
-            current_app.logger.info(f"翻译任务创建响应: {result}")
+            current_app.logger.info("翻译任务创建响应: {}".format(result))
+            
             if result.get('code') == 1000:
-                return result.get('data', {})
+                # 根据API文档，成功响应应该包含data和all_results
+                response_data = result.get('data', {})
+                all_results = result.get('all_results', [])
+                
+                # 如果没有all_results，尝试从data中构建
+                if not all_results and response_data:
+                    all_results = [{'code': 1000, 'data': response_data}]
+                
+                return {
+                    'data': response_data,
+                    'all_results': all_results
+                }
             else:
                 error_msg = result.get('msg', 'Unknown error')
                 current_app.logger.error(f"创建翻译任务失败: {error_msg}")

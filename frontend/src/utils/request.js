@@ -12,9 +12,12 @@ const service = axios.create({
   withCredentials: true, // send cookies when cross-domain requests
   crossDomain: true,
   timeout: 30000, // request timeout
-  transformRequest: [function(data) {
+  transformRequest: [function(data, headers) {
     if (data instanceof FormData) {
       return data
+    } else if (headers['Content-Type'] === 'application/json') {
+      // JSON请求不进行转换
+      return JSON.stringify(data)
     } else {
       data = Qs.stringify(data, { arrayFormat: 'indices' })
       return data
@@ -34,12 +37,14 @@ const service = axios.create({
 service.interceptors.request.use(
   config => {
     const userStore = useUserStore()
+    console.log('请求token:', userStore.token) // 添加调试信息
     config.headers['Authorization'] = 'Bearer ' + userStore.token;
     config.headers['credentials']='include'
     config.headers['withCredentials']=true  // 携带凭据（如 Cookies）
     
-    // 设置Content-Type为application/x-www-form-urlencoded
+    // 设置Content-Type
     if (config.data && !(config.data instanceof FormData) && !config.headers['Content-Type']) {
+      // 如果没有指定Content-Type，默认为application/x-www-form-urlencoded
       config.headers['Content-Type'] = 'application/x-www-form-urlencoded'
     }
     

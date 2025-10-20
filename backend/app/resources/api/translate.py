@@ -93,21 +93,27 @@ class TranslateStartResource(Resource):
                 return APIResponse.error("用户状态异常", 403)
 
             # 生成绝对路径（跨平台兼容）
-            def get_absolute_storage_path(filename):
+            def get_absolute_storage_path(filename, user_id):
                 # 使用配置文件中的UPLOAD_BASE_DIR（保持与file_utils.py一致）
                 base_dir = Path(current_app.config['UPLOAD_BASE_DIR'])
-                # 按日期创建子目录（如 storage/translate/2024-01-20）
+                # 按用户ID和日期创建子目录（如 storage/translate/user_123/2024-01-20）
                 date_str = datetime.now().strftime('%Y-%m-%d')
                 # 创建目标目录（如果不存在）
-                target_dir = base_dir / "translate" / date_str
+                target_dir = base_dir / "translate" / f"user_{user_id}" / date_str
                 target_dir.mkdir(parents=True, exist_ok=True)
-                # 返回绝对路径（保持原文件名）
-                return str(target_dir / filename)
+                
+                # 生成唯一文件名，避免多次翻译同一文件时的冲突
+                import uuid
+                name_part, ext_part = os.path.splitext(filename)
+                unique_filename = f"{name_part}_{uuid.uuid4().hex[:8]}{ext_part}"
+                
+                # 返回绝对路径（使用唯一文件名）
+                return str(target_dir / unique_filename)
 
             origin_filename = data['file_name']
 
             # 生成翻译结果绝对路径
-            target_abs_path = get_absolute_storage_path(origin_filename)
+            target_abs_path = get_absolute_storage_path(origin_filename, user_id)
 
             # 根据PDF翻译方法处理PDF文件
             if origin_filename.lower().endswith('.pdf'):
@@ -561,6 +567,22 @@ class TranslateDeleteResource(Resource):
             old_storage = customer.storage
             file_size = translate.size or 0
             
+            # 删除物理文件
+            if translate.origin_filepath and os.path.exists(translate.origin_filepath):
+                try:
+                    os.remove(translate.origin_filepath)
+                    current_app.logger.info(f"已删除源文件: {translate.origin_filepath}")
+                except Exception as e:
+                    current_app.logger.warning(f"删除源文件失败: {translate.origin_filepath} - {e}")
+            
+            # 删除翻译结果文件
+            if translate.target_filepath and os.path.exists(translate.target_filepath):
+                try:
+                    os.remove(translate.target_filepath)
+                    current_app.logger.info(f"已删除翻译结果文件: {translate.target_filepath}")
+                except Exception as e:
+                    current_app.logger.warning(f"删除翻译结果文件失败: {translate.target_filepath} - {e}")
+            
             # 更新 deleted_flag 为 'Y'
             translate.deleted_flag = 'Y'
             
@@ -597,11 +619,31 @@ class TranslateDownloadResource(Resource):
         if not translate.target_filepath or not os.path.exists(translate.target_filepath):
             return APIResponse.error('文件不存在', 404)
 
+        # 生成下载文件名（移除后缀）
+        original_filename = translate.origin_filename
+        if original_filename:
+            # 移除路径，只保留文件名
+            filename = os.path.basename(original_filename)
+            # 移除后缀（如 _a97f0abf, _compressed_aggressive 等）
+            if '_' in filename:
+                # 找到最后一个下划线和点号的位置
+                name_part = os.path.splitext(filename)[0]  # 移除扩展名
+                if '_' in name_part:
+                    # 移除最后一个下划线及其后面的内容
+                    parts = name_part.split('_')
+                    if len(parts) > 1:
+                        # 检查最后一部分是否是数字或压缩标识
+                        last_part = parts[-1]
+                        if last_part.isdigit() or 'compressed' in last_part.lower() or len(last_part) == 8:
+                            filename = '_'.join(parts[:-1]) + os.path.splitext(filename)[1]
+        else:
+            filename = os.path.basename(translate.target_filepath)
+        
         # 返回文件
         response = make_response(send_file(
             translate.target_filepath,
             as_attachment=True,
-            download_name=os.path.basename(translate.target_filepath)
+            download_name=filename
         ))
 
         # 禁用缓存
@@ -712,8 +754,25 @@ class TranslateDeleteAllResource(Resource):
             customer = Customer.query.get(customer_id)
             old_storage = customer.storage if customer else 0
 
-            # 执行批量软删除
+            # 执行批量软删除并删除物理文件
+            deleted_files_count = 0
             for record in records_to_delete:
+                # 删除源文件
+                if record.origin_filepath and os.path.exists(record.origin_filepath):
+                    try:
+                        os.remove(record.origin_filepath)
+                        deleted_files_count += 1
+                    except Exception as e:
+                        current_app.logger.warning(f"删除源文件失败: {record.origin_filepath} - {e}")
+                
+                # 删除翻译结果文件
+                if record.target_filepath and os.path.exists(record.target_filepath):
+                    try:
+                        os.remove(record.target_filepath)
+                    except Exception as e:
+                        current_app.logger.warning(f"删除翻译结果文件失败: {record.target_filepath} - {e}")
+                
+                # 软删除记录
                 record.deleted_flag = 'Y'
 
             # 更新用户存储空间
@@ -724,7 +783,7 @@ class TranslateDeleteAllResource(Resource):
                 current_app.logger.info(
                     f"用户 {customer_id} 批量删除文件: "
                     f"存储空间 {old_storage} -> {customer.storage} "
-                    f"(减少 {total_size} 字节, 删除 {len(records_to_delete)} 个文件)"
+                    f"(减少 {total_size} 字节, 删除 {len(records_to_delete)} 个文件, 实际删除 {deleted_files_count} 个源文件)"
                 )
 
             db.session.commit()

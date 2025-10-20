@@ -85,23 +85,6 @@ def check_if_textbox(run):
     
     return False
 
-
-# def clear_image(paragraph):
-#     """清除段落中的图片，但保留文本内容"""
-#     runs_to_remove = []
-#     for run in paragraph.runs:
-#         if check_if_image(run):
-#             runs_to_remove.append(run)
-#     
-#     # 从后往前删除，避免索引变化
-#     for run in reversed(runs_to_remove):
-#         try:
-#             run._element.getparent().remove(run._element)
-#         except:
-#             pass
-
-
-
 def start(trans):
     """主入口函数，处理Word文档翻译"""
     # 恢复线程数为30，提高翻译效率
@@ -909,11 +892,21 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                 add_text_safe(text_item)
         
         # 使用线程池并行处理段落组
-        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+        executor = None
+        try:
+            executor = ThreadPoolExecutor(max_workers=max_threads)
             futures = [executor.submit(process_paragraph_group, group) 
                       for group in paragraph_groups]
             for future in as_completed(futures):
                 future.result()
+        finally:
+            # 确保线程池被正确关闭
+            if executor is not None:
+                try:
+                    executor.shutdown(wait=True)
+                    logger.debug("段落处理线程池已关闭")
+                except Exception as shutdown_error:
+                    logger.warning(f"关闭段落处理线程池时出错: {shutdown_error}")
     
     def process_tables_parallel():
         """并行处理表格（表格之间无依赖）"""
@@ -927,11 +920,21 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                 add_text_safe(text_item)
         
         # 使用线程池并行处理表格
-        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+        executor = None
+        try:
+            executor = ThreadPoolExecutor(max_workers=max_threads)
             futures = [executor.submit(process_table, table) 
                       for table in document.tables]
             for future in as_completed(futures):
                 future.result()
+        finally:
+            # 确保线程池被正确关闭
+            if executor is not None:
+                try:
+                    executor.shutdown(wait=True)
+                    logger.debug("表格处理线程池已关闭")
+                except Exception as shutdown_error:
+                    logger.warning(f"关闭表格处理线程池时出错: {shutdown_error}")
     
     def process_sections_parallel():
         """并行处理页眉页脚（section之间无依赖）"""
@@ -1003,11 +1006,21 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                 add_text_safe(text_item)
         
         # 使用线程池并行处理sections
-        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+        executor = None
+        try:
+            executor = ThreadPoolExecutor(max_workers=max_threads)
             futures = [executor.submit(process_section, section) 
                       for section in document.sections]
             for future in as_completed(futures):
                 future.result()
+        finally:
+            # 确保线程池被正确关闭
+            if executor is not None:
+                try:
+                    executor.shutdown(wait=True)
+                    logger.debug("页眉页脚处理线程池已关闭")
+                except Exception as shutdown_error:
+                    logger.warning(f"关闭页眉页脚处理线程池时出错: {shutdown_error}")
     
     def process_inline_shapes_parallel():
         """并行处理内嵌形状（inline shapes）"""
@@ -1028,7 +1041,9 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                 add_text_safe(text_item)
         
         # 使用线程池并行处理形状
-        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+        executor = None
+        try:
+            executor = ThreadPoolExecutor(max_workers=max_threads)
             futures = [executor.submit(process_shape, shape) 
                        for shape in document.inline_shapes]
             for future in as_completed(futures):
@@ -1036,6 +1051,14 @@ def extract_content_for_translation(document, file_path, texts, max_threads=4):
                     future.result()
                 except Exception as e:
                     logger.error(f"内嵌形状线程异常: {str(e)}")
+        finally:
+            # 确保线程池被正确关闭
+            if executor is not None:
+                try:
+                    executor.shutdown(wait=True)
+                    logger.debug("内嵌形状处理线程池已关闭")
+                except Exception as shutdown_error:
+                    logger.warning(f"关闭内嵌形状处理线程池时出错: {shutdown_error}")
     
     # 按顺序执行各个部分，避免依赖问题
     logger.info("开始安全的多线程文本提取...")
@@ -1262,118 +1285,6 @@ def merge_compatible_runs(run_group):
     }
 
 
-# def extract_paragraph_with_context(paragraph, texts, context_type):
-#     """为正文段落添加上下文，使用保守的run合并策略"""
-#     
-#     # 过滤掉超链接的run，避免重复处理
-#     paragraph_runs = []
-#     for run in paragraph.runs:
-#         # 检查run是否属于超链接
-#         is_hyperlink_run = False
-#         for hyperlink in paragraph.hyperlinks:
-#             if run in hyperlink.runs:
-#                 is_hyperlink_run = True
-#                 break
-#         
-#         if not is_hyperlink_run:
-#             paragraph_runs.append(run)
-#     
-#     # 暂时注释掉run合并，让每个段落保持独立
-#     # 使用保守的run合并策略
-#     # merged_runs = conservative_run_merge(paragraph_runs)
-#     
-#     # 直接使用原始run，不合并
-#     merged_runs = []
-#     for run in paragraph_runs:
-#         if check_text(run.text):
-#             merged_runs.append({
-#                 'text': run.text,
-#                 'type': 'merged',  # 改为merged类型，这样apply_translations才能处理
-#                 'runs': [run]
-#             })
-#     
-#     for i, merged_item in enumerate(merged_runs):
-#         if not check_text(merged_item['text']):
-#             continue
-#         
-#         # 检查是否包含图片，如果包含图片则跳过，避免在图片后添加空行
-#         has_image = False
-#         for run in merged_item['runs']:
-#             if check_if_image(run):
-#                 has_image = True
-#                 break
-#         
-#         if has_image:
-#             continue
-#         
-#         # 判断是否是段落边界
-#         is_start = i == 0
-#         is_end = i == len(merged_runs) - 1
-#         
-#         # 根据边界情况获取上下文
-#         if is_start:
-#             # 段落开头：只要后文
-#             context_before = ""
-#             context_after = get_context_after_merged(merged_runs, i, 2)
-#         elif is_end:
-#             # 段落结尾：只要前文
-#             context_before = get_context_before_merged(merged_runs, i, 2)
-#             context_after = ""
-#         else:
-#             # 正常情况：前后文都要
-#             context_before = get_context_before_merged(merged_runs, i, 2)
-#             context_after = get_context_after_merged(merged_runs, i, 2)
-#         
-#         # 构建带上下文的翻译文本
-#         context_parts = []
-#         if context_before:
-#             context_parts.append(f"[前文: {context_before}]")
-#         context_parts.append(merged_item['text'])
-#         if context_after:
-#             context_parts.append(f"[后文: {context_after}]")
-#         
-#         # 使用空字符串连接，避免添加额外空格
-#         context_text = "".join(context_parts)
-#         
-#         texts.append({
-#             "text": merged_item['text'],           # 原始文本
-#             "context_text": context_text,  # 带上下文的文本
-#             "type": "merged_run",
-#             "merged_item": merged_item,  # 包含runs列表
-#             "complete": False,
-#             "context_type": context_type,  # 标记为正文
-#             "is_boundary": is_start or is_end
-#         })
-
-
-# def get_context_before(runs, current_index, window_size):
-#     """获取前文上下文"""
-#     start_index = max(0, current_index - window_size)
-#     context_runs = runs[start_index:current_index]
-#     
-#     # 收集文本
-#     context_texts = []
-#     for run in context_runs:
-#         if check_text(run.text):
-#             context_texts.append(run.text)
-#     
-#     return ''.join(context_texts)
-
-
-# def get_context_after(runs, current_index, window_size):
-#     """获取后文上下文"""
-#     end_index = min(len(runs), current_index + window_size + 1)
-#     context_runs = runs[current_index + 1:end_index]
-#     
-#     # 收集文本
-#     context_texts = []
-#     for run in context_runs:
-#         if check_text(run.text):
-#             context_texts.append(run.text)
-#     
-#     return ''.join(context_texts)
-
-
 def get_context_before_merged(merged_runs, current_index, window_size):
     """获取合并run的前文上下文，保持原始空格格式"""
     start_index = max(0, current_index - window_size)
@@ -1493,7 +1404,9 @@ def run_translation(trans, texts, max_threads):
                 logger.error(f"更新进度失败: {str(e)}")
 
     # 使用线程池执行翻译任务
-    with ThreadPoolExecutor(max_workers=max_threads) as executor:
+    executor = None
+    try:
+        executor = ThreadPoolExecutor(max_workers=max_threads)
         # 提交所有翻译任务
         futures = []
         for i in range(len(texts)):
@@ -1512,6 +1425,14 @@ def run_translation(trans, texts, max_threads):
                     logger.error(f"翻译任务执行异常: {str(e)}")
                 if not event.is_set():
                     event.set()  # 设置事件，通知其他线程停止
+    finally:
+        # 确保线程池被正确关闭
+        if executor is not None:
+            try:
+                executor.shutdown(wait=True)
+                logger.debug("翻译线程池已关闭")
+            except Exception as shutdown_error:
+                logger.warning(f"关闭翻译线程池时出错: {shutdown_error}")
 
     with print_lock:
         logger.info("所有翻译任务已完成")
@@ -2281,59 +2202,6 @@ def is_english_text(text):
     return total_chars > 0 and english_chars / total_chars > 0.7
 
 
-# def detect_spacing_needs(original_text, translated_text):
-#     """检测是否需要添加空格（改进版本）"""
-#     needs_spaces, spacing_type = detect_language_and_spacing_needs(original_text, translated_text)
-#     
-#     if spacing_type == "chinese_to_english":
-#         # 中译英：强制添加空格
-#         return True
-#     elif spacing_type == "english_to_chinese":
-#         # 英译中：保持原始格式
-#         return False
-#     else:
-#         # 其他情况：基于空格存在性判断
-#         original_has_spaces = ' ' in original_text
-#         translated_has_spaces = ' ' in translated_text
-#         
-#         # 如果原始文本没有空格但翻译后有空格，说明需要添加空格
-#         if not original_has_spaces and translated_has_spaces:
-#             return True
-#         
-#         # 如果原始文本有空格但翻译后没有，说明需要保持空格
-#         if original_has_spaces and not translated_has_spaces:
-#             return False
-#         
-#         # 如果都有空格，检查是否需要重新格式化
-#         if original_has_spaces and translated_has_spaces:
-#             # 比较空格模式，如果差异很大，可能需要重新格式化
-#             original_word_count = len(original_text.split())
-#             translated_word_count = len(translated_text.split())
-#             if abs(original_word_count - translated_word_count) > 2:
-#                 return True
-#     
-#     return False
-
-
-# def distribute_with_proper_spacing(runs, translated_text):
-#     """为需要添加空格的文本分配run，确保单词间有适当空格（专门处理中译英）"""
-#     # 暂时注释掉有问题的函数调用
-#     # 使用专门的run间空格处理函数
-#     # ensure_proper_spacing_between_runs(runs, translated_text)
-#     
-#     # 简单的空格处理
-#     if len(runs) == 1:
-#         runs[0].text = translated_text
-#     else:
-#         # 多run情况，简单分配
-#         words = translated_text.split()
-#         for i, run in enumerate(runs):
-#             if i < len(words):
-#                 run.text = words[i]
-#             else:
-#                 run.text = ""
-
-
 def distribute_preserving_original_spaces(runs, translated_text, original_text):
     """保持原始空格格式的分配"""
     # 计算原始文本的总长度
@@ -2455,44 +2323,3 @@ def process_table_with_layout_adjustment(table, local_texts):
     
     # 调整表格布局
     adjust_table_layout_for_translation(table)
-
-
-# def convert_chinese_punctuation_to_english(text):
-#     """将中文标点符号转换为英文标点符号"""
-#     if not text:
-#         return text
-#     
-#     # 中文标点到英文标点的映射
-#     punctuation_map = {
-#         '，': ',',  # 逗号
-#         '。': '.',  # 句号
-#         '！': '!',  # 感叹号
-#         '？': '?',  # 问号
-#         '；': ';',  # 分号
-#         '：': ':',  # 冒号
-#         '（': '(',  # 左括号
-#         '）': ')',  # 右括号
-#         '【': '[',  # 左方括号
-#         '】': ']',  # 右方括号
-#         '《': '<',  # 左尖括号
-#         '》': '>',  # 右尖括号
-#         '"': '"',   # 中文引号
-#         '"': '"',   # 中文引号
-#         ''': "'",   # 中文单引号
-#         ''': "'",   # 中文单引号
-#         '…': '...', # 省略号
-#         '—': '-',   # 破折号
-#         '－': '-',  # 全角连字符
-#         '　': ' ',  # 全角空格
-#     }
-#     
-#     # 执行转换
-#     converted_text = text
-#     for chinese, english in punctuation_map.items():
-#         converted_text = converted_text.replace(chinese, english)
-#     
-#     # 如果文本有变化，记录日志
-#     if converted_text != text:
-#         logger.info(f"标点符号转换: '{text}' -> '{converted_text}'")
-#     
-#     return converted_text

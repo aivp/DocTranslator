@@ -30,55 +30,6 @@ SPECIAL_SYMBOLS_PATTERN = re.compile(
 # 纯数字和简单标点的正则表达式
 NUMBERS_PATTERN = re.compile(r'^[\d\s\.,\-\+\*\/\(\)\[\]\{\}]+$')
 
-# def wrap_text_for_pdf(text, chars_per_line):
-#     """
-#     为PDF文本换行处理
-#     根据每行字符数将文本分割成多行，使用<br>标签连接
-#     """
-#     if not text or chars_per_line <= 0:
-#         return text
-#     
-#     # 如果文本长度不超过单行容量，直接返回
-#     if len(text) <= chars_per_line:
-#         return text
-#     
-#     lines = []
-#     current_line = ""
-#     
-#     # 按单词分割（优先在单词边界换行）
-#     words = text.split()
-#     
-#     for word in words:
-#         # 如果当前行加上新单词不超过限制
-#         if len(current_line + " " + word) <= chars_per_line:
-#             if current_line:
-#                 current_line += " " + word
-#             else:
-#                 current_line = word
-#         else:
-#             # 如果当前行不为空，保存它
-#             if current_line:
-#                 lines.append(current_line)
-#                 current_line = word
-#             else:
-#                 # 如果单个单词就超过限制，强制分割
-#                 if len(word) > chars_per_line:
-#                     # 按字符强制分割
-#                     while len(word) > chars_per_line:
-#                         lines.append(word[:chars_per_line])
-#                         word = word[chars_per_line:]
-#                     current_line = word
-#                 else:
-#                     current_line = word
-#     
-#     # 添加最后一行
-#     if current_line:
-#         lines.append(current_line)
-#     
-#     # 用<br>标签连接所有行
-#     return "<br>".join(lines)
-
-
 def check_docx_quality(docx_path):
     """检查转换后的DOCX文件质量，分析编码和文本内容"""
     try:
@@ -1366,6 +1317,38 @@ def start_direct_pdf_translation(trans):
         target_dir = os.path.dirname(trans['target_file'])
         os.makedirs(target_dir, exist_ok=True)
         
+        # 检测PDF页数，决定使用哪种翻译方法
+        try:
+            import fitz
+            doc = fitz.open(str(original_path))
+            total_pages = doc.page_count
+            doc.close()
+            print(f"📄 PDF总页数: {total_pages}")
+            
+            if total_pages > 20:
+                print("📊 检测到大文件（超过20页），使用多线程分批处理")
+                return start_large_pdf_translation(trans, total_pages)
+            else:
+                print("📊 检测到小文件（20页以内），使用标准处理")
+                return start_small_pdf_translation(trans)
+                
+        except Exception as e:
+            print(f"⚠️ 检测PDF页数失败: {e}，使用标准处理")
+            return start_small_pdf_translation(trans)
+            
+    except Exception as e:
+        print(f"❌ 直接PDF翻译异常: {str(e)}")
+        to_translate.error(trans['id'], "直接PDF翻译异常: " + str(e))
+        return False
+
+
+def start_small_pdf_translation(trans):
+    """小文件PDF翻译方法（20页以内）"""
+    try:
+        print("🎯 使用小文件翻译方法")
+        
+        original_path = Path(trans['file_path'])
+        
         # 创建翻译函数
         def translate_func(text):
             """翻译函数，使用现有的翻译逻辑"""
@@ -1380,7 +1363,8 @@ def start_direct_pdf_translation(trans):
         # 创建直接PDF翻译器
         translator = DirectPDFTranslator(
             input_pdf_path=str(original_path),
-            target_lang=trans.get('target_lang', 'zh')
+            target_lang=trans.get('lang', 'zh'),  # 使用 'lang' 字段与翻译函数一致
+            user_id=trans.get('user_id')  # 传递用户ID用于临时文件隔离
         )
         
         # 执行完整翻译流程
@@ -1390,7 +1374,7 @@ def start_direct_pdf_translation(trans):
         )
         
         if result_file and os.path.exists(result_file):
-            print(f"✅ 直接PDF翻译完成: {result_file}")
+            print(f"✅ 小文件PDF翻译完成: {result_file}")
             
             # 更新任务状态为完成
             try:
@@ -1402,13 +1386,64 @@ def start_direct_pdf_translation(trans):
             
             return True
         else:
-            print(f"❌ 直接PDF翻译失败")
-            to_translate.error(trans['id'], "直接PDF翻译失败")
+            print(f"❌ 小文件PDF翻译失败")
+            to_translate.error(trans['id'], "小文件PDF翻译失败")
             return False
-            
+
     except Exception as e:
-        print(f"❌ 直接PDF翻译异常: {str(e)}")
-        to_translate.error(trans['id'], "直接PDF翻译异常: " + str(e))
+        print(f"❌ 小文件PDF翻译过程出错: {str(e)}")
+        traceback.print_exc()
+        to_translate.error(trans['id'], "小文件PDF翻译过程出错: " + str(e))
+        return False
+
+
+def start_large_pdf_translation(trans, total_pages):
+    """大文件PDF翻译方法（超过20页）"""
+    try:
+        print("🎯 使用大文件多线程翻译方法")
+        print(f"📊 总页数: {total_pages}")
+        
+        original_path = Path(trans['file_path'])
+        
+        # 导入大文件翻译器
+        from .large_pdf_translator import LargePDFTranslator
+        
+        # 创建大文件翻译器，使用与小PDF相同的线程配置
+        translator = LargePDFTranslator(
+            input_pdf_path=str(original_path),
+            batch_size=10,  # 增加批次大小，减少批次数量
+            max_workers=30,  # 与小PDF保持一致，使用系统默认30线程
+            target_lang=trans.get('lang', 'zh'),  # 使用 'lang' 字段与翻译函数一致
+            user_id=trans.get('user_id')  # 传递用户ID用于临时文件隔离
+        )
+        
+        # 执行完整翻译流程
+        result_file = translator.run_complete_translation(
+            trans=trans,
+            output_file=trans['target_file']
+        )
+        
+        if result_file and os.path.exists(result_file):
+            print(f"✅ 大文件PDF翻译完成: {result_file}")
+            
+            # 更新任务状态为完成
+            try:
+                from .to_translate import db
+                db.execute("update translate set status='done', process='100' where id=%s", trans['id'])
+                print("✅ 已更新任务状态为done，进度100%")
+            except Exception as e:
+                print(f"⚠️ 更新任务状态失败: {str(e)}")
+            
+            return True
+        else:
+            print("❌ 大文件PDF翻译失败")
+            to_translate.error(trans['id'], "大文件PDF翻译失败")
+            return False
+
+    except Exception as e:
+        print(f"❌ 大文件PDF翻译过程出错: {str(e)}")
+        traceback.print_exc()
+        to_translate.error(trans['id'], "大文件PDF翻译过程出错: " + str(e))
         return False
 
 
@@ -1418,9 +1453,10 @@ class DirectPDFTranslator:
     基于pdf-translator-final项目集成
     """
     
-    def __init__(self, input_pdf_path, target_lang='zh'):
+    def __init__(self, input_pdf_path, target_lang='zh', user_id=None):
         self.input_pdf_path = input_pdf_path
         self.target_lang = target_lang
+        self.user_id = user_id
         self.doc = None
         self.extracted_texts = []
         
@@ -1682,13 +1718,7 @@ class DirectPDFTranslator:
                             
                             # 估算每行字符数（根据字体大小）
                             chars_per_line = max(1, int(box_width / (font_size * 0.6)))  # 0.6是经验值
-                            
-                            # 注释掉换行处理，直接使用原始文本
-                            # if len(text) > chars_per_line:
-                            #     wrapped_text = wrap_text_for_pdf(text, chars_per_line)
-                            #     print(f"   🔄 文本换行处理: {len(text)} 字符 -> {len(wrapped_text.split('<br>'))} 行")
-                            # else:
-                            #     wrapped_text = text
+
                             wrapped_text = text
                             
                             # 构建HTML文本，使用完全透明的背景
@@ -1748,10 +1778,16 @@ class DirectPDFTranslator:
             
             # 为每个翻译任务创建唯一的临时目录，避免批量翻译时文件冲突
             import uuid
-            temp_dir_name = f"temp_{uuid.uuid4().hex[:8]}"
+            if self.user_id:
+                # 使用用户ID创建隔离目录
+                temp_dir_name = f"temp_user_{self.user_id}_{uuid.uuid4().hex[:8]}"
+            else:
+                # 如果没有用户ID，使用默认方式
+                temp_dir_name = f"temp_{uuid.uuid4().hex[:8]}"
             temp_dir = os.path.join(output_dir, temp_dir_name)
             os.makedirs(temp_dir, exist_ok=True)
             print(f"📁 创建临时目录: {temp_dir}")
+            print(f"👤 用户ID: {self.user_id if self.user_id else 'N/A'}")
             
             # 步骤1: 拆分PDF
             extracted_texts_file, no_text_pdf_file = self.step1_split_pdf(temp_dir)
@@ -1798,6 +1834,19 @@ class DirectPDFTranslator:
                 print("⚠️ PDF压缩失败，使用原始PDF")
                 final_pdf_file = final_pdf_file
             
+            # 删除原始上传文件，保留翻译后的文件（带UUID后缀）
+            original_file = self.input_pdf_path
+            if os.path.exists(original_file) and original_file != output_file:
+                try:
+                    os.remove(original_file)
+                    print("✅ 已删除原始上传文件: " + os.path.basename(original_file))
+                except Exception as e:
+                    logging.warning("删除原始上传文件失败: " + str(e))
+                    print("⚠️ 删除原始上传文件失败: " + str(e))
+            
+            # 确保输出文件保持UUID后缀，避免多次翻译冲突
+            # 不重命名文件，保持数据库路径与实际文件一致
+            
             print("\n" + "=" * 60)
             print("🎉 完整PDF翻译流程完成!")
             print("=" * 60)
@@ -1836,6 +1885,8 @@ class DirectPDFTranslator:
         original_size = os.path.getsize(input_pdf_path)
         print("原始文件大小: " + str(original_size) + " 字节 (" + str(original_size/1024/1024) + " MB)")
         
+        doc = None
+        doc2 = None
         try:
             # 打开PDF
             print("\n1. 打开PDF...")
@@ -1886,7 +1937,6 @@ class DirectPDFTranslator:
                     expand=0,         # 不展开
                     no_new_id=True,   # 不生成新ID
                 )
-                doc2.close()
                 
                 # 检查激进优化后的文件大小
                 aggressive_size = os.path.getsize(aggressive_output)
@@ -1901,8 +1951,6 @@ class DirectPDFTranslator:
                     output_pdf_path = aggressive_output
                     optimized_size = aggressive_size
             
-            doc.close()
-            
             print("\n✅ 优化完成! 输出文件: " + output_pdf_path)
             print("📊 文件大小对比:")
             print("   原始: " + str(original_size) + " 字节 (" + str(original_size/1024/1024) + " MB)")
@@ -1915,6 +1963,21 @@ class DirectPDFTranslator:
             logging.error("优化PDF时出错: " + str(e))
             print("❌ 优化PDF时出错: " + str(e))
             raise
+        finally:
+            # 确保所有文档对象被正确关闭
+            if doc2 is not None:
+                try:
+                    doc2.close()
+                    logging.debug("激进优化PDF文档已关闭")
+                except Exception as close_error:
+                    logging.warning(f"关闭激进优化PDF文档时出错: {close_error}")
+            
+            if doc is not None:
+                try:
+                    doc.close()
+                    logging.debug("优化PDF文档已关闭")
+                except Exception as close_error:
+                    logging.warning(f"关闭优化PDF文档时出错: {close_error}")
 
     def _cleanup_temp_files(self, temp_files, temp_dir=None):
         """清理临时文件和目录"""

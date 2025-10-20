@@ -20,6 +20,23 @@ class VideoTranslate(db.Model):
     translated_video_url = db.Column(db.String(1024), comment='翻译后视频URL')
     lipsync_enabled = db.Column(db.Boolean, default=False, comment='是否启用唇语同步')
     webhook_url = db.Column(db.String(512), comment='回调URL')
+    # 新增字段：AI语音相关
+    voice_id = db.Column(db.String(128), comment='选择的AI语音ID')
+    voice_name = db.Column(db.String(256), comment='选择的AI语音名称')
+    voice_gender = db.Column(db.String(16), comment='语音性别')
+    voice_language = db.Column(db.String(64), comment='语音语言')
+    voice_preview_url = db.Column(db.String(1024), comment='语音预览URL')
+    # 新增字段：唇语同步类型
+    lip_sync_type = db.Column(db.Integer, default=0, comment='唇语同步类型(0-2)')
+    # 新增字段：多语言翻译支持
+    parent_video_id = db.Column(db.Integer, comment='父视频ID（多语言翻译时使用）')
+    translation_group_id = db.Column(db.String(64), comment='翻译组ID（同一批次的多语言翻译）')
+    # 新增字段：术语库支持
+    terminology_ids = db.Column(db.Text, comment='术语库ID列表（JSON格式）')
+    # 新增字段：主翻译记录标识（暂时注释，需要数据库迁移）
+    # is_main_translation = db.Column(db.Boolean, default=False, comment='是否为主翻译记录')
+    # target_languages_json = db.Column(db.Text, comment='目标语言列表（JSON格式）')
+    # voices_map_json = db.Column(db.Text, comment='语音映射（JSON格式）')
     file_size = db.Column(db.BigInteger, default=0, comment='文件大小(字节)')
     duration = db.Column(db.Numeric(10, 2), comment='视频时长(秒)')
     error_message = db.Column(db.Text, comment='错误信息')
@@ -56,7 +73,20 @@ class VideoTranslate(db.Model):
             'created_at': self.created_at.replace(tzinfo=timezone.utc).astimezone(gmt8).isoformat() if self.created_at else None,
             'updated_at': self.updated_at.replace(tzinfo=timezone.utc).astimezone(gmt8).isoformat() if self.updated_at else None,
             'deleted_flag': self.deleted_flag,
-            'deleted_at': self.deleted_at.replace(tzinfo=timezone.utc).astimezone(gmt8).isoformat() if self.deleted_at else None
+            'deleted_at': self.deleted_at.replace(tzinfo=timezone.utc).astimezone(gmt8).isoformat() if self.deleted_at else None,
+            # 新增字段
+            'voice_id': self.voice_id,
+            'voice_name': self.voice_name,
+            'voice_gender': self.voice_gender,
+            'voice_language': self.voice_language,
+            'voice_preview_url': self.voice_preview_url,
+            'lip_sync_type': self.lip_sync_type,
+            'parent_video_id': self.parent_video_id,
+            'translation_group_id': self.translation_group_id,
+            'terminology_ids': self.terminology_ids,
+            # 'is_main_translation': self.is_main_translation,
+            # 'target_languages_json': self.target_languages_json,
+            # 'voices_map_json': self.voices_map_json
         }
 
     def is_expired(self):

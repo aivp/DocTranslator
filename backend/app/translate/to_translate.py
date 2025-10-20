@@ -27,7 +27,7 @@ except ImportError as e:
         return False, "Qwen模块未找到"
 
 
-def translate_text(trans, text, source_lang="auto", target_lang="en"):
+def translate_text(trans, text, source_lang="auto", target_lang=None):
     """
     翻译单个文本
     
@@ -48,6 +48,10 @@ def translate_text(trans, text, source_lang="auto", target_lang="en"):
         server = trans.get('server', 'openai')
         app_id = trans.get('app_id', '')
         app_key = trans.get('app_key', '')
+        
+        # 如果没有传递target_lang参数，从trans中获取
+        if target_lang is None:
+            target_lang = trans.get('lang', 'zh')
         
         # 根据服务器类型选择翻译方法
         if server == 'baidu':
@@ -401,9 +405,11 @@ def translate_text(trans, text, source_lang="auto", target_lang="en"):
                 logging.error(f"OpenAI 翻译失败: {e}")
                 # 如果 OpenAI 失败，尝试使用 Qwen 作为备用
                 try:
+                    # 使用映射后的语言，确保语言映射正确
+                    qwen_target_lang = LANGUAGE_MAPPING.get(target_lang, target_lang)
                     return qwen_translate(
                         text=text,
-                        target_language=target_lang,
+                        target_language=qwen_target_lang,
                         source_lang="auto",
                         prompt=trans.get('prompt'),
                         prompt_id=trans.get('prompt_id'),
@@ -782,9 +788,10 @@ def get(trans, event, texts, index):
     texts[index] = text
     # print(text)
     if not event.is_set():
-        # 对于Word文档翻译，不调用process函数，因为Word翻译有自己的进度更新机制
+        # 对于Word文档翻译和大PDF翻译，不调用process函数，因为它们有自己的进度更新机制
         extension = trans.get('extension', '').lower()
-        if extension not in ['.docx', '.doc']:
+        is_large_pdf = trans.get('is_large_pdf', False)  # 检查是否为大PDF翻译
+        if extension not in ['.docx', '.doc'] and not is_large_pdf:
             process(texts, translate_id)
     # set_threading_num(mredis)
     return True  # 返回结果而不是exit(0)

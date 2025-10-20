@@ -28,6 +28,7 @@ class AIChecker:
     @staticmethod
     def check_pdf_scanned(file_stream: BytesIO):
         """PDF扫描件检测"""
+        doc = None
         try:
             file_stream.seek(0)
             doc = fitz.open(stream=file_stream.read(), filetype="pdf")
@@ -43,3 +44,11 @@ class AIChecker:
         except Exception as e:
             logging.error(f"PDF检测失败: {str(e)}")
             raise
+        finally:
+            # 确保文档对象被正确关闭
+            if doc is not None:
+                try:
+                    doc.close()
+                    logging.debug("PDF检测文档已关闭")
+                except Exception as close_error:
+                    logging.warning(f"关闭PDF检测文档时出错: {close_error}")

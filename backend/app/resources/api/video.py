@@ -1,6 +1,7 @@
 import os
 import uuid
 import hashlib
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from flask import request, current_app
@@ -165,30 +166,89 @@ class VideoTranslateResource(Resource):
     @require_valid_token
     @jwt_required()
     def post(self):
-        """启动视频翻译"""
+        """启动视频翻译（支持多语言和语音选择）"""
         # 支持JSON和表单数据
         if request.is_json:
             data = request.get_json()
         else:
-            data = request.form.to_dict()
-            # 转换字符串值为适当类型
-            if 'video_id' in data:
-                data['video_id'] = int(data['video_id'])
-            if 'speaker_num' in data:
-                data['speaker_num'] = int(data['speaker_num'])
-            if 'lipsync_enabled' in data:
-                data['lipsync_enabled'] = data['lipsync_enabled'].lower() in ('true', '1', 'yes')
+            # 处理表单数据，包括数组格式
+            form_data = request.form.to_dict()
+            data = {}
+            
+            # 处理普通字段
+            for key, value in form_data.items():
+                if key == 'video_id':
+                    data[key] = int(value)
+                elif key == 'speaker_num':
+                    data[key] = int(value)
+                elif key == 'lipsync_enabled':
+                    data[key] = value.lower() in ('true', '1', 'yes')
+                elif key == 'lip_sync_type':
+                    data[key] = int(value)
+                elif not ('[' in key and ']' in key):  # 不是数组格式的字段
+                    data[key] = value
+            
+            # 处理数组格式的字段
+            target_languages = []
+            voices_map = {}
+            terminology_ids = []
+            
+            for key, value in form_data.items():
+                if key.startswith('target_languages[') and key.endswith(']'):
+                    target_languages.append(value)
+                elif key.startswith('voices_map[') and key.endswith(']'):
+                    # 提取语言代码
+                    lang_code = key[11:-1]  # 去掉 'voices_map[' 和 ']'
+                    voices_map[lang_code] = value
+                elif key.startswith('terminology_ids[') and key.endswith(']'):
+                    terminology_ids.append(value)
+            
+            # 设置处理后的数据
+            if target_languages:
+                data['target_languages'] = target_languages
+            if voices_map:
+                data['voices_map'] = voices_map
+            if terminology_ids:
+                data['terminology_ids'] = terminology_ids
         
-        required_fields = ['video_id', 'source_language', 'target_language']
+        required_fields = ['video_id', 'source_language', 'target_languages']
         if not all(field in data for field in required_fields):
             current_app.logger.error(f"缺少必要参数，请求数据: {data}")
             return APIResponse.error('缺少必要参数', 400)
         
+        # 处理目标语言（支持多语言）
+        target_languages = data['target_languages']
+        if isinstance(target_languages, str):
+            target_languages = [target_languages]
+        elif not isinstance(target_languages, list):
+            return APIResponse.error('target_languages必须是字符串或数组', 400)
+        
+        # 处理术语库ID（支持多选）
+        terminology_ids = data.get('terminology_ids', [])
+        if isinstance(terminology_ids, str):
+            terminology_ids = [terminology_ids] if terminology_ids else []
+        elif not isinstance(terminology_ids, list):
+            terminology_ids = []
+        
         try:
-            current_app.logger.info(f"开始处理翻译请求，数据: {data}")
-            current_app.logger.info(f"请求头: {dict(request.headers)}")
-            current_app.logger.info(f"请求方法: {request.method}")
-            current_app.logger.info(f"Content-Type: {request.content_type}")
+            current_app.logger.info("开始处理翻译请求")
+            current_app.logger.info("原始表单数据: {}".format(request.form.to_dict()))
+            current_app.logger.info("解析后的数据: {}".format(data))
+            current_app.logger.info("目标语言: {}".format(target_languages))
+            current_app.logger.info("语音映射: {}".format(data.get('voices_map', {})))
+            
+            # 验证必要参数
+            if not data.get('video_id'):
+                current_app.logger.error("video_id参数为空")
+                return APIResponse.error('video_id参数不能为空', 400)
+            
+            if not data.get('source_language'):
+                current_app.logger.error("source_language参数为空")
+                return APIResponse.error('source_language参数不能为空', 400)
+            
+            if not target_languages or len(target_languages) == 0:
+                current_app.logger.error("target_languages参数为空")
+                return APIResponse.error('target_languages参数不能为空', 400)
             
             # 查询视频记录
             video = VideoTranslate.query.filter_by(
@@ -206,49 +266,132 @@ class VideoTranslateResource(Resource):
             if video.status != 'uploaded':
                 return APIResponse.error('视频状态不允许翻译', 400)
             
+            # 检查是否已经存在相同的翻译任务
+            existing_translations = VideoTranslate.query.filter_by(
+                customer_id=get_jwt_identity(),
+                video_url=video.video_url,
+                source_language=data['source_language'],
+                deleted_flag='N'
+            ).filter(
+                VideoTranslate.target_language.in_(target_languages)
+            ).all()
+            
+            if existing_translations:
+                existing_langs = [t.target_language for t in existing_translations]
+                current_app.logger.warning(f"已存在相同翻译任务: {existing_langs}")
+                return APIResponse.error(f'已存在相同翻译任务: {", ".join(existing_langs)}', 400)
+            
             # 初始化Akool服务
             client_id = os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
             client_secret = os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
             if not client_id or not client_secret:
                 return APIResponse.error('Akool认证信息未配置', 500)
             
-            current_app.logger.info(f"初始化Akool服务，Client ID: {client_id[:10]}...")
+            current_app.logger.info("初始化Akool服务，Client ID: {}...".format(client_id[:10]))
             akool_service = AkoolVideoService(client_id, client_secret)
+            
+            # 生成翻译组ID
+            import uuid
+            translation_group_id = str(uuid.uuid4())
             
             # 生成Webhook URL
             webhook_url = self._generate_webhook_url(video.id)
             
-            # 调用Akool API
+            # 调用Akool API（支持多语言和语音映射）
+            voices_map = data.get('voices_map', {})
+            
+            current_app.logger.info("调用Akool API创建翻译任务")
+            current_app.logger.info("视频URL: {}".format(video.video_url))
+            current_app.logger.info("源语言: {}".format(data['source_language']))
+            current_app.logger.info("目标语言: {}".format(target_languages))
+            current_app.logger.info("语音映射: {}".format(voices_map))
+            
             result = akool_service.create_translation(
                 video_url=video.video_url,
                 source_language=data['source_language'],
-                target_language=data['target_language'],
+                target_languages=target_languages,
                 lipsync=data.get('lipsync_enabled', False),
                 webhook_url=webhook_url,
-                speaker_num=data.get('speaker_num', 0)
+                speaker_num=data.get('speaker_num', 0),
+                voice_id=data.get('voice_id'),
+                voices_map=voices_map,  # 传递语音映射
+                terminology_ids=terminology_ids,  # 传递术语库
+                style=data.get('style', 'professional')  # 传递翻译风格
             )
             
-            # 更新视频记录
-            video.source_language = data['source_language']
-            video.target_language = data['target_language']
-            video.lipsync_enabled = data.get('lipsync_enabled', False)
-            video.akool_task_id = result.get('_id')
+            # 处理Akool返回的结果
+            akool_results = result.get('all_results', [])
+            if not akool_results:
+                # 如果没有all_results，尝试从data中获取
+                akool_data = result.get('data', {})
+                if akool_data:
+                    akool_results = [{'code': 1000, 'data': akool_data}]
+                else:
+                    akool_results = []
+            
+            created_videos = []
+            
+            # 为每个目标语言创建视频记录
+            for i, target_lang in enumerate(target_languages):
+                # 获取对应的Akool结果
+                akool_result = akool_results[i] if i < len(akool_results) else {}
+                akool_data = akool_result.get('data', {})
+                
+                # 创建新的视频翻译记录
+                new_video = VideoTranslate(
+                    customer_id=video.customer_id,
+                    filename=video.filename,
+                    original_filename=video.original_filename,
+                    filepath=video.filepath,
+                    video_url=video.video_url,
+                    source_language=data['source_language'],
+                    target_language=target_lang,
+                    akool_task_id=akool_data.get('_id'),
+                    status='processing',
+                    lipsync_enabled=data.get('lipsync_enabled', False),
+                    webhook_url=webhook_url,
+                    file_size=video.file_size,
+                    duration=video.duration,
+                    # 新增字段
+                    voice_id=voices_map.get(target_lang) if voices_map else None,
+                    voice_name=data.get('voice_name'),
+                    voice_gender=data.get('voice_gender'),
+                    voice_language=data.get('voice_language'),
+                    voice_preview_url=data.get('voice_preview_url'),
+                    lip_sync_type=data.get('lip_sync_type', 0),
+                    parent_video_id=video.id,  # 所有翻译记录都指向原始视频
+                    translation_group_id=translation_group_id,
+                    # 术语库字段
+                    terminology_ids=json.dumps(terminology_ids) if terminology_ids else None,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                
+                db.session.add(new_video)
+                created_videos.append(new_video)
+            
+            # 更新原始视频记录状态
             video.status = 'processing'
-            video.webhook_url = webhook_url
             video.updated_at = datetime.utcnow()
             
             db.session.commit()
             
             return APIResponse.success({
-                'video_id': video.id,
-                'akool_task_id': video.akool_task_id,
-                'status': video.status,
-                'message': '翻译任务已启动'
+                'translation_group_id': translation_group_id,
+                'created_videos': [v.id for v in created_videos],
+                'target_languages': target_languages,
+                'status': 'processing',
+                'message': '已启动{}个语言的翻译任务'.format(len(target_languages))
             })
             
         except Exception as e:
             db.session.rollback()
-            current_app.logger.error(f"启动视频翻译失败：{str(e)}")
+            current_app.logger.error("启动视频翻译失败：{}".format(str(e)))
+            
+            # 检查是否是语音必选错误
+            if 'voice_id is required' in str(e) or 'voices_map' in str(e) or 'This language' in str(e):
+                return APIResponse.error('某些语言必须选择AI语音，请为所有目标语言选择对应的AI语音', 400)
+            
             return APIResponse.error('启动翻译失败', 500)
     
     @staticmethod
@@ -320,27 +463,38 @@ class VideoListResource(Resource):
     def get(self):
         """获取用户视频列表"""
         try:
+            current_app.logger.info("获取视频列表请求，用户ID: {}".format(get_jwt_identity()))
             page = request.args.get('page', 1, type=int)
             per_page = request.args.get('per_page', 10, type=int)
             status = request.args.get('status')
+            current_app.logger.info("查询参数: page={}, per_page={}, status={}".format(page, per_page, status))
             
             query = VideoTranslate.query.filter_by(
                 customer_id=get_jwt_identity(),
                 deleted_flag='N'
+            ).filter(
+                VideoTranslate.target_language.isnot(None)  # 只显示有目标语言的记录（翻译任务）
             )
             
             if status:
                 query = query.filter_by(status=status)
             
+            current_app.logger.info("执行查询: {}".format(query))
             videos = query.order_by(VideoTranslate.created_at.desc()).paginate(
                 page=page, per_page=per_page, error_out=False
             )
+            current_app.logger.info("查询结果: 总数={}, 当前页={}, 每页={}".format(videos.total, videos.page, videos.per_page))
             
             video_list = []
             for video in videos.items:
-                video_data = video.to_dict()
-                video_data['status_info'] = video.get_status_info()
-                video_list.append(video_data)
+                try:
+                    video_data = video.to_dict()
+                    video_data['status_info'] = video.get_status_info()
+                    video_list.append(video_data)
+                    current_app.logger.info("处理视频记录: ID={}, 文件名={}".format(video.id, video.filename))
+                except Exception as e:
+                    current_app.logger.error("处理视频记录失败: ID={}, 错误={}".format(video.id, str(e)))
+                    continue
             
             return APIResponse.success({
                 'videos': video_list,
@@ -477,6 +631,43 @@ class VideoLanguagesResource(Resource):
             return APIResponse.success({
                 'languages': self._get_default_languages()
             })
+
+
+class VideoVoicesResource(Resource):
+    """AI语音列表接口"""
+    
+    def get(self):
+        """获取AI语音列表"""
+        try:
+            # 获取查询参数
+            language_code = request.args.get('language_code')
+            page = request.args.get('page', 1, type=int)
+            size = request.args.get('size', 100, type=int)
+            
+            # 检查Client ID和Client Secret是否存在
+            client_id = os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
+            client_secret = os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
+            if not client_id or not client_secret:
+                current_app.logger.error("Akool认证信息未配置")
+                return APIResponse.error('Akool认证信息未配置', 500)
+            
+            akool_service = AkoolVideoService(client_id, client_secret)
+            voices_data = akool_service.get_ai_voices(language_code, page, size)
+            
+            if voices_data:
+                return APIResponse.success(voices_data)
+            else:
+                # 返回空结果而不是错误
+                return APIResponse.success({
+                    'page': page,
+                    'size': size,
+                    'count': 0,
+                    'result': []
+                })
+            
+        except Exception as e:
+            current_app.logger.error(f"获取AI语音列表失败：{str(e)}")
+            return APIResponse.error('获取AI语音列表失败', 500)
     
     def _get_default_languages(self):
         """获取默认语言列表"""

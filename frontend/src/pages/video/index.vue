@@ -75,7 +75,7 @@
               <el-option label="已失败" value="failed"></el-option>
               <el-option label="已过期" value="expired"></el-option>
             </el-select>
-            <el-button @click="loadVideoList" :loading="loading">
+            <el-button type="primary" @click="loadVideoList" :loading="loading">
               <i class="el-icon-refresh"></i>
               刷新
             </el-button>
@@ -83,7 +83,7 @@
         </div>
 
         <el-table :data="videoList" v-loading="loading" class="video-table">
-          <el-table-column prop="original_filename" label="文件名" min-width="200">
+          <el-table-column prop="original_filename" label="文件名" min-width="250">
             <template #default="scope">
               <div class="filename-cell">
                 <i class="el-icon-video-camera" style="margin-right: 8px; color: #409EFF;"></i>
@@ -92,13 +92,13 @@
             </template>
           </el-table-column>
           
-          <el-table-column prop="source_language" label="源语言" width="100">
+          <el-table-column prop="source_language" label="源语言" width="120">
             <template #default="scope">
               {{ getLanguageName(scope.row.source_language) }}
             </template>
           </el-table-column>
           
-          <el-table-column prop="target_language" label="目标语言" width="100">
+          <el-table-column prop="target_language" label="目标语言" width="180">
             <template #default="scope">
               {{ getLanguageName(scope.row.target_language) }}
             </template>
@@ -112,7 +112,7 @@
             </template>
           </el-table-column>
           
-          <el-table-column prop="status_info" label="状态信息" min-width="200">
+          <el-table-column prop="status_info" label="状态信息" min-width="250">
             <template #default="scope">
               <div class="status-info">
                 <span :class="getStatusClass(scope.row.status_info?.status)">
@@ -125,19 +125,19 @@
             </template>
           </el-table-column>
           
-          <el-table-column prop="file_size" label="文件大小" width="100">
+          <el-table-column prop="file_size" label="文件大小" width="120">
             <template #default="scope">
               {{ formatFileSize(scope.row.file_size) }}
             </template>
           </el-table-column>
           
-          <el-table-column prop="created_at" label="创建时间" width="160">
+          <el-table-column prop="created_at" label="创建时间" width="180">
             <template #default="scope">
               {{ formatDate(scope.row.created_at) }}
             </template>
           </el-table-column>
           
-          <el-table-column label="操作" width="250" fixed="right">
+          <el-table-column label="操作" width="280" fixed="right">
             <template #default="scope">
               <el-button 
                 v-if="scope.row.status_info?.can_download"
@@ -220,8 +220,15 @@
           </el-select>
         </el-form-item>
         
-        <el-form-item label="目标语言" prop="target_language">
-          <el-select v-model="translateForm.target_language" placeholder="请选择目标语言" style="width: 100%;">
+        <el-form-item label="目标语言" prop="target_languages">
+          <el-select 
+            v-model="translateForm.target_languages" 
+            placeholder="请选择目标语言（支持多选）" 
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            style="width: 100%;"
+            @change="handleTargetLanguagesChange">
             <el-option
               v-for="lang in languages"
               :key="lang.lang_code"
@@ -229,6 +236,85 @@
               :value="lang.lang_code">
             </el-option>
           </el-select>
+          <div class="form-tip">支持同时选择多个目标语言进行翻译</div>
+        </el-form-item>
+        
+        <!-- AI语音选择 - 为每个目标语言单独选择 -->
+        <el-form-item label="AI语音" v-if="translateForm.target_languages && translateForm.target_languages.length > 0">
+          <div class="voice-selection-container">
+            <div 
+              v-for="langCode in translateForm.target_languages" 
+              :key="langCode" 
+              class="voice-selection-item">
+              <div class="voice-selection-label">
+                <span>{{ getLanguageName(langCode) }}</span>
+              </div>
+              <el-select 
+                v-model="voiceMap[langCode]" 
+                :placeholder="languageVoicesLoading[langCode] ? '正在加载语音列表...' : `请为 ${getLanguageName(langCode)} 选择AI语音（可选）`" 
+                clearable
+                :loading="languageVoicesLoading[langCode]"
+                style="width: 100%;"
+                @change="(val) => handleVoiceChangeForLanguage(langCode, val)">
+                <template #empty>
+                  <div class="voice-loading-empty">
+                    <i class="el-icon-loading" v-if="languageVoicesLoading[langCode]"></i>
+                    <span v-if="languageVoicesLoading[langCode]">正在加载语音列表...</span>
+                    <span v-else>暂无可用语音</span>
+                  </div>
+                </template>
+                <el-option
+                  v-for="voice in getVoicesForLanguage(langCode)"
+                  :key="voice.voice_id"
+                  :label="`${voice.name} (${voice.gender})`"
+                  :value="voice.voice_id">
+                  <div class="voice-option">
+                    <div class="voice-info">
+                      <span class="voice-name">{{ voice.name }}</span>
+                      <span class="voice-gender">{{ voice.gender }}</span>
+                    </div>
+                    <div class="voice-details">
+                      <span class="voice-language">{{ voice.language }}</span>
+                      <span class="voice-style" v-if="voice.style && voice.style.length">
+                        {{ voice.style.join(', ') }}
+                      </span>
+                    </div>
+                  </div>
+                </el-option>
+              </el-select>
+              
+              <!-- 语音预览 -->
+              <div class="voice-preview" v-if="voiceMap[langCode]">
+                <div class="voice-preview-info">
+                  <img 
+                    :src="getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.thumbnailUrl" 
+                    class="voice-avatar" 
+                    v-if="getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.thumbnailUrl">
+                  <div class="voice-details">
+                    <h4>{{ getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.name }}</h4>
+                    <p>{{ getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.language }} • {{ getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.gender }}</p>
+                    <div class="voice-tags">
+                      <el-tag 
+                        v-for="style in getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.style" 
+                        :key="style" 
+                        size="small" 
+                        style="margin-right: 4px;">
+                        {{ style }}
+                      </el-tag>
+                    </div>
+                  </div>
+                </div>
+                <div class="voice-preview-audio" v-if="getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.preview">
+                  <audio 
+                    controls 
+                    :src="getVoicesForLanguage(langCode).find(v => v.voice_id === voiceMap[langCode])?.preview" 
+                    class="preview-audio">
+                  </audio>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="form-tip">为每个目标语言单独选择AI语音，不选择则使用默认语音</div>
         </el-form-item>
         
         <el-form-item label="Lip Sync">
@@ -238,6 +324,42 @@
             inactive-text="禁用">
           </el-switch>
           <i class="el-icon-info" style="margin-left: 8px; color: #909399;"></i>
+        </el-form-item>
+        
+        <!-- 唇语同步类型 -->
+        <el-form-item label="唇语同步类型" v-if="translateForm.lipsync_enabled">
+          <el-radio-group v-model="translateForm.lip_sync_type">
+            <el-radio :label="0">标准</el-radio>
+            <el-radio :label="1">增强</el-radio>
+            <el-radio :label="2">专业</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        
+        <el-form-item label="术语库">
+          <el-select
+            v-model="translateForm.terminology_ids"
+            placeholder="请选择术语库（可选，可多选）"
+            multiple
+            clearable
+            filterable
+            style="width: 100%;"
+            @focus="loadTerminologies"
+            @visible-change="handleTerminologyVisible">
+            <el-option 
+              v-for="term in terminologies" 
+              :key="term.id" 
+              :label="term.title" 
+              :value="term.id">
+              <div class="terminology-option">
+                <span class="terminology-title">{{ term.title }}</span>
+                <span class="terminology-count">({{ term.term_count || 0 }}条术语)</span>
+              </div>
+            </el-option>
+          </el-select>
+          <div class="form-tip">选择术语库可以提高翻译的专业性和准确性</div>
+          <div class="form-tip" style="color: #909399; font-size: 12px;">
+            当前加载了 {{ terminologies.length }} 个术语库
+          </div>
         </el-form-item>
         
         <el-form-item label="发言者人数">
@@ -251,6 +373,18 @@
             </el-option>
           </el-select>
         </el-form-item>
+        
+        <el-form-item label="翻译风格">
+          <el-select v-model="translateForm.style" placeholder="请选择翻译风格" style="width: 100%;">
+            <el-option
+              v-for="option in styleOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value">
+            </el-option>
+          </el-select>
+          <div class="form-tip">选择翻译风格，影响语音的情感表达</div>
+        </el-form-item>
       </el-form>
       
       <template #footer>
@@ -259,7 +393,8 @@
         <el-button 
           type="primary" 
           @click="startTranslate"
-          :loading="isTranslating">
+          :loading="isTranslating"
+          :disabled="isTranslating">
           翻译
         </el-button>
         </div>
@@ -273,6 +408,7 @@ import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/store/user'
 import { videoApi } from '@/api/video'
+import request from '@/utils/request'
 
 export default {
   name: 'VideoTranslate',
@@ -294,6 +430,17 @@ export default {
     const translateDialogVisible = ref(false)
     const translateFormRef = ref()
     
+    // 新增：AI语音相关数据
+    const availableVoices = ref([])
+    const selectedVoice = ref(null)
+    const showVoiceSelection = ref(false)
+    const voiceMap = ref({}) // 存储每个语言对应的语音ID
+    const languageVoices = ref({}) // 存储每个语言对应的可用语音列表
+    const languageVoicesLoading = ref({}) // 存储每个语言的加载状态
+    
+    // 新增：术语库相关数据
+    const terminologies = ref([])
+    
     // 上传配置
     const upload_url = '/api/video/upload'
     const video_accepts = '.mp4,.avi,.mov,.wmv,.flv,.mkv,.webm'
@@ -302,18 +449,43 @@ export default {
     const translateForm = reactive({
       video_id: null,
       source_language: 'auto',
-      target_language: '',
+      target_languages: [], // 改为数组支持多选
       speaker_num: 0,
-      lipsync_enabled: false
+      lipsync_enabled: false,
+      lip_sync_type: 0, // 新增唇语同步类型
+      voices_map: {}, // 改为对象，存储每个语言对应的语音ID
+      terminology_ids: [], // 新增术语库ID列表
+      style: 'professional' // 新增翻译风格参数
     })
+    
+    // 翻译风格选项
+    const styleOptions = [
+      { value: 'affectionate', label: '深情 (Affectionate)' },
+      { value: 'angry', label: '愤怒 (Angry)' },
+      { value: 'calm', label: '平静 (Calm)' },
+      { value: 'cheerful', label: '愉快 (Cheerful)' },
+      { value: 'depressed', label: '沮丧 (Depressed)' },
+      { value: 'disgruntled', label: '不满 (Disgruntled)' },
+      { value: 'embarrassed', label: '尴尬 (Embarrassed)' },
+      { value: 'empathetic', label: '共情 (Empathetic)' },
+      { value: 'excited', label: '兴奋 (Excited)' },
+      { value: 'fearful', label: '恐惧 (Fearful)' },
+      { value: 'friendly', label: '友好 (Friendly)' },
+      { value: 'unfriendly', label: '不友好 (Unfriendly)' },
+      { value: 'sad', label: '悲伤 (Sad)' },
+      { value: 'serious', label: '严肃 (Serious)' },
+      { value: 'relaxed', label: '放松 (Relaxed)' },
+      { value: 'professional', label: '专业 (Professional)' }
+    ]
     
     // 表单验证规则
     const translateRules = {
       source_language: [
         { required: true, message: '请选择源语言', trigger: 'change' }
       ],
-      target_language: [
-        { required: true, message: '请选择目标语言', trigger: 'change' }
+      target_languages: [
+        { required: true, message: '请选择目标语言', trigger: 'change' },
+        { type: 'array', min: 1, message: '至少选择一个目标语言', trigger: 'change' }
       ]
     }
     
@@ -321,7 +493,7 @@ export default {
     const canStartTranslate = computed(() => {
       return currentVideo.value && 
              translateForm.source_language && 
-             translateForm.target_language &&
+             translateForm.target_languages.length > 0 &&
              !isTranslating.value
     })
     
@@ -381,10 +553,22 @@ export default {
       Object.assign(translateForm, {
         video_id: null,
         source_language: 'auto',
-        target_language: '',
+        target_languages: [], // 改为数组
         speaker_num: 0,
-        lipsync_enabled: false
+        lipsync_enabled: false,
+        lip_sync_type: 0, // 新增
+        voices_map: {}, // 改为对象
+        terminology_ids: [], // 新增术语库ID列表
+        style: 'professional' // 新增翻译风格参数
       })
+      
+      // 重置语音选择
+      selectedVoice.value = null
+      availableVoices.value = []
+      showVoiceSelection.value = false
+      voiceMap.value = {}
+      languageVoices.value = {}
+      languageVoicesLoading.value = {}
     }
     
     // 打开翻译设置弹窗
@@ -393,6 +577,16 @@ export default {
         ElMessage.warning('请先上传视频')
         return
       }
+      
+      // 重置表单
+      resetForm()
+      
+      // 设置视频ID
+      translateForm.video_id = currentVideo.value.id
+      
+      // 加载术语库
+      loadTerminologies()
+      
       translateDialogVisible.value = true
     }
     
@@ -420,7 +614,32 @@ export default {
       
       isTranslating.value = true
       try {
-        const response = await videoApi.startTranslate(translateForm)
+        // 构建请求数据
+        const requestData = {
+          ...translateForm,
+          voices_map: voiceMap.value // 使用语音映射对象
+        }
+        
+        // 添加调试日志
+        console.log('发送翻译请求数据:', requestData)
+        console.log('当前视频:', currentVideo.value)
+        console.log('语音映射:', voiceMap.value)
+        
+        // 验证必要参数
+        if (!requestData.video_id) {
+          ElMessage.error('视频ID不能为空')
+          isTranslating.value = false
+          return
+        }
+        if (!requestData.target_languages || requestData.target_languages.length === 0) {
+          ElMessage.error('请选择目标语言')
+          isTranslating.value = false
+          return
+        }
+        
+        // 语音选择默认可选，只有当API返回错误时才提示必选
+        
+        const response = await videoApi.startTranslate(requestData)
         if (response.code === 200) {
           ElMessage.success('翻译任务已启动!')
           translateDialogVisible.value = false
@@ -434,7 +653,12 @@ export default {
             startAutoRefresh()
           }, 1000)
         } else {
-          ElMessage.error(response.message || '启动翻译失败')
+          // 检查是否是语音必选错误
+          if (response.message && response.message.includes('必须选择AI语音')) {
+            ElMessage.error(response.message)
+          } else {
+            ElMessage.error(response.message || '启动翻译失败')
+          }
         }
       } catch (error) {
         console.error('Start translate error:', error)
@@ -509,6 +733,110 @@ export default {
           { lang_code: 'es', lang_name: 'Spanish' },
           { lang_code: 'ru', lang_name: 'Russian' }
         ]
+      }
+    }
+    
+    // 新增：加载AI语音列表（为特定语言）
+    const loadVoices = async (languageCode) => {
+      try {
+        // 如果已经加载过该语言的语音，直接返回
+        if (languageVoices.value[languageCode]) {
+          return languageVoices.value[languageCode]
+        }
+        
+        // 设置加载状态
+        languageVoicesLoading.value[languageCode] = true
+        
+        const params = { page: 1, size: 100 }
+        if (languageCode) {
+          params.language_code = languageCode
+        }
+        
+        const response = await videoApi.getVoices(params)
+        if (response.code === 200) {
+          const voices = response.data.result || []
+          languageVoices.value[languageCode] = voices
+          return voices
+        } else {
+          languageVoices.value[languageCode] = []
+          return []
+        }
+      } catch (error) {
+        console.error('Load voices error:', error)
+        languageVoices.value[languageCode] = []
+        return []
+      } finally {
+        // 清除加载状态
+        languageVoicesLoading.value[languageCode] = false
+      }
+    }
+    
+    // 新增：处理目标语言变化，为每个语言加载对应的语音
+    const handleTargetLanguagesChange = async (languages) => {
+      // 获取之前的语言列表
+      const previousLanguages = Object.keys(voiceMap.value)
+      
+      // 找出被移除的语言
+      const removedLanguages = previousLanguages.filter(lang => !languages.includes(lang))
+      
+      // 只清空被移除的语言的语音映射
+      removedLanguages.forEach(lang => {
+        delete voiceMap.value[lang]
+      })
+      
+      // 找出新增的语言
+      const newLanguages = languages.filter(lang => !previousLanguages.includes(lang))
+      
+      // 只为新增的语言加载语音列表
+      for (const langCode of newLanguages) {
+        await loadVoices(langCode)
+      }
+    }
+    
+    // 新增：处理单个语言的语音选择变化
+    const handleVoiceChangeForLanguage = (langCode, voiceId) => {
+      if (voiceId) {
+        voiceMap.value[langCode] = voiceId
+      } else {
+        delete voiceMap.value[langCode]
+      }
+    }
+    
+    // 新增：获取某个语言的可用语音列表
+    const getVoicesForLanguage = (langCode) => {
+      return languageVoices.value[langCode] || []
+    }
+    
+    // 新增：加载术语库列表
+    const loadTerminologies = async () => {
+      try {
+        console.log('开始加载术语库...')
+        const response = await request({
+          url: '/comparison/my',
+          method: 'get'
+        })
+        
+        console.log('术语库API响应:', response)
+        
+        if (response.code === 200) {
+          // 修复数据路径：API返回的是 data.data，不是 data.comparisons
+          terminologies.value = response.data.data || response.data.comparisons || []
+          console.log('加载术语库成功:', terminologies.value.length, '个术语库')
+          console.log('术语库详情:', terminologies.value)
+        } else {
+          console.error('加载术语库失败:', response.message)
+          terminologies.value = []
+        }
+      } catch (error) {
+        console.error('加载术语库异常:', error)
+        terminologies.value = []
+      }
+    }
+    
+    // 新增：处理术语库下拉框显示变化
+    const handleTerminologyVisible = (visible) => {
+      if (visible && terminologies.value.length === 0) {
+        loadTerminologies()
       }
     }
     
@@ -607,9 +935,12 @@ export default {
       }
       translateForm.video_id = video.id
       translateForm.source_language = video.source_language
-      translateForm.target_language = video.target_language
+      translateForm.target_languages = video.target_language ? [video.target_language] : []
       translateForm.lipsync_enabled = video.lipsync_enabled
       translateForm.speaker_num = 0
+      
+      // 打开翻译设置弹窗
+      openTranslateDialog()
     }
     
     const deleteVideo = async (video) => {
@@ -806,6 +1137,20 @@ export default {
       translateDialogVisible,
       canStartTranslate,
       
+      // 新增：AI语音相关数据
+      availableVoices,
+      selectedVoice,
+      showVoiceSelection,
+      voiceMap,
+      languageVoices,
+      languageVoicesLoading,
+      
+      // 新增：术语库相关数据
+      terminologies,
+      
+      // 新增：翻译风格选项
+      styleOptions,
+      
       // 方法
       beforeUpload,
       uploadSuccess,
@@ -817,6 +1162,13 @@ export default {
       openTranslateDialog,
       startTranslate,
       loadVideoList,
+      loadLanguages,
+      loadVoices, // 新增
+      handleTargetLanguagesChange, // 新增
+      handleVoiceChangeForLanguage, // 新增
+      getVoicesForLanguage, // 新增
+      loadTerminologies, // 新增
+      handleTerminologyVisible, // 新增
       previewVideo,
       downloadVideo,
       renewVideo,
@@ -840,16 +1192,190 @@ export default {
 
 <style scoped>
 .page-center {
-  padding: 20px;
-  max-width: 1200px;
+  padding: 20px 40px; /* 左右增加更多留白 */
+  max-width: 1600px;
   margin: 0 auto;
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
+/* 新增：语音选择相关样式 */
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.voice-selection-container {
+  width: 100%;
+}
+
+.voice-selection-item {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e4e7ed;
+}
+
+.voice-selection-item:last-child {
+  margin-bottom: 0;
+}
+
+.voice-selection-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+  margin-bottom: 8px;
+}
+
+.voice-selection-label span {
+  display: inline-block;
+  padding: 4px 8px;
+  background: #409EFF;
+  color: white;
+  border-radius: 4px;
+}
+
+.voice-selection {
+  width: 100%;
+}
+
+.voice-option {
+  padding: 8px 0;
+}
+
+.voice-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.voice-name {
+  font-weight: 500;
+  color: #303133;
+}
+
+.voice-gender {
+  font-size: 12px;
+  color: #909399;
+  background: #f4f4f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.voice-details {
+  font-size: 12px;
+  color: #606266;
+}
+
+.voice-language {
+  margin-right: 8px;
+}
+
+.voice-style {
+  color: #909399;
+}
+
+.voice-preview {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #e4e7ed;
+}
+
+.voice-preview-info {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.voice-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  margin-right: 12px;
+  object-fit: cover;
+}
+
+.voice-preview-info .voice-details h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  color: #303133;
+}
+
+.voice-preview-info .voice-details p {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: #606266;
+}
+
+.voice-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.preview-audio {
+  width: 100%;
+  height: 32px;
+}
+
+/* 语音加载状态样式 */
+.voice-loading-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: #909399;
+  font-size: 14px;
+}
+
+.voice-loading-empty i {
+  margin-right: 8px;
+  font-size: 16px;
+  animation: rotating 2s linear infinite;
+}
+
+@keyframes rotating {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* 术语库选择器样式 */
+.terminology-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.terminology-title {
+  font-weight: 500;
+  color: #303133;
+}
+
+.terminology-count {
+  font-size: 12px;
+  color: #909399;
+  background: #f4f4f5;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .container {
   background: #fff;
   border-radius: 8px;
-  padding: 24px;
+  padding: 24px 32px; /* 左右增加更多内边距 */
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  width: 100%;
+  overflow-x: auto;
 }
 
 .upload-container {
@@ -1031,10 +1557,27 @@ export default {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-shrink: 0; /* 防止按钮被压缩 */
+  margin-right: 20px; /* 添加右边距 */
+}
+
+.filter-box .el-button {
+  white-space: nowrap; /* 防止按钮文字换行 */
+  min-width: auto; /* 确保按钮有足够宽度 */
 }
 
 .video-table {
   margin-bottom: 20px;
+  width: 100%;
+  min-width: 1200px;
+}
+
+.video-table .el-table {
+  width: 100%;
+}
+
+.video-table .el-table__body-wrapper {
+  overflow-x: auto;
 }
 
 .filename-cell {
@@ -1101,6 +1644,50 @@ export default {
   
   .phone_show {
     display: none;
+  }
+}
+
+/* 确保页面可以滚动 */
+body {
+  overflow-y: auto;
+}
+
+/* 表格滚动优化 */
+.video-table .el-table__body-wrapper {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+/* 响应式优化 */
+@media (max-width: 1400px) {
+  .page-center {
+    max-width: 1400px;
+    padding: 20px 30px; /* 中等屏幕减少留白 */
+  }
+}
+
+@media (max-width: 1200px) {
+  .page-center {
+    max-width: 1200px;
+    padding: 20px 24px; /* 小屏幕进一步减少留白 */
+  }
+  
+  .container {
+    padding: 24px 28px; /* 小屏幕减少容器内边距 */
+  }
+  
+  .video-table {
+    min-width: 1000px;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-center {
+    padding: 15px 16px; /* 移动端最小留白 */
+  }
+  
+  .container {
+    padding: 20px 16px; /* 移动端最小内边距 */
   }
 }
 </style>

@@ -18,7 +18,10 @@ export const videoApi = {
     return request({
       url: '/video/translate',
       method: 'post',
-      data
+      data,
+      headers: {
+        'Content-Type': 'application/json'
+      }
     })
   },
 
@@ -61,6 +64,15 @@ export const videoApi = {
     return request({
       url: '/video/languages',
       method: 'get'
+    })
+  },
+
+  // 获取AI语音列表
+  getVoices: (params) => {
+    return request({
+      url: '/video/voices',
+      method: 'get',
+      params
     })
   }
 }

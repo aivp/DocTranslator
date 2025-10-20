@@ -38,7 +38,7 @@ from app.resources.api.translate import TranslateListResource, TranslateSettingR
     TranslateRandDownloadResource, Doc2xCheckResource, TranslateStartResource, \
     TranslateDownloadAllResource, TranslateProgressResource
 from app.resources.api.video import VideoUploadResource, VideoTranslateResource, VideoStatusResource, \
-    VideoListResource, VideoDeleteResource, VideoDownloadResource, VideoLanguagesResource, VideoWebhookResource, VideoTokenInfoResource
+    VideoListResource, VideoDeleteResource, VideoDownloadResource, VideoLanguagesResource, VideoVoicesResource, VideoWebhookResource, VideoTokenInfoResource
 
 
 def register_routes(api):
@@ -138,6 +138,7 @@ def register_routes(api):
     api.add_resource(VideoDeleteResource, '/api/video/<int:video_id>')
     api.add_resource(VideoDownloadResource, '/api/video/<int:video_id>/download')
     api.add_resource(VideoLanguagesResource, '/api/video/languages')
+    api.add_resource(VideoVoicesResource, '/api/video/voices')
     api.add_resource(VideoWebhookResource, '/api/video/webhook/<int:video_id>')
     api.add_resource(VideoTokenInfoResource, '/api/video/token-info')
 
