@@ -385,6 +385,17 @@
           </el-select>
           <div class="form-tip">选择翻译风格，影响语音的情感表达</div>
         </el-form-item>
+        
+        <el-form-item label="字幕设置">
+          <el-select v-model="translateForm.caption_type" placeholder="请选择字幕类型" style="width: 100%;">
+            <el-option :label="'无字幕'" :value="0"></el-option>
+            <el-option :label="'添加原始字幕'" :value="1"></el-option>
+            <el-option :label="'添加目标字幕'" :value="2"></el-option>
+            <el-option :label="'翻译并替换原始字幕'" :value="3"></el-option>
+            <el-option :label="'添加翻译字幕'" :value="4"></el-option>
+          </el-select>
+          <div class="form-tip">选择是否在视频中添加字幕，以及字幕的显示方式</div>
+        </el-form-item>
       </el-form>
       
       <template #footer>
@@ -455,7 +466,8 @@ export default {
       lip_sync_type: 0, // 新增唇语同步类型
       voices_map: {}, // 改为对象，存储每个语言对应的语音ID
       terminology_ids: [], // 新增术语库ID列表
-      style: 'professional' // 新增翻译风格参数
+      style: 'professional', // 新增翻译风格参数
+      caption_type: 0 // 新增字幕类型：0无，1原始字幕，2目标字幕，3翻译替换，4翻译字幕
     })
     
     // 翻译风格选项
@@ -559,7 +571,8 @@ export default {
         lip_sync_type: 0, // 新增
         voices_map: {}, // 改为对象
         terminology_ids: [], // 新增术语库ID列表
-        style: 'professional' // 新增翻译风格参数
+        style: 'professional', // 新增翻译风格参数
+        caption_type: 0 // 新增字幕类型
       })
       
       // 重置语音选择

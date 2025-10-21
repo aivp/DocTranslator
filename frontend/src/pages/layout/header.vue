@@ -24,10 +24,10 @@
               <div class="icon_svg"><svg-icon icon-class="corpus" /></div>
               <span class="pc_show">语料库</span>
             </div>
-            <!-- <div class="btn_set" @click="funOpenVideo">
+            <div class="btn_set" @click="funOpenVideo">
               <div class="icon_svg"><svg-icon icon-class="video" /></div>
               <span class="pc_show">视频翻译</span>
-            </div> -->
+            </div>
             <div class="btn_set" @click="funOpenSet">
               <div class="icon_svg"><svg-icon icon-class="setting" /></div>
               <span class="pc_show">翻译设置</span>
