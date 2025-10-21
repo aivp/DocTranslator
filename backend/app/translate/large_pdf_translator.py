@@ -213,14 +213,19 @@ class LargePDFTranslator:
         
         # 创建临时目录，按用户ID隔离
         if temp_dir is None:
-            # 在目标文件目录下创建用户隔离的临时目录
-            base_dir = os.path.dirname(input_pdf_path)
+            # 获取uploads基础目录（避免在用户的上传文件目录中创建临时文件）
+            # 输入文件路径格式：/app/storage/uploads/user_2/2025-10-21/file.pdf
+            # 临时文件应创建在：/app/storage/uploads/temp_user_2/translate_xxx/
+            base_dir = os.path.dirname(input_pdf_path)  # /app/storage/uploads/user_2/2025-10-21
+            date_dir = os.path.dirname(base_dir)  # /app/storage/uploads/user_2
+            uploads_base = os.path.dirname(date_dir)  # /app/storage/uploads
+            
             if user_id:
                 # 使用用户ID创建隔离目录
-                temp_dir = os.path.join(base_dir, f"temp_user_{user_id}", f"translate_{uuid.uuid4().hex[:8]}")
+                temp_dir = os.path.join(uploads_base, f"temp_user_{user_id}", f"translate_{uuid.uuid4().hex[:8]}")
             else:
                 # 如果没有用户ID，使用默认方式
-                temp_dir = os.path.join(base_dir, f"temp_translate_{uuid.uuid4().hex[:8]}")
+                temp_dir = os.path.join(uploads_base, f"temp_translate_{uuid.uuid4().hex[:8]}")
         
         self.temp_dir = temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)

@@ -193,7 +193,8 @@ class TranslateEngine:
             'prompt_id': task.prompt_id,
             'doc2x_api_key':task.doc2x_secret_key,
             'extension': os.path.splitext(task.origin_filepath)[1],  # 动态获取文件扩展名
-            'pdf_translate_method': getattr(task, 'pdf_translate_method', None)  # PDF翻译方法
+            'pdf_translate_method': getattr(task, 'pdf_translate_method', None),  # PDF翻译方法
+            'user_id': task.customer_id  # 添加用户ID，用于文件隔离
         }
 
         # 加载术语对照表（支持多个术语库，逗号分隔）

@@ -49,8 +49,8 @@ class FileUploadResource(Resource):
             return APIResponse.error('用户存储空间不足', 403)
 
         try:
-            # 生成存储路径
-            save_dir = self.get_upload_dir()
+            # 生成存储路径（按用户ID隔离）
+            save_dir = self.get_upload_dir(user_id)
             filename = file.filename
 
             # 直接使用原始文件名
@@ -116,11 +116,11 @@ class FileUploadResource(Resource):
         return file_size <= MAX_FILE_SIZE
 
     @staticmethod
-    def get_upload_dir():
-        """获取按日期分类的上传目录"""
+    def get_upload_dir(user_id):
+        """获取按用户ID和日期分类的上传目录"""
         # 获取上传根目录
         base_dir = Path(current_app.config['UPLOAD_BASE_DIR'])
-        upload_dir = base_dir / 'uploads' / datetime.now().strftime('%Y-%m-%d')
+        upload_dir = base_dir / 'uploads' / f'user_{user_id}' / datetime.now().strftime('%Y-%m-%d')
 
         # 如果目录不存在则创建
         if not upload_dir.exists():

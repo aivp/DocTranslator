@@ -1777,14 +1777,25 @@ class DirectPDFTranslator:
             os.makedirs(output_dir, exist_ok=True)
             
             # 为每个翻译任务创建唯一的临时目录，避免批量翻译时文件冲突
+            # 临时文件应创建在uploads目录下，与用户的翻译结果目录分开
             import uuid
+            from flask import current_app
+            
+            # 获取uploads基础目录
+            # output_file 格式：/app/storage/translate/user_2/2025-10-21/file.pdf
+            # 临时文件应创建在：/app/storage/uploads/temp_user_2/translate_xxx/
+            base_dir = os.path.dirname(output_file)  # /app/storage/translate/user_2/2025-10-21
+            user_dir = os.path.dirname(base_dir)  # /app/storage/translate/user_2
+            storage_base = os.path.dirname(os.path.dirname(user_dir))  # /app/storage
+            uploads_base = os.path.join(storage_base, 'uploads')
+            
             if self.user_id:
                 # 使用用户ID创建隔离目录
                 temp_dir_name = f"temp_user_{self.user_id}_{uuid.uuid4().hex[:8]}"
             else:
                 # 如果没有用户ID，使用默认方式
                 temp_dir_name = f"temp_{uuid.uuid4().hex[:8]}"
-            temp_dir = os.path.join(output_dir, temp_dir_name)
+            temp_dir = os.path.join(uploads_base, temp_dir_name)
             os.makedirs(temp_dir, exist_ok=True)
             print(f"📁 创建临时目录: {temp_dir}")
             print(f"👤 用户ID: {self.user_id if self.user_id else 'N/A'}")
