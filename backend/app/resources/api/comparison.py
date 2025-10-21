@@ -645,8 +645,8 @@ class ExportComparisonResource(Resource):
         # 查询术语表
         comparison = Comparison.query.get_or_404(id)
         logger.info(f"Comparison customer_id: {comparison.customer_id}, current_user_id: {current_user_id}")
-        # 检查术语表是否共享或属于当前用户
-        if comparison.share_flag == 'Y' or comparison.customer_id != int(current_user_id):
+        # 检查术语表是否未共享且不属于当前用户
+        if comparison.share_flag != 'Y' and comparison.customer_id != int(current_user_id):
             return {'message': '术语表未共享或无权限访问', 'code': 403}, 403
 
         # 从comparison_sub表获取术语数据

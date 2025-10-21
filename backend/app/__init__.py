@@ -19,6 +19,10 @@ def create_app(config_class=None):
     safe_init_mysql(app,'app/init.sql')
     # 初始化扩展（扩展内部会注册路由）
     init_extensions(app)
+    
+    # 设置内存监控器
+    from app.utils.memory_manager import setup_memory_monitor
+    setup_memory_monitor(app)
 
     # 首先注册JWT相关异常处理器（优先级最高）
     from flask_jwt_extended.exceptions import JWTExtendedException

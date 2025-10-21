@@ -96,3 +96,13 @@ def get_running_tasks() -> list:
     with _task_lock:
         return list(_task_events.keys())
 
+def is_any_task_running() -> bool:
+    """
+    检查是否有任何任务正在运行
+    
+    Returns:
+        bool: 是否有任务正在运行
+    """
+    with _task_lock:
+        return len(_task_events) > 0
+
