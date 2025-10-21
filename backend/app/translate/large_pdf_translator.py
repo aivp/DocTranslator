@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from multiprocessing import Process, Queue, cpu_count
 from multiprocessing import set_start_method
+import ctypes
 
 # 设置进程启动方法（仅在主进程中设置一次）
 try:
@@ -27,6 +28,21 @@ except RuntimeError:
     pass  # 已经设置过了
 
 logger = logging.getLogger(__name__)
+
+def force_memory_release():
+    """强制释放内存到操作系统"""
+    try:
+        import gc
+        gc.collect()
+        # 尝试调用glibc的malloc_trim释放未使用的内存
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+            logger.info("🧹 已调用malloc_trim释放内存")
+        except Exception as e:
+            logger.debug(f"malloc_trim不可用: {e}")
+    except Exception as e:
+        logger.warning(f"强制释放内存失败: {e}")
 
 # 全局进程池管理器
 _process_pool = None
@@ -42,6 +58,19 @@ def get_process_pool():
             _process_pool = ThreadPoolExecutor(max_workers=max_processes)
             logger.info(f"创建进程池，最大进程数: {max_processes}")
         return _process_pool
+
+def shutdown_process_pool():
+    """关闭全局进程池"""
+    global _process_pool
+    with _process_pool_lock:
+        if _process_pool is not None:
+            try:
+                _process_pool.shutdown(wait=True)
+                logger.info("全局进程池已关闭")
+            except Exception as e:
+                logger.warning(f"关闭进程池失败: {e}")
+            finally:
+                _process_pool = None
 
 
 def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir):
@@ -972,6 +1001,9 @@ class LargePDFTranslator:
                 # 强制垃圾回收
                 import gc
                 gc.collect()
+                
+                # 强制释放内存到操作系统
+                force_memory_release()
                 
                 logger.info("🧹 翻译完成后内存已彻底清理")
             except Exception as cleanup_error:

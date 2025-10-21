@@ -85,6 +85,16 @@ class TranslateEngine:
                 # 释放内存
                 import gc
                 gc.collect()
+                
+                # 强制释放内存到操作系统
+                try:
+                    import ctypes
+                    libc = ctypes.CDLL("libc.so.6")
+                    libc.malloc_trim(0)
+                    app.logger.info(f"🧹 任务 {task_id} 已调用malloc_trim释放内存")
+                except Exception as e:
+                    app.logger.debug(f"malloc_trim不可用: {e}")
+                
                 app.logger.debug(f"任务 {task_id} 内存已释放")
                 
                 db.session.remove()  # 清理线程局部session

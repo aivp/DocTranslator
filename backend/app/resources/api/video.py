@@ -316,7 +316,8 @@ class VideoTranslateResource(Resource):
                 voice_id=data.get('voice_id'),
                 voices_map=voices_map,  # 传递语音映射
                 terminology_ids=terminology_ids,  # 传递术语库
-                style=data.get('style', 'professional')  # 传递翻译风格
+                style=data.get('style', 'professional'),  # 传递翻译风格
+                caption_type=data.get('caption_type', 0)  # 传递字幕类型
             )
             
             # 处理Akool返回的结果

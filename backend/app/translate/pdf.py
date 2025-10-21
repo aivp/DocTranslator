@@ -1325,11 +1325,11 @@ def start_direct_pdf_translation(trans):
             doc.close()
             print(f"📄 PDF总页数: {total_pages}")
             
-            if total_pages > 20:
-                print("📊 检测到大文件（超过20页），使用多线程分批处理")
+            if total_pages > 25:
+                print("📊 检测到大文件（超过25页），使用多线程分批处理")
                 return start_large_pdf_translation(trans, total_pages)
             else:
-                print("📊 检测到小文件（20页以内），使用标准处理")
+                print("📊 检测到小文件（25页以内），使用标准处理")
                 return start_small_pdf_translation(trans)
                 
         except Exception as e:
@@ -1343,7 +1343,7 @@ def start_direct_pdf_translation(trans):
 
 
 def start_small_pdf_translation(trans):
-    """小文件PDF翻译方法（20页以内）"""
+    """小文件PDF翻译方法（25页以内）"""
     try:
         print("🎯 使用小文件翻译方法")
         
@@ -1411,7 +1411,7 @@ def start_large_pdf_translation(trans, total_pages):
         # 创建大文件翻译器，使用与小PDF相同的线程配置
         translator = LargePDFTranslator(
             input_pdf_path=str(original_path),
-            batch_size=10,  # 增加批次大小，减少批次数量
+            batch_size=5,  # 减小批次大小，降低内存占用
             max_workers=30,  # 与小PDF保持一致，使用系统默认30线程
             target_lang=trans.get('lang', 'zh'),  # 使用 'lang' 字段与翻译函数一致
             user_id=trans.get('user_id')  # 传递用户ID用于临时文件隔离

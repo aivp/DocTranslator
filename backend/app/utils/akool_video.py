@@ -175,7 +175,8 @@ class AkoolVideoService:
                           target_languages: List[str], lipsync: bool = False, 
                           webhook_url: str = None, speaker_num: int = 0,
                           voice_id: str = None, voices_map: Dict = None, 
-                          terminology_ids: List = None, style: str = 'professional') -> Dict:
+                          terminology_ids: List = None, style: str = 'professional',
+                          caption_type: int = 0) -> Dict:
         """创建视频翻译任务（支持多语言和语音映射）"""
         # 如果target_languages是字符串，转换为列表
         if isinstance(target_languages, str):
@@ -189,7 +190,7 @@ class AkoolVideoService:
             'lipsync': lipsync,
             'speaker_num': speaker_num,
             'remove_bgm': True,  # 添加背景音乐移除参数
-            'caption_type': 2,  # 添加字幕类型参数
+            'caption_type': caption_type,  # 使用传入的字幕类型参数
             'caption_url': ''  # 添加字幕URL参数
         }
         
