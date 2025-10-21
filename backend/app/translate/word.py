@@ -1366,7 +1366,14 @@ def run_translation(trans, texts, max_threads):
         logger.info("没有需要翻译的内容")
         return
 
-    event = threading.Event()
+    # 如果 trans 中有 cancel_event，使用它；否则创建新的 event
+    cancel_event = trans.get('cancel_event')
+    if cancel_event:
+        event = cancel_event
+        logger.info("使用传入的取消事件")
+    else:
+        event = threading.Event()
+        logger.info("创建新的取消事件")
     
     with print_lock:
         logger.info(f"开始翻译 {len(texts)} 个文本片段")

@@ -246,7 +246,7 @@ class TranslateStartResource(Resource):
             # 更新用户已用存储空间
             customer.storage += int(translate.size)
             db.session.commit()
-            # with current_app.app_context():  # 确保在应用上下文中运行
+            
             # 启动翻译引擎，传入 current_app
             TranslateEngine(translate.id).execute()
 
@@ -566,6 +566,15 @@ class TranslateDeleteResource(Resource):
             # 记录删除前的存储空间
             old_storage = customer.storage
             file_size = translate.size or 0
+            
+            # 如果任务正在运行，先取消任务
+            from app.utils.task_manager import cancel_task, is_task_running
+            if is_task_running(id):
+                current_app.logger.info(f"任务 {id} 正在运行，尝试取消...")
+                if cancel_task(id):
+                    current_app.logger.info(f"已取消正在运行的任务 {id}")
+                else:
+                    current_app.logger.warning(f"取消任务 {id} 失败")
             
             # 删除物理文件
             if translate.origin_filepath and os.path.exists(translate.origin_filepath):

@@ -425,7 +425,14 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
 
 
 def get(trans, event, texts, index):
+    # 检查是否被取消
     if event.is_set():
+        exit(0)
+    
+    # 检查全局取消事件（如果存在）
+    cancel_event = trans.get('cancel_event')
+    if cancel_event and cancel_event.is_set():
+        logging.info(f"任务 {trans.get('id')} 已被用户取消")
         exit(0)
     # 恢复线程数为30，提高翻译效率
     max_threads = 30

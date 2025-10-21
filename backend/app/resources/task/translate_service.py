@@ -1,11 +1,12 @@
 import os
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Event
 from flask import current_app
 from app.extensions import db
 from app.models.translate import Translate
 from app.models.comparison import Comparison, ComparisonSub
 from app.models.prompt import Prompt
+from app.utils.task_manager import register_task, unregister_task
 from .main import main_wrapper
 import pytz
 
@@ -22,18 +23,41 @@ class TranslateEngine:
             with self.app.app_context():
                 task = self._prepare_task()
 
-            # 启动线程时传递真实app对象和任务ID
+            # 检查任务是否已经在运行（防止重复启动）
+            from app.utils.task_manager import is_task_running
+            if is_task_running(self.task_id):
+                self.app.logger.warning(f"任务 {self.task_id} 已经在运行，跳过重复启动")
+                return False
+
+            # 创建用于控制任务取消的Event
+            cancel_event = Event()
+            
+            # 注册任务到任务管理器
+            register_task(self.task_id, cancel_event)
+            self.app.logger.info(f"任务 {self.task_id} 已注册到任务管理器")
+
+            # 启动线程时传递真实app对象、任务ID和取消事件
             thr = Thread(
                 target=self._async_wrapper,
-                args=(self.app, self.task_id)
+                args=(self.app, self.task_id, cancel_event),
+                daemon=True  # 设置为守护线程，主进程退出时自动退出
             )
             thr.start()
             return True
         except Exception as e:
             self.app.logger.error(f"任务初始化失败: {str(e)}", exc_info=True)
+            # 如果启动失败，确保任务状态更新为失败
+            try:
+                task = Translate.query.get(self.task_id)
+                if task:
+                    task.status = 'failed'
+                    task.failed_reason = f'任务启动失败: {str(e)}'
+                    db.session.commit()
+            except:
+                pass
             return False
 
-    def _async_wrapper(self, app, task_id):
+    def _async_wrapper(self, app, task_id, cancel_event):
         """异步执行包装器"""
         with app.app_context():
             from app.extensions import db  # 确保在每个线程中导入
@@ -44,16 +68,47 @@ class TranslateEngine:
                     app.logger.error(f"任务 {task_id} 不存在")
                     return
 
-                # 执行核心逻辑
-                success = self._execute_core(task)
-                self._complete_task(success)
+                # 执行核心逻辑，传递取消事件
+                success = self._execute_core(task, cancel_event)
+                # 只在任务真正完成时更新状态
+                if success is not None:
+                    self._complete_task(success)
             except Exception as e:
                 app.logger.error(f"任务执行异常: {str(e)}", exc_info=True)
+                # 异常时也更新状态为失败
                 self._complete_task(False)
             finally:
+                # 注销任务并释放资源
+                unregister_task(task_id)
+                app.logger.info(f"任务 {task_id} 已从任务管理器注销")
+                
+                # 释放内存
+                import gc
+                gc.collect()
+                app.logger.debug(f"任务 {task_id} 内存已释放")
+                
                 db.session.remove()  # 清理线程局部session
+    
+    def _complete_task(self, success):
+        """更新任务状态（只在任务真正完成或失败时调用）"""
+        try:
+            task = db.session.query(Translate).get(self.task_id)
+            if task:
+                # 检查当前状态，如果已经是 done 或 failed，不重复更新
+                if task.status in ['done', 'failed']:
+                    self.app.logger.info(f"任务 {self.task_id} 状态已经是 {task.status}，跳过更新")
+                    return
+                
+                task.status = 'done' if success else 'failed'
+                task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
+                task.process = 100.00 if success else task.process  # 失败时保持当前进度
+                db.session.commit()
+                self.app.logger.info(f"任务 {self.task_id} 状态已更新为 {task.status}")
+        except Exception as e:
+            db.session.rollback()
+            self.app.logger.error(f"状态更新失败: {str(e)}", exc_info=True)
 
-    def _execute_core(self, task):
+    def _execute_core(self, task, cancel_event):
         """执行核心翻译逻辑"""
         try:
             # 初始化翻译配置
@@ -61,6 +116,9 @@ class TranslateEngine:
 
             # 构建符合要求的 trans 字典
             trans_config = self._build_trans_config(task)
+            
+            # 将取消事件添加到配置中
+            trans_config['cancel_event'] = cancel_event
 
             # 调用 main_wrapper 执行翻译
             return main_wrapper(task_id=task.id, config=trans_config,origin_path=task.origin_filepath)
@@ -84,7 +142,11 @@ class TranslateEngine:
         if not task.origin_filepath.lower().endswith('.pdf'):
             task.status = 'process'    # 非PDF文件：进行中
         task.start_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
+        
+        # 提交状态更新
         db.session.commit()
+        self.app.logger.info(f"任务 {self.task_id} 状态已更新为 {task.status}")
+        
         return task
 
     def _build_trans_config(self, task):
@@ -162,20 +224,6 @@ class TranslateEngine:
             import openai
             openai.api_base = task.api_url
             openai.api_key = task.api_key
-
-    def _complete_task(self, success):
-        """更新任务状态"""
-        try:
-            task = db.session.query(Translate).get(self.task_id)
-            if task:
-                task.status = 'done' if success else 'failed'
-                task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
-                task.process = 100.00 if success else 0.00
-                db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            self.app.logger.error(f"状态更新失败: {str(e)}", exc_info=True)
-
 
     def get_comparison(self, comparison_id):
         """
