@@ -434,6 +434,20 @@ def get(trans, event, texts, index):
     if cancel_event and cancel_event.is_set():
         logging.info(f"任务 {trans.get('id')} 已被用户取消")
         exit(0)
+    
+    # 检查暂停事件（如果存在）
+    from app.utils.task_manager import get_task_pause_event
+    pause_event = get_task_pause_event(trans.get('id'))
+    if pause_event and pause_event.is_set():
+        logging.info(f"任务 {trans.get('id')} 已被暂停，等待恢复...")
+        # 等待暂停事件被清除（恢复）
+        while pause_event.is_set():
+            time.sleep(0.1)  # 短暂等待
+            # 在等待期间也要检查取消事件
+            if cancel_event and cancel_event.is_set():
+                logging.info(f"任务 {trans.get('id')} 在暂停期间被取消")
+                exit(0)
+        logging.info(f"任务 {trans.get('id')} 已恢复")
     # 恢复线程数为30，提高翻译效率
     max_threads = 30
     translate_id = trans['id']

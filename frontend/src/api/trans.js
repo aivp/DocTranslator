@@ -130,3 +130,11 @@ export function doc2xQueryStatusService(data) {
     });
 }
 
+// 获取队列状态
+export function getQueueStatus() {
+    return request({
+        url: '/translate/queue-status',
+        method: 'GET'
+    });
+}
+

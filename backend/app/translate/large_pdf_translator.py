@@ -6,6 +6,13 @@
 """
 
 import fitz
+from app.utils.pymupdf_queue import (
+    safe_fitz_open, safe_fitz_close, safe_fitz_save, 
+    safe_fitz_new_document, safe_fitz_insert_pdf,
+    safe_fitz_get_text_blocks, safe_fitz_insert_text,
+    safe_fitz_insert_textbox, safe_fitz_new_rect,
+    PyMuPDFContext
+)
 import os
 import json
 import logging
@@ -95,16 +102,16 @@ def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir)
         successful_batches.sort(key=lambda x: x["start_page"])
         
         # 创建合并文档
-        merged_doc = fitz.open()
+        merged_doc = safe_fitz_new_document()
         batch_docs = []
         
         # 流式合并，避免同时打开所有PDF
         for batch_result in successful_batches:
             translated_pdf_path = batch_result["translated_pdf_path"]
             if os.path.exists(translated_pdf_path):
-                batch_doc = fitz.open(translated_pdf_path)
+                batch_doc = safe_fitz_open(translated_pdf_path)
                 batch_docs.append(batch_doc)
-                merged_doc.insert_pdf(batch_doc)
+                safe_fitz_insert_pdf(merged_doc, batch_doc, 0, batch_doc.page_count)
                 logger.info(f"合并批次 {batch_result['batch_num']}: 页面 {batch_result['start_page']}-{batch_result['end_page']-1}")
                 
                 # 每合并几个批次后强制垃圾回收
@@ -146,7 +153,7 @@ def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir)
         
         for batch_doc in batch_docs:
             try:
-                batch_doc.close()
+                safe_fitz_close(batch_doc)
             except Exception as e:
                 logger.warning(f"关闭批次PDF文档时出错: {e}")
 
@@ -641,19 +648,25 @@ class LargePDFTranslator:
                 except Exception as close_error:
                     logger.warning(f"关闭填充PDF文档时出错: {close_error}")
     
-    def compress_pdf(self, input_pdf_path, output_pdf_path):
+    def compress_pdf(self, input_pdf_path, output_pdf_path, cancel_event=None):
         """
         压缩PDF文件（使用独立进程执行，避免阻塞其他任务）
         
         Args:
             input_pdf_path: 输入PDF路径
             output_pdf_path: 输出PDF路径
+            cancel_event: 取消事件
         
         Returns:
             bool: 压缩是否成功
         """
         try:
             logger.info("开始压缩PDF（使用独立进程）...")
+            
+            # 检查是否已被取消
+            if cancel_event and cancel_event.is_set():
+                logger.info("PDF压缩被取消")
+                return False
             
             # 使用独立进程执行压缩操作，避免阻塞其他翻译任务
             # 虽然当前任务会等待压缩完成，但其他任务不会受影响
@@ -662,7 +675,19 @@ class LargePDFTranslator:
                 args=(input_pdf_path, output_pdf_path)
             )
             process.start()
-            process.join()  # 等待进程完成
+            
+            # 等待进程完成，但定期检查取消事件
+            while process.is_alive():
+                if cancel_event and cancel_event.is_set():
+                    logger.info("PDF压缩被取消，终止进程")
+                    process.terminate()
+                    process.join(timeout=5)  # 等待5秒让进程优雅退出
+                    if process.is_alive():
+                        process.kill()  # 强制杀死进程
+                    return False
+                time.sleep(0.1)  # 短暂等待
+            
+            process.join()  # 确保进程完全结束
             
             if process.exitcode == 0:
                 logger.info("PDF压缩完成")
@@ -733,7 +758,7 @@ class LargePDFTranslator:
             
             # 5. 压缩单个批次PDF
             compressed_pdf_path = os.path.join(self.temp_dir, f"batch_{batch_num}_compressed.pdf")
-            if not self.compress_pdf(translated_pdf_path, compressed_pdf_path):
+            if not self.compress_pdf(translated_pdf_path, compressed_pdf_path, trans.get('cancel_event')):
                 logger.warning(f"批次 {batch_num} 压缩失败，使用原文件")
                 compressed_pdf_path = translated_pdf_path
             
@@ -777,16 +802,22 @@ class LargePDFTranslator:
                 "thread_id": thread_id
             }
     
-    def merge_translated_pdfs(self, batch_results, output_path):
+    def merge_translated_pdfs(self, batch_results, output_path, cancel_event=None):
         """
         合并所有翻译后的PDF（使用独立进程执行，避免阻塞其他任务）
         
         Args:
             batch_results: 批次处理结果列表
             output_path: 最终输出路径
+            cancel_event: 取消事件
         """
         try:
             logger.info("开始合并翻译后的PDF（使用独立进程）...")
+            
+            # 检查是否已被取消
+            if cancel_event and cancel_event.is_set():
+                logger.info("PDF合并被取消")
+                return False
             
             # 过滤成功的批次
             successful_batches = [r for r in batch_results if r["status"] == "success"]
@@ -801,7 +832,19 @@ class LargePDFTranslator:
                 args=(successful_batches, output_path, self.input_pdf_path, self.temp_dir)
             )
             process.start()
-            process.join()  # 等待进程完成
+            
+            # 等待进程完成，但定期检查取消事件
+            while process.is_alive():
+                if cancel_event and cancel_event.is_set():
+                    logger.info("PDF合并被取消，终止进程")
+                    process.terminate()
+                    process.join(timeout=5)  # 等待5秒让进程优雅退出
+                    if process.is_alive():
+                        process.kill()  # 强制杀死进程
+                    return False
+                time.sleep(0.1)  # 短暂等待
+            
+            process.join()  # 确保进程完全结束
             
             if process.exitcode == 0:
                 logger.info(f"PDF合并完成: {output_path}")
@@ -878,6 +921,14 @@ class LargePDFTranslator:
             print("🚀 开始大文件多线程PDF翻译")
             print("=" * 60)
             
+            # 获取取消事件
+            cancel_event = trans.get('cancel_event')
+            
+            # 检查是否已被取消
+            if cancel_event and cancel_event.is_set():
+                print("翻译任务已被取消")
+                return False
+            
             # 获取总页数
             self.total_pages = self.get_total_pages()
             print(f"PDF总页数: {self.total_pages}")
@@ -900,6 +951,11 @@ class LargePDFTranslator:
             
             # 逐个处理批次，确保一个批次完全处理完后再处理下一个
             for batch_num in range(total_batches):
+                # 检查是否已被取消
+                if cancel_event and cancel_event.is_set():
+                    print("翻译任务已被取消，停止处理")
+                    return False
+                
                 start_page = batch_num * self.batch_size
                 end_page = min(start_page + self.batch_size, self.total_pages)
                 
@@ -947,7 +1003,7 @@ class LargePDFTranslator:
             self.update_progress(trans, 95.0)
             print(f"📊 进度: 合并中 (95.0%)")
             
-            final_output_file = self.merge_translated_pdfs(batch_results, output_file)
+            final_output_file = self.merge_translated_pdfs(batch_results, output_file, cancel_event)
             
             # 内存优化：合并后立即清理batch_results
             try:
@@ -1057,7 +1113,7 @@ class LargePDFTranslator:
             compressed_path = batch_output_path.replace('.pdf', '_compressed.pdf')
             print(f"🗜️ 压缩PDF: {compressed_path}")
             
-            self.compress_pdf(batch_output_path, compressed_path)
+            self.compress_pdf(batch_output_path, compressed_path, trans.get('cancel_event'))
             
             # 5. 删除未压缩的临时文件，只保留压缩文件
             if os.path.exists(batch_output_path):

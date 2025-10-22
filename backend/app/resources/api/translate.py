@@ -234,6 +234,23 @@ class TranslateStartResource(Resource):
             translate.doc2x_flag = data.get('doc2x_flag', 'N')
             translate.doc2x_secret_key = data.get('doc2x_secret_key', 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0')
             translate.pdf_translate_method = data.get('pdf_translate_method', 'direct')
+            # 流式翻译配置 - 硬编码策略
+            file_size_mb = float(translate.size) / (1024 * 1024) if translate.size else 0
+            
+            # 硬编码规则：
+            # 1. 文件大于5MB 或 字数超过10000 时启用流式翻译
+            # 2. 根据文件大小动态调整块大小
+            if file_size_mb > 5 or translate.word_count > 10000:
+                translate.use_streaming = True
+                if file_size_mb > 50:  # 超大文件
+                    translate.streaming_chunk_size = 5
+                elif file_size_mb > 20:  # 大文件
+                    translate.streaming_chunk_size = 8
+                else:  # 中等文件
+                    translate.streaming_chunk_size = 10
+            else:
+                translate.use_streaming = False
+                translate.streaming_chunk_size = 10
             if data['server'] == 'baidu':
                 translate.lang = data['to_lang']
                 translate.comparison_id = 1 if data.get('needIntervene', False) else None  # 使用术语库
@@ -243,18 +260,45 @@ class TranslateStartResource(Resource):
             # current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')
             # translate.created_at = current_time
             # 保存到数据库
-            # 更新用户已用存储空间
             customer.storage += int(translate.size)
             db.session.commit()
             
-            # 启动翻译引擎，传入 current_app
-            TranslateEngine(translate.id).execute()
-
-            return APIResponse.success({
-                "task_id": translate.id,
-                "uuid": translate.uuid,
-                "target_path": target_abs_path
-            })
+            # 检查资源状态，决定是直接启动还是加入队列
+            from app.utils.queue_manager import queue_manager
+            
+            can_start, reason = queue_manager.can_start_task(translate.origin_filepath)
+            
+            if can_start:
+                # 资源充足，直接启动
+                success = TranslateEngine(translate.id).execute()
+                if success:
+                    translate.status = 'process'  # 直接设为进行中
+                    db.session.commit()
+                    
+                    return APIResponse.success({
+                        "task_id": translate.id,
+                        "uuid": translate.uuid,
+                        "target_path": target_abs_path,
+                        "status": "started",
+                        "message": "任务已启动"
+                    })
+                else:
+                    translate.status = 'failed'
+                    translate.failed_reason = '任务启动失败'
+                    db.session.commit()
+                    return APIResponse.error("任务启动失败", 500)
+            else:
+                # 资源不足，加入队列
+                translate.status = 'queued'
+                db.session.commit()
+                
+                return APIResponse.success({
+                    "task_id": translate.id,
+                    "uuid": translate.uuid,
+                    "target_path": target_abs_path,
+                    "status": "queued",
+                    "message": f"系统繁忙，任务已加入队列。{reason}"
+                })
 
         except Exception as e:
             db.session.rollback()
@@ -304,7 +348,8 @@ class TranslateListResource(Resource):
                 # 获取状态中文描述
                 status_name_map = {
                     'none': '未开始',
-                    'changing': '转换中',  # 新增：PDF转换状态
+                    'queued': '队列中',
+                    'changing': '转换中',  # PDF转换状态
                     'process': '进行中',
                     'done': '已完成',
                     'failed': '失败'
@@ -569,10 +614,12 @@ class TranslateDeleteResource(Resource):
             
             # 如果任务正在运行，先取消任务
             from app.utils.task_manager import cancel_task, is_task_running
+            task_was_running = False
             if is_task_running(id):
                 current_app.logger.info(f"任务 {id} 正在运行，尝试取消...")
                 if cancel_task(id):
                     current_app.logger.info(f"已取消正在运行的任务 {id}")
+                    task_was_running = True
                 else:
                     current_app.logger.warning(f"取消任务 {id} 失败")
             
@@ -606,6 +653,17 @@ class TranslateDeleteResource(Resource):
             )
             
             db.session.commit()
+            
+            # 如果删除了正在运行的任务，立即触发队列处理
+            if task_was_running:
+                try:
+                    from app.utils.queue_manager import queue_manager
+                    # 立即触发一次队列处理，让队列中的任务尽快开始
+                    queue_manager._process_queue()
+                    current_app.logger.info(f"已触发队列处理，队列中的任务将尽快开始执行")
+                except Exception as e:
+                    current_app.logger.warning(f"触发队列处理失败: {e}")
+            
             return APIResponse.success(message='删除成功!')
             
         except Exception as e:
@@ -914,6 +972,7 @@ class TranslateProgressResource(Resource):
             # 获取状态中文描述
             status_name_map = {
                 'none': '未开始',
+                'queued': '队列中',
                 'changing': '转换中',
                 'process': '进行中',
                 'done': '已完成',
@@ -986,3 +1045,51 @@ class TranslateProgressResource(Resource):
         except Exception as e:
             current_app.logger.error(f"查询翻译进度失败: {str(e)}", exc_info=True)
             return APIResponse.error('查询进度失败', 500)
+
+
+class QueueStatusResource(Resource):
+    @require_valid_token
+    @jwt_required()
+    def get(self):
+        """获取队列状态和用户任务状态"""
+        try:
+            from app.utils.queue_manager import queue_manager
+            
+            # 获取系统队列状态
+            system_status = queue_manager.get_queue_status()
+            
+            # 获取当前用户的任务状态
+            user_id = get_jwt_identity()
+            user_tasks = Translate.query.filter_by(
+                customer_id=user_id,
+                deleted_flag='N'
+            ).filter(
+                Translate.status.in_(['queued', 'process', 'changing'])
+            ).order_by(Translate.created_at.desc()).all()
+            
+            user_task_status = []
+            for task in user_tasks:
+                user_task_status.append({
+                    'id': task.id,
+                    'uuid': task.uuid,
+                    'filename': task.origin_filename,
+                    'status': task.status,
+                    'status_name': {
+                        'queued': '队列中',
+                        'changing': '转换中',
+                        'process': '进行中'
+                    }.get(task.status, task.status),
+                    'progress': float(task.process),
+                    'created_at': task.created_at.isoformat() if task.created_at else None,
+                    'start_at': task.start_at.isoformat() if task.start_at else None
+                })
+            
+            return APIResponse.success({
+                'system_status': system_status,
+                'user_tasks': user_task_status,
+                'user_id': user_id
+            })
+            
+        except Exception as e:
+            current_app.logger.error(f"获取队列状态失败: {str(e)}", exc_info=True)
+            return APIResponse.error(f"获取队列状态失败: {str(e)}", 500)

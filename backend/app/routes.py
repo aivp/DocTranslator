@@ -36,7 +36,7 @@ from app.resources.api.translate import TranslateListResource, TranslateSettingR
     OpenAICheckResource, PDFCheckResource, TranslateTestResource, TranslateDeleteAllResource, \
     TranslateFinishCountResource, TranslateRandDeleteAllResource, TranslateRandDeleteResource, \
     TranslateRandDownloadResource, Doc2xCheckResource, TranslateStartResource, \
-    TranslateDownloadAllResource, TranslateProgressResource
+    TranslateDownloadAllResource, TranslateProgressResource, QueueStatusResource
 from app.resources.api.video import VideoUploadResource, VideoTranslateResource, VideoStatusResource, \
     VideoListResource, VideoDeleteResource, VideoDownloadResource, VideoLanguagesResource, VideoVoicesResource, VideoWebhookResource, VideoTokenInfoResource
 
@@ -95,6 +95,7 @@ def register_routes(api):
     api.add_resource(Doc2xCheckResource, '/api/check/doc2x')
     api.add_resource(TranslateStartResource, '/api/translate')  # 启动翻译
     api.add_resource(TranslateProgressResource, '/api/translate/progress')  # 查询翻译进度
+    api.add_resource(QueueStatusResource, '/api/translate/queue-status')  # 查询队列状态
     # doc2x接口
     api.add_resource(Doc2XTranslateStartResource, '/api/doc2x/start')
     api.add_resource(Doc2XTranslateStatusResource, '/api/doc2x/status')

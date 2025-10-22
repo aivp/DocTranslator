@@ -34,14 +34,7 @@
             </button>
             <div class="title phone_show">点击按钮选择添加文档</div>
             <div class="tips">支持格式{{ accpet_tip }}，建议文件≤500MB</div>
-            <div class="file-count-tip" 
-                 v-if="form.files.length > 0"
-                 :class="{
-                   'warning': form.files.length >= 4,
-                   'error': form.files.length >= 5
-                 }">
-              已选择 {{ form.files.length }}/5 个文件
-            </div>
+            <div class="upload-limit-tip">最多可同时上传5个文件</div>
           </div>
         </el-upload>
       </div>
@@ -267,6 +260,15 @@ const upload_url = API_URL + '/upload'
 const translatesData = ref([])
 const translatesTotal = ref(0)
 const translatesLimit = ref(100)
+
+// 队列状态
+const queueStatus = ref({
+  queued_count: 0,
+  running_count: 0,
+  memory_usage_gb: 0,
+  memory_limit_gb: 8,
+  can_start_new: true
+})
 const storageTotal = ref(0)
 const storageUsed = ref(0)
 const storagePercentage = ref(0.0)
@@ -643,6 +645,11 @@ async function startBatchTranslation() {
           successCount++
           console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动成功:`, file.file_name)
           
+          // 检查是否进入队列
+          if (res.data.status === 'queued') {
+            console.log(`文件 ${file.file_name} 已加入队列`)
+          }
+          
           // 启动进度查询
           process(file.uuid)
           
@@ -692,12 +699,20 @@ async function startBatchTranslation() {
     // 刷新翻译列表
     getTranslatesData(1)
     
+    // 清空上传文件列表
+    uploadRef.value.clearFiles()
+    form.value.files = []  // 清空表单文件数组
+    
   } catch (error) {
     console.error('批量启动翻译任务时发生错误:', error)
     ElMessage.error({
       message: '批量启动翻译任务失败',
       duration: 3000
     })
+    
+    // 即使失败也要清空文件列表
+    uploadRef.value.clearFiles()
+    form.value.files = []  // 清空表单文件数组
   }
 }
 
@@ -901,6 +916,20 @@ async function handleTranslate(transform) {
   translateButtonState.value.disabled = true
 
   try {
+    // 先检查队列状态，如果系统繁忙则弹出确认对话框
+    await checkQueueStatus()
+    if (!queueStatus.value.can_start_new) {
+      const confirmed = await showQueueConfirmDialog()
+      if (!confirmed) {
+        // 用户取消，恢复按钮状态并清空文件列表
+        translateButtonState.value.isLoading = false
+        translateButtonState.value.disabled = false
+        uploadRef.value.clearFiles()
+        form.value.files = []  // 清空表单文件数组
+        return
+      }
+    }
+
     // 检查是否有多个文件需要翻译
     if (form.value.files.length > 1) {
       // 批量启动翻译任务
@@ -910,10 +939,19 @@ async function handleTranslate(transform) {
       console.log('翻译表单：', form.value)
       const res = await transalteFile(form.value)
       if (res.code == 200) {
-        ElMessage({
-          message: '提交翻译任务成功！',
-          type: 'success',
-        })
+        // 检查任务状态
+        if (res.data.status === 'queued') {
+          ElMessage({
+            message: res.data.message || '任务已加入队列，等待系统资源释放后自动开始',
+            type: 'warning',
+            duration: 5000
+          })
+        } else {
+          ElMessage({
+            message: '提交翻译任务成功！',
+            type: 'success',
+          })
+        }
         
         // 先刷新一次列表，让用户看到新创建的翻译任务
         await getTranslatesData(1)
@@ -935,6 +973,7 @@ async function handleTranslate(transform) {
 
   // 4.清空上传文件列表
   uploadRef.value.clearFiles()
+  form.value.files = []  // 清空表单文件数组
 }
 // 重启翻译任务
 async function retryTranslate(item) {
@@ -1143,12 +1182,58 @@ async function getTranslatesData(page, uuid) {
   getCount()
 }
 
+// 检查队列状态
+async function checkQueueStatus() {
+  try {
+    const res = await getQueueStatus()
+    if (res.code === 200) {
+      queueStatus.value = res.data.system_status
+    }
+  } catch (error) {
+    console.error('获取队列状态失败:', error)
+  }
+}
+
+// 显示队列确认对话框
+async function showQueueConfirmDialog() {
+  try {
+    await checkQueueStatus()
+    
+    const { queued_count, running_count, memory_usage_gb, memory_limit_gb } = queueStatus.value
+    
+    const message = `
+      <div style="text-align: left;">
+        <p><strong>系统资源紧张，需要进入等待队列</strong></p>
+        <p>• 当前运行任务: ${running_count} 个</p>
+        <p>• 队列中等待: ${queued_count} 个</p>
+        <p>• 内存使用: ${memory_usage_gb}GB / ${memory_limit_gb}GB</p>
+        <p style="margin-top: 10px; color: #666;">
+          任务将按提交顺序自动开始，请耐心等待
+        </p>
+      </div>
+    `
+    
+    return await ElMessageBox.confirm(message, '系统繁忙提示', {
+      confirmButtonText: '继续提交',
+      cancelButtonText: '取消',
+      type: 'warning',
+      dangerouslyUseHTMLString: true,
+      customClass: 'queue-confirm-dialog'
+    })
+  } catch (error) {
+    if (error === 'cancel') {
+      return false
+    }
+    throw error
+  }
+}
+
 // 专门的进度更新函数（只更新进度，不刷新整个列表）
 async function updateProgressOnly() {
   try {
     // 获取所有正在进行的翻译任务
     const processingTasks = translatesData.value.filter(item => 
-      item.status === 'process' || item.status === 'changing' || item.status === 'none'
+      item.status === 'process' || item.status === 'changing' || item.status === 'none' || item.status === 'queued'
     )
     
     if (processingTasks.length === 0) {
@@ -1882,21 +1967,12 @@ onUnmounted(() => {
   cursor: pointer; /* 鼠标悬停时显示手型 */
 }
 
-/* 文件数量提示样式 */
-.file-count-tip {
+/* 上传限制提示样式 */
+.upload-limit-tip {
   font-size: 12px;
-  color: #666;
+  color: #999;
   margin-top: 8px;
   text-align: center;
-}
-
-/* 当接近限制时显示警告色 */
-.file-count-tip.warning {
-  color: #e6a23c;
-}
-
-/* 当达到限制时显示错误色 */
-.file-count-tip.error {
-  color: #f56c6c;
+  font-style: italic;
 }
 </style>

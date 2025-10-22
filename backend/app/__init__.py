@@ -98,6 +98,16 @@ def create_app(config_class=None):
     # 启动时清理未完成的翻译任务（已禁用）
     # cleanup_incomplete_tasks(app)
     
+    # 初始化队列管理器
+    with app.app_context():
+        try:
+            from app.utils.queue_manager import queue_manager
+            queue_manager.set_app(app)  # 设置应用实例
+            queue_manager.start_monitor()
+            app.logger.info("队列管理器已启动")
+        except Exception as e:
+            app.logger.error(f"启动队列管理器失败: {e}")
+    
     # 开发环境路由打印
     # if app.debug:
     #     with app.app_context():

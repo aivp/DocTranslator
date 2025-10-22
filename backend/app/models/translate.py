@@ -14,7 +14,7 @@ class Translate(db.Model):
     origin_filename = db.Column(db.String(520), nullable=False)     # 原始文件名（带路径）
     origin_filepath = db.Column(db.String(520), nullable=False)     # 原始文件存储路径
     target_filepath = db.Column(db.String(520), nullable=False)     # 目标文件路径
-    status = db.Column(db.Enum('none', 'changing', 'process', 'done', 'failed'), default='none') # 任务状态
+    status = db.Column(db.Enum('none', 'queued', 'changing', 'process', 'done', 'failed'), default='none') # 任务状态
     start_at = db.Column(db.DateTime)                               # 开始时间
     end_at = db.Column(db.DateTime)                                 # 完成时间
     deleted_flag = db.Column(db.Enum('N', 'Y'), default='N')        # 删除标记
@@ -41,6 +41,8 @@ class Translate(db.Model):
     pdf_translate_method = db.Column(db.String(32), default='direct')  # PDF翻译方法：direct(直接翻译) 或 doc2x(转换后翻译)
     prompt_id = db.Column(db.BigInteger, default=0)                 # 提示词ID
     comparison_id = db.Column(db.BigInteger, default=0)             # 对照表ID
+    use_streaming = db.Column(db.Boolean, default=False)            # 是否启用流式翻译
+    streaming_chunk_size = db.Column(db.Integer, default=10)        # 流式翻译块大小
     size = db.Column(db.BigInteger, default=0) # 文件大小 字节
     server= db.Column(db.String(32), default='openai')
     app_id = db.Column(db.String(64), default='')

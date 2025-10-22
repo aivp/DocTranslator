@@ -5,10 +5,80 @@ from . import common
 import datetime
 import time
 import re
+from app.utils.streaming_translator import StreamingTranslator
 
 
 def start(trans):
-    # 允许的最大线程
+    """启动TXT翻译（支持流式翻译）"""
+    # 检查是否启用流式翻译
+    use_streaming = trans.get('use_streaming', False)
+    chunk_size = trans.get('streaming_chunk_size', 10)
+    
+    if use_streaming:
+        return start_streaming(trans, chunk_size)
+    else:
+        return start_traditional(trans)
+
+
+def start_streaming(trans, chunk_size=10):
+    """流式翻译模式"""
+    threads = trans['threads']
+    if threads is None or int(threads) < 0:
+        max_threads = 10
+    else:
+        max_threads = int(threads)
+    
+    start_time = datetime.datetime.now()
+    
+    try:
+        with open(trans['file_path'], 'r', encoding='utf-8') as file:
+            content = file.read()
+    except Exception as e:
+        print(f"无法读取文件 {trans['file_path']}: {e}")
+        return False
+
+    texts = []
+    
+    # 按段落分割内容
+    paragraphs = content.split('\n\n')
+    for paragraph in paragraphs:
+        if paragraph.strip():
+            texts.append({
+                'origin': paragraph.strip(),
+                'text': '',
+                'complete': False,
+                'sub': False
+            })
+    
+    if not texts:
+        print("文件内容为空")
+        return False
+    
+    # 使用流式翻译器
+    with StreamingTranslator(trans['id'], trans['target_file'], chunk_size) as streaming_translator:
+        success = streaming_translator.translate_in_chunks(
+            texts, 
+            lambda chunk: translate_chunk(chunk, trans, max_threads)
+        )
+        
+        if success:
+            end_time = datetime.datetime.now()
+            spend_time = common.display_spend(start_time, end_time)
+            to_translate.complete(trans, len(texts), spend_time)
+            print(f"流式翻译完成，处理了 {len(texts)} 个段落")
+            return True
+        else:
+            print("流式翻译失败")
+            return False
+
+
+def translate_chunk(chunk, trans, max_threads):
+    """翻译单个文本块"""
+    # 这里调用原有的翻译逻辑
+    return translate_texts(chunk, trans, max_threads)
+
+
+def start_traditional(trans):
     threads = trans['threads']
     if threads is None or int(threads) < 0:
         max_threads = 10

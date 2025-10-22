@@ -142,16 +142,25 @@ class TranslateEngine:
         if not task:
             raise ValueError(f"任务 {self.task_id} 不存在")
 
-        # 验证文件存在性
+        # 验证文件存在性和路径安全性
         if not os.path.exists(task.origin_filepath):
             raise FileNotFoundError(f"原始文件不存在: {task.origin_filepath}")
+        
+        # 防止路径遍历攻击 - 允许 /app/ 和 /workspace/ 路径
+        abs_path = os.path.abspath(task.origin_filepath)
+        if not (abs_path.startswith('/app/') or abs_path.startswith('/workspace/')):
+            raise ValueError(f"文件路径不安全: {task.origin_filepath}")
 
         # 更新任务状态
         # PDF文件不在这里设置状态，由PDF翻译函数自己管理
         # 其他文件使用process状态
         if not task.origin_filepath.lower().endswith('.pdf'):
             task.status = 'process'    # 非PDF文件：进行中
-        task.start_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
+        
+        # 只有在start_at为空时才设置开始时间（避免覆盖队列设置的开始时间）
+        if not task.start_at:
+            task.start_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
+            self.app.logger.info(f"任务 {self.task_id} 开始时间已设置")
         
         # 提交状态更新
         db.session.commit()
@@ -194,7 +203,10 @@ class TranslateEngine:
             'doc2x_api_key':task.doc2x_secret_key,
             'extension': os.path.splitext(task.origin_filepath)[1],  # 动态获取文件扩展名
             'pdf_translate_method': getattr(task, 'pdf_translate_method', None),  # PDF翻译方法
-            'user_id': task.customer_id  # 添加用户ID，用于文件隔离
+            'user_id': task.customer_id,  # 添加用户ID，用于文件隔离
+            # 流式翻译配置
+            'use_streaming': getattr(task, 'use_streaming', False),  # 是否启用流式翻译
+            'streaming_chunk_size': getattr(task, 'streaming_chunk_size', 10)  # 流式翻译块大小
         }
 
         # 加载术语对照表（支持多个术语库，逗号分隔）

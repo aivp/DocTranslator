@@ -17,6 +17,13 @@ import shutil
 import fitz
 import json
 import logging
+from app.utils.pymupdf_queue import (
+    safe_fitz_open, safe_fitz_close, safe_fitz_save, 
+    safe_fitz_new_document, safe_fitz_insert_pdf,
+    safe_fitz_get_text_blocks, safe_fitz_insert_text,
+    safe_fitz_insert_textbox, safe_fitz_new_rect,
+    PyMuPDFContext
+)
 
 from ..utils.doc2x import Doc2XService
 
@@ -1049,7 +1056,14 @@ def run_translation(trans, texts, max_threads=30):
         print("没有需要翻译的内容")
         return
 
-    event = threading.Event()
+    # 如果 trans 中有 cancel_event，使用它；否则创建新的 event
+    cancel_event = trans.get('cancel_event')
+    if cancel_event:
+        event = cancel_event
+        print("使用传入的取消事件")
+    else:
+        event = threading.Event()
+        print("创建新的取消事件")
     run_index = 0
     active_count = threading.activeCount()
     
@@ -1092,6 +1106,18 @@ def run_translation(trans, texts, max_threads=30):
     # 等待翻译完成，并监控进度
     last_completed_count = 0
     while not all(t.get('complete') for t in texts) and not event.is_set():
+        # 检查暂停事件
+        from app.utils.task_manager import get_task_pause_event
+        pause_event = get_task_pause_event(trans['id'])
+        if pause_event and pause_event.is_set():
+            print(f"任务 {trans['id']} 已被暂停，等待恢复...")
+            while pause_event.is_set():
+                time.sleep(0.1)
+                if event.is_set():
+                    print(f"任务 {trans['id']} 在暂停期间被取消")
+                    return
+            print(f"任务 {trans['id']} 已恢复")
+        
         # 检查完成的文本数量
         current_completed = sum(1 for t in texts if t.get('complete', False))
         if current_completed > last_completed_count:
@@ -1319,11 +1345,11 @@ def start_direct_pdf_translation(trans):
         
         # 检测PDF页数，决定使用哪种翻译方法
         try:
-            import fitz
-            doc = fitz.open(str(original_path))
-            total_pages = doc.page_count
-            doc.close()
-            print(f"📄 PDF总页数: {total_pages}")
+            with PyMuPDFContext("检测PDF页数"):
+                doc = safe_fitz_open(str(original_path))
+                total_pages = doc.page_count
+                safe_fitz_close(doc)
+                print(f"📄 PDF总页数: {total_pages}")
             
             if total_pages > 25:
                 print("📊 检测到大文件（超过25页），使用多线程分批处理")
