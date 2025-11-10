@@ -6,7 +6,7 @@
     <el-form-item label="" required prop="password">
       <el-input v-model="user.password" type="password" show-password placeholder="密码" />
     </el-form-item>
-    <el-form-item label="" required prop="tenant_code">
+    <el-form-item v-if="!hasDefaultTenant" label="" required prop="tenant_code">
       <el-input v-model="user.tenant_code" placeholder="租户代码" />
     </el-form-item>
     <!-- 隐藏忘记密码功能 -->
@@ -19,21 +19,44 @@
   </el-form>
 </template>
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { login } from '@/api/auth'
 import { store } from '@/store/index'
+
 const emit = defineEmits(['forget', 'success'])
 const form = ref()
+
+// 从环境变量读取默认租户代码
+const defaultTenantCode = import.meta.env.VITE_DEFAULT_TENANT_CODE || ''
+const hasDefaultTenant = computed(() => !!defaultTenantCode)
+
 const user = reactive({
   email: '',
   password: '',
-  tenant_code: ''
+  tenant_code: defaultTenantCode // 如果有默认值，自动填充
 })
-const rules = reactive({
-  email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
-  password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
-  tenant_code: [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
+
+// 动态生成验证规则：如果有默认租户代码，则不需要验证tenant_code
+const rules = computed(() => {
+  const rulesObj = {
+    email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
+    password: [{ required: true, message: '请填写密码', trigger: 'blur' }]
+  }
+  
+  // 只有在没有默认租户代码时才需要验证
+  if (!hasDefaultTenant.value) {
+    rulesObj.tenant_code = [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
+  }
+  
+  return rulesObj
+})
+
+// 组件挂载时，如果有默认租户代码，确保表单值已设置
+onMounted(() => {
+  if (hasDefaultTenant.value) {
+    user.tenant_code = defaultTenantCode
+  }
 })
 function doLogin(form) {
   form.validate((valid, fields) => {

@@ -25,7 +25,7 @@
                 prefix-icon="el-icon-lock"
               />
             </el-form-item>
-            <el-form-item prop="tenant_code">
+            <el-form-item v-if="!hasDefaultTenant" prop="tenant_code">
               <el-input
                 v-model="loginForm.tenant_code"
                 placeholder="租户代码"
@@ -108,27 +108,49 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login } from '@/api/auth'
 import { useUserStore } from '@/store/user'
+
 const userStore = useUserStore()
 const router = useRouter()
 const activeTab = ref('login')
 const loginFormRef = ref(null)
 const loginLoading = ref(false)
-// const registerLoading = ref(false)
+
+// 从环境变量读取默认租户代码
+const defaultTenantCode = import.meta.env.VITE_DEFAULT_TENANT_CODE || ''
+const hasDefaultTenant = computed(() => !!defaultTenantCode)
+
 // 登录表单
 const loginForm = reactive({
   email: '',
   password: '',
-  tenant_code: ''
+  tenant_code: defaultTenantCode // 如果有默认值，自动填充
 })
-const loginRules = reactive({
-  email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
-  password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
-  tenant_code: [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
+
+// 动态生成验证规则：如果有默认租户代码，则不需要验证tenant_code
+const loginRules = computed(() => {
+  const rules = {
+    email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
+    password: [{ required: true, message: '请填写密码', trigger: 'blur' }]
+  }
+  
+  // 只有在没有默认租户代码时才需要验证
+  if (!hasDefaultTenant.value) {
+    rules.tenant_code = [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
+  }
+  
+  return rules
+})
+
+// 组件挂载时，如果有默认租户代码，确保表单值已设置
+onMounted(() => {
+  if (hasDefaultTenant.value) {
+    loginForm.tenant_code = defaultTenantCode
+  }
 })
 
 // 注册功能已隐藏
