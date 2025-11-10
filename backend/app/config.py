@@ -99,9 +99,14 @@ class ProductionConfig(Config):
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_pre_ping': True,
         'pool_recycle': 300,
-        'pool_size': 20,
-        'max_overflow': 30,
-        'pool_timeout': 10
+        'pool_size': 30,  # 增加基础连接池大小（从20增加到30）
+        'max_overflow': 50,  # 增加溢出连接数（从30增加到50），总共最多80个连接
+        'pool_timeout': 5,  # 减少连接获取超时（从10秒减少到5秒），快速失败
+        'connect_args': {
+            'connect_timeout': 5,  # 连接超时5秒
+            'read_timeout': 10,    # 读取超时10秒
+            'write_timeout': 10    # 写入超时10秒
+        }
     }
 
 

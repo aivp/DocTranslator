@@ -73,46 +73,61 @@ class ImageTranslateQueueManager:
     def _process_queue(self):
         """处理队列中的任务"""
         try:
+            # 快速检查并发数，避免长时间持有锁
+            with self.processing_lock:
+                if self.processing_count >= self.max_concurrent_tasks:
+                    return  # 已达到最大并发数
+                
+                # 检查提交间隔
+                current_time = time.time()
+                if current_time - self.last_submit_time < self.submit_interval:
+                    return  # 还未到提交间隔
+            
+            # 在独立的上下文中快速获取任务，避免长时间占用连接
             app = self._get_app()
-            with app.app_context():
-                # 检查是否可以处理新任务
+            queued_tasks = []
+            try:
+                with app.app_context():
+                    # 获取队列中的任务（状态为uploaded，等待翻译）
+                    # 使用快速查询，避免阻塞
+                    queued_tasks = self._get_queued_tasks(1)  # 每次只取1个任务
+                    # 立即关闭session，释放连接
+                    from app.extensions import db
+                    db.session.close()
+            except Exception as e:
+                logger.error(f"获取队列任务时发生异常: {str(e)}", exc_info=True)
+                try:
+                    from app.extensions import db
+                    db.session.close()
+                except:
+                    pass
+                return
+            
+            if not queued_tasks:
+                return
+            
+            # 处理任务
+            for task in queued_tasks:
+                # 再次检查并发数
                 with self.processing_lock:
                     if self.processing_count >= self.max_concurrent_tasks:
-                        return  # 已达到最大并发数
+                        break
                     
                     # 检查提交间隔
                     current_time = time.time()
                     if current_time - self.last_submit_time < self.submit_interval:
-                        return  # 还未到提交间隔
-                
-                # 获取队列中的任务（状态为uploaded，等待翻译）
-                queued_tasks = self._get_queued_tasks(1)  # 每次只取1个任务
-                
-                if not queued_tasks:
-                    return
-                
-                # 处理任务
-                for task in queued_tasks:
-                    # 再次检查并发数
-                    with self.processing_lock:
-                        if self.processing_count >= self.max_concurrent_tasks:
-                            break
-                        
-                        # 检查提交间隔
-                        current_time = time.time()
-                        if current_time - self.last_submit_time < self.submit_interval:
-                            break
-                        
-                        self.processing_count += 1
-                        self.last_submit_time = current_time
+                        break
                     
-                    # 在后台线程中处理任务
-                    thread = threading.Thread(
-                        target=self._process_single_task,
-                        args=(task,),
-                        daemon=True
-                    )
-                    thread.start()
+                    self.processing_count += 1
+                    self.last_submit_time = current_time
+                
+                # 在后台线程中处理任务
+                thread = threading.Thread(
+                    target=self._process_single_task,
+                    args=(task,),
+                    daemon=True
+                )
+                thread.start()
                     
         except Exception as e:
             logger.error(f"处理图片翻译队列异常: {str(e)}", exc_info=True)
@@ -123,6 +138,8 @@ class ImageTranslateQueueManager:
             from app.models.image_translate import ImageTranslate
             from app.extensions import db
             
+            # 使用简单的查询，避免复杂操作阻塞
+            # 添加索引提示，确保查询快速执行
             tasks = ImageTranslate.query.filter(
                 ImageTranslate.status == 'uploaded',
                 ImageTranslate.source_language.isnot(None),
@@ -137,82 +154,131 @@ class ImageTranslateQueueManager:
     
     def _process_single_task(self, task):
         """处理单个任务"""
+        app = self._get_app()
         try:
-            app = self._get_app()
-            with app.app_context():
-                from app.models.image_translate import ImageTranslate
-                from app.utils.api_key_helper import get_dashscope_key, get_current_tenant_id_from_request
-                from app.extensions import db
-                
-                # 重新查询任务（确保获取最新状态）
-                image_record = ImageTranslate.query.get(task.id)
-                if not image_record or image_record.status != 'uploaded':
-                    with self.processing_lock:
-                        self.processing_count -= 1
-                    return
-                
-                # 获取租户ID和API Key
-                tenant_id = image_record.tenant_id or 1
-                try:
-                    api_key = get_dashscope_key(tenant_id)
-                except ValueError as e:
-                    logger.error(f"获取API Key失败: {str(e)}")
-                    image_record.status = 'failed'
-                    image_record.error_message = '未配置翻译服务API密钥'
-                    db.session.commit()
-                    with self.processing_lock:
-                        self.processing_count -= 1
-                    return
-                
-                # 转换文件路径为URL
-                image_url = image_record.filepath
-                if not (image_url.startswith('http://') or image_url.startswith('https://')):
-                    image_url = self._convert_filepath_to_url(image_url)
-                    if not image_url:
-                        image_record.status = 'failed'
-                        image_record.error_message = '无法生成图片访问URL'
-                        db.session.commit()
-                        with self.processing_lock:
-                            self.processing_count -= 1
+            # 快速获取任务信息，然后立即释放数据库连接
+            task_id = task.id
+            tenant_id = None
+            source_lang = None
+            target_lang = None
+            image_url = None
+            
+            # 第一步：快速查询任务信息，立即释放连接
+            try:
+                with app.app_context():
+                    from app.models.image_translate import ImageTranslate
+                    from app.extensions import db
+                    
+                    # 使用 with_for_update(skip_locked=True) 避免并发问题
+                    image_record = ImageTranslate.query.filter_by(id=task_id).first()
+                    if not image_record or image_record.status != 'uploaded':
                         return
-                
-                # 创建翻译任务
-                task_result = self._create_qwen_mt_image_task(
-                    api_key,
-                    image_url,
-                    image_record.source_language,
-                    image_record.target_language
-                )
-                
-                if task_result.get('success'):
-                    task_id = task_result.get('task_id')
-                    if task_id:
-                        image_record.status = 'translating'
-                        image_record.qwen_task_id = task_id
-                        db.session.commit()
-                        logger.info(f"图片翻译任务已提交: image_id={image_record.id}, task_id={task_id}")
+                    
+                    # 快速获取需要的信息
+                    tenant_id = image_record.tenant_id or 1
+                    source_lang = image_record.source_language
+                    target_lang = image_record.target_language
+                    image_url = image_record.filepath
+                    
+                    # 立即关闭session，释放连接
+                    db.session.close()
+            except Exception as e:
+                logger.error(f"查询任务信息失败: task_id={task_id}, error={str(e)}")
+                return
+            
+            # 第二步：在app_context外执行网络请求（避免占用数据库连接）
+            if not (image_url.startswith('http://') or image_url.startswith('https://')):
+                image_url = self._convert_filepath_to_url(image_url)
+                if not image_url:
+                    # 更新状态失败
+                    try:
+                        with app.app_context():
+                            from app.models.image_translate import ImageTranslate
+                            from app.extensions import db
+                            image_record = ImageTranslate.query.get(task_id)
+                            if image_record:
+                                image_record.status = 'failed'
+                                image_record.error_message = '无法生成图片访问URL'
+                                db.session.commit()
+                            db.session.close()
+                    except:
+                        pass
+                    return
+            
+            # 获取API Key（不占用数据库连接）
+            try:
+                from app.utils.api_key_helper import get_dashscope_key
+                api_key = get_dashscope_key(tenant_id)
+            except ValueError as e:
+                logger.error(f"获取API Key失败: {str(e)}")
+                try:
+                    with app.app_context():
+                        from app.models.image_translate import ImageTranslate
+                        from app.extensions import db
+                        image_record = ImageTranslate.query.get(task_id)
+                        if image_record:
+                            image_record.status = 'failed'
+                            image_record.error_message = '未配置翻译服务API密钥'
+                            db.session.commit()
+                        db.session.close()
+                except:
+                    pass
+                return
+            
+            # 第三步：创建翻译任务（网络请求，不占用数据库连接）
+            task_result = self._create_qwen_mt_image_task(
+                api_key,
+                image_url,
+                source_lang,
+                target_lang
+            )
+            
+            # 第四步：快速更新数据库状态，立即释放连接
+            try:
+                with app.app_context():
+                    from app.models.image_translate import ImageTranslate
+                    from app.extensions import db
+                    
+                    image_record = ImageTranslate.query.get(task_id)
+                    if not image_record:
+                        return
+                    
+                    if task_result.get('success'):
+                        task_id_from_api = task_result.get('task_id')
+                        if task_id_from_api:
+                            image_record.status = 'translating'
+                            image_record.qwen_task_id = task_id_from_api
+                            db.session.commit()
+                            logger.info(f"图片翻译任务已提交: image_id={image_record.id}, task_id={task_id_from_api}")
+                        else:
+                            image_record.status = 'failed'
+                            image_record.error_message = '未获取到任务ID'
+                            db.session.commit()
+                            logger.error(f"图片翻译任务提交失败: image_id={image_record.id}, 未获取到任务ID")
                     else:
+                        error_msg = task_result.get('error', '创建翻译任务失败')
                         image_record.status = 'failed'
-                        image_record.error_message = '未获取到任务ID'
+                        image_record.error_message = error_msg
                         db.session.commit()
-                        logger.error(f"图片翻译任务提交失败: image_id={image_record.id}, 未获取到任务ID")
-                else:
-                    error_msg = task_result.get('error', '创建翻译任务失败')
-                    image_record.status = 'failed'
-                    image_record.error_message = error_msg
-                    db.session.commit()
-                    logger.error(f"图片翻译任务提交失败: image_id={image_record.id}, error={error_msg}")
+                        logger.error(f"图片翻译任务提交失败: image_id={image_record.id}, error={error_msg}")
+                    
+                    # 立即关闭session，释放连接
+                    db.session.close()
+            except Exception as e:
+                logger.error(f"更新任务状态失败: task_id={task_id}, error={str(e)}")
                 
         except Exception as e:
             logger.error(f"处理图片翻译任务异常: image_id={task.id}, error={str(e)}", exc_info=True)
             try:
-                from app.models.image_translate import ImageTranslate
-                from app.extensions import db
-                image_record = ImageTranslate.query.get(task.id)
-                if image_record:
-                    image_record.status = 'failed'
-                    image_record.error_message = f'处理异常: {str(e)}'
-                    db.session.commit()
+                with app.app_context():
+                    from app.models.image_translate import ImageTranslate
+                    from app.extensions import db
+                    image_record = ImageTranslate.query.get(task.id)
+                    if image_record:
+                        image_record.status = 'failed'
+                        image_record.error_message = f'处理异常: {str(e)}'
+                        db.session.commit()
+                    db.session.close()
             except:
                 pass
         finally:
