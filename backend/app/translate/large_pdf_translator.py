@@ -221,11 +221,12 @@ class LargePDFTranslator:
         # 创建临时目录，按用户ID隔离
         if temp_dir is None:
             # 获取uploads基础目录（避免在用户的上传文件目录中创建临时文件）
-            # 输入文件路径格式：/app/storage/uploads/user_2/2025-10-21/file.pdf
+            # 输入文件路径格式：/app/storage/uploads/tenant_1/user_2/2025-10-21/file.pdf
             # 临时文件应创建在：/app/storage/uploads/temp_user_2/translate_xxx/
-            base_dir = os.path.dirname(input_pdf_path)  # /app/storage/uploads/user_2/2025-10-21
-            date_dir = os.path.dirname(base_dir)  # /app/storage/uploads/user_2
-            uploads_base = os.path.dirname(date_dir)  # /app/storage/uploads
+            base_dir = os.path.dirname(input_pdf_path)  # /app/storage/uploads/tenant_1/user_2/2025-10-21
+            date_dir = os.path.dirname(base_dir)  # /app/storage/uploads/tenant_1/user_2
+            user_dir = os.path.dirname(date_dir)  # /app/storage/uploads/tenant_1
+            uploads_base = os.path.dirname(user_dir)  # /app/storage/uploads
             
             if user_id:
                 # 使用用户ID创建隔离目录
@@ -499,40 +500,47 @@ class LargePDFTranslator:
                 page = doc[page_num]
                 new_page = no_text_doc.new_page(width=page.rect.width, height=page.rect.height)
                 
-                # 复制页面内容（图片、背景等）
+                # 复制页面内容（图片、背景等）- 保留原文本，不删除
+                # 这样可以避免高内存消耗的redaction操作，降低崩溃风险
                 new_page.show_pdf_page(page.rect, doc, page_num)
                 
-                # 删除所有文本
-                text_blocks = page.get_text("dict", flags=fitz.TEXTFLAGS_TEXT)["blocks"]
-                text_count = 0
-                
-                for block in text_blocks:
-                    if "lines" in block:
-                        for line in block["lines"]:
-                            for span in line["spans"]:
-                                bbox = span["bbox"]
-                                text = span["text"].strip()
-                                if text:
-                                    try:
-                                        redact_annot = new_page.add_redact_annot(bbox, fill=None)
-                                        text_count += 1
-                                    except Exception as e:
-                                        logger.warning(f"删除文本失败: {e}")
-                                        try:
-                                            redact_annot = new_page.add_redact_annot(bbox, fill=(0, 0, 0, 0))
-                                            text_count += 1
-                                        except Exception as e2:
-                                            logger.warning(f"透明填充也失败: {e2}")
-                
-                # 应用删除操作
-                try:
-                    new_page.apply_redactions()
-                    logger.info(f"第 {page_num + 1} 页删除了 {text_count} 个文本块")
-                except Exception as e:
-                    logger.warning(f"应用删除操作失败: {e}")
+                # 注意：不再执行删除文本操作（redaction），因为：
+                # 1. redaction操作会消耗大量内存
+                # 2. 可能导致PyMuPDF底层崩溃
+                # 3. 保留原文本不会影响翻译结果（翻译文本会覆盖在原文上方）
+                logger.debug(f"第 {page_num + 1} 页已复制（保留原文本，不删除）")
             
             no_text_doc.save(output_path)
-            logger.info(f"无文本PDF创建完成: {output_path}")
+            logger.info(f"[no_text] 无文本PDF保存完成: {output_path}")
+            
+            # 验证文件是否正常
+            if not os.path.exists(output_path):
+                logger.error(f"[no_text] 文件保存后不存在: {output_path}")
+                return False
+            
+            file_size = os.path.getsize(output_path)
+            logger.info(f"[no_text] 保存后文件大小: {file_size} 字节")
+            
+            # 尝试验证PDF是否可以正常打开（但不保留引用，避免内存泄漏）
+            test_doc = None
+            try:
+                test_doc = fitz.open(output_path)
+                test_page_count = test_doc.page_count
+                logger.info(f"[no_text] PDF验证成功，页数: {test_page_count}")
+            except Exception as verify_error:
+                logger.error(f"[no_text] PDF验证失败，文件可能损坏: {verify_error}")
+                return False
+            finally:
+                # 立即关闭验证文档，释放内存
+                if test_doc is not None:
+                    try:
+                        test_doc.close()
+                    except:
+                        pass
+                # 验证后立即清理内存
+                import gc
+                gc.collect()
+            
             return True
             
         except Exception as e:
@@ -565,7 +573,15 @@ class LargePDFTranslator:
         """
         doc = None
         try:
+            # 添加详细日志，定位崩溃点
+            logger.info(f"[fill] 准备打开无文本PDF: {no_text_pdf_path}")
+            logger.info(f"[fill] 文件是否存在: {os.path.exists(no_text_pdf_path)}")
+            if os.path.exists(no_text_pdf_path):
+                file_size = os.path.getsize(no_text_pdf_path)
+                logger.info(f"[fill] 文件大小: {file_size} 字节")
+            
             doc = fitz.open(no_text_pdf_path)
+            logger.info(f"[fill] PDF打开成功，页数: {doc.page_count}")
             
             # 创建页面索引映射：原始页面号 -> 批次内页面索引
             page_index_map = {}
@@ -573,11 +589,17 @@ class LargePDFTranslator:
                 original_page_num = page_data["page_number"]
                 page_index_map[original_page_num] = i
             
+            # 批量处理文本插入，每处理一定数量后清理内存
+            text_insert_count = 0
             for page_data in translated_texts:
                 original_page_num = page_data["page_number"]
                 batch_page_index = page_index_map[original_page_num]
                 page = doc[batch_page_index]
                 logger.info(f"填充第 {original_page_num + 1} 页翻译文本 (批次内索引: {batch_page_index})...")
+                
+                # 先收集这一页所有需要删除的文本区域和要插入的文本
+                redact_rects = []
+                text_insertions = []
                 
                 for text_info in page_data["texts"]:
                     # 使用翻译后的文本
@@ -604,36 +626,89 @@ class LargePDFTranslator:
                         else:
                             color = (0, 0, 0)  # 默认黑色
                         
-                        # 使用insert_htmlbox方法
-                        try:
-                            textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
-                            
-                            html_text = f"""
-                            <div style="
-                                font-size: {font_size}px;
-                                color: rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)});
-                                font-family: sans-serif;
-                                line-height: 1.0;
-                                margin: 0;
-                                padding: 0;
-                                background: none;
-                                background-color: transparent;
-                                background-image: none;
-                                border: none;
-                                outline: none;
-                                box-shadow: none;
-                            ">
-                                {text}
-                            </div>
-                            """
-                            
-                            page.insert_htmlbox(textbox, html_text)
-                            logger.info(f"文本插入成功: '{text[:20]}...'")
-                        except Exception as e:
-                            logger.error(f"文本插入失败: {e}")
+                        # 创建文本框矩形
+                        textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                        
+                        # 收集需要删除的区域（避免文本重叠）
+                        redact_rects.append(textbox)
+                        
+                        # 准备HTML文本
+                        html_text = f"""
+                        <div style="
+                            font-size: {font_size}px;
+                            color: rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)});
+                            font-family: sans-serif;
+                            line-height: 1.0;
+                            margin: 0;
+                            padding: 0;
+                            background: none;
+                            background-color: transparent;
+                            background-image: none;
+                            border: none;
+                            outline: none;
+                            box-shadow: none;
+                        ">
+                            {text}
+                        </div>
+                        """
+                        
+                        text_insertions.append({
+                            'textbox': textbox,
+                            'html_text': html_text,
+                            'text': text
+                        })
+                
+                # 先删除原始文本，避免重叠
+                if redact_rects:
+                    try:
+                        # 为每个文本区域添加redaction标注
+                        for rect in redact_rects:
+                            try:
+                                # 使用透明填充，避免白色遮挡
+                                page.add_redact_annot(rect, fill=None)
+                            except Exception as e:
+                                logger.debug(f"添加redaction标注失败（可能已被删除）: {e}")
+                                # 如果失败，尝试透明填充
+                                try:
+                                    page.add_redact_annot(rect, fill=(0, 0, 0, 0))
+                                except Exception as e2:
+                                    logger.debug(f"透明填充redaction也失败: {e2}")
+                        
+                        # 应用redaction，真正删除文本
+                        page.apply_redactions()
+                        logger.debug(f"第 {original_page_num + 1} 页已删除 {len(redact_rects)} 个原始文本区域")
+                    except Exception as e:
+                        logger.warning(f"删除原始文本失败，继续插入翻译文本: {e}")
+                
+                # 然后插入翻译后的文本
+                for insertion in text_insertions:
+                    try:
+                        page.insert_htmlbox(insertion['textbox'], insertion['html_text'])
+                        text_insert_count += 1
+                        # 每插入50个文本清理一次内存，避免内存过载
+                        if text_insert_count % 50 == 0:
+                            import gc
+                            gc.collect()
+                            logger.debug(f"[fill] 已插入{text_insert_count}个文本，执行内存清理")
+                        logger.info(f"文本插入成功: '{insertion['text'][:20]}...'")
+                    except Exception as e:
+                        logger.error(f"文本插入失败: {e}")
+                
+                # 每页处理完后清理临时数据，避免内存累积
+                redact_rects.clear()
+                text_insertions.clear()
+                import gc
+                gc.collect()
+                logger.debug(f"[fill] 第 {original_page_num + 1} 页处理完成，已清理内存")
+            
+            # 保存前添加日志和内存检查
+            logger.info(f"[fill] 准备保存PDF到: {output_path}")
+            import gc
+            gc.collect()  # 保存前清理内存
             
             doc.save(output_path)
-            logger.info(f"翻译PDF保存完成: {output_path}")
+            logger.info(f"[fill] PDF保存成功: {output_path}")
+            logger.info(f"[fill] 保存后文件大小: {os.path.getsize(output_path) if os.path.exists(output_path) else 0} 字节")
             return True
             
         except Exception as e:
@@ -1102,12 +1177,21 @@ class LargePDFTranslator:
             
             # 先创建无文本PDF
             no_text_pdf_path = os.path.join(self.temp_dir, f"batch_{batch_num}_no_text.pdf")
+            logger.info(f"[batch_{batch_num}] 开始创建附加文本PDF...")
             if not self.create_no_text_pdf(start_page, end_page, no_text_pdf_path):
                 raise Exception("创建无文本PDF失败")
+            
+            # 创建完成后立即清理内存，避免后续步骤内存不足
+            logger.info(f"[batch_{batch_num}] 无文本PDF创建完成，清理内存...")
+            import gc
+            gc.collect()
+            logger.info(f"[batch_{batch_num}] 内存清理完成，开始填充翻译文本...")
             
             # 填充翻译文本
             if not self.fill_translated_texts_to_pdf(translated_texts, no_text_pdf_path, batch_output_path):
                 raise Exception("填充翻译文本失败")
+            
+            logger.info(f"[batch_{batch_num}] 翻译文本填充完成")
             
             # 4. 压缩PDF
             compressed_path = batch_output_path.replace('.pdf', '_compressed.pdf')

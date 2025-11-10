@@ -29,9 +29,10 @@ def init_extensions(app):
     migrate.init_app(app, db)
     # 延迟初始化API（避免循环导入）
     from app.routes import register_routes
-    # 注册路由
+    # Flask-RESTful 的正确顺序：先注册路由，再初始化 API
     register_routes(api)
     api.init_app(app)
+    print("✅ 所有路由已绑定到应用")  # 添加调试输出
 
 
 

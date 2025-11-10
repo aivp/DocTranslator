@@ -15,6 +15,8 @@ from app.models.video_translate import VideoTranslate
 from app.utils.response import APIResponse
 from app.utils.token_checker import require_valid_token
 from app.utils.akool_video import AkoolVideoService
+from app.utils.tenant_helper import get_current_tenant_id
+from app.utils.tenant_path import get_tenant_video_dir
 
 
 class VideoUploadResource(Resource):
@@ -78,6 +80,8 @@ class VideoUploadResource(Resource):
             video_url = self._generate_video_url(unique_filename, user_id)
             
             # 创建视频翻译记录
+            tenant_id = get_current_tenant_id(user_id)
+            
             video_record = VideoTranslate(
                 customer_id=user_id,
                 filename=unique_filename,
@@ -87,6 +91,10 @@ class VideoUploadResource(Resource):
                 file_size=file_size,
                 created_at=datetime.utcnow()
             )
+            
+            # 设置租户ID
+            if tenant_id:
+                video_record.tenant_id = tenant_id
             
             db.session.add(video_record)
             
@@ -126,14 +134,9 @@ class VideoUploadResource(Resource):
     
     @staticmethod
     def _get_upload_dir(user_id):
-        """获取视频上传目录"""
-        base_dir = Path(current_app.config['UPLOAD_BASE_DIR'])
-        upload_dir = base_dir / 'videos' / datetime.now().strftime('%Y-%m-%d') / str(user_id)
-        
-        if not upload_dir.exists():
-            upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        return str(upload_dir)
+        """获取视频上传目录（包含租户ID）"""
+        # 使用租户路径工具
+        return get_tenant_video_dir(user_id)
     
     @staticmethod
     def _calculate_md5(file_path):
@@ -153,11 +156,16 @@ class VideoUploadResource(Resource):
     
     @staticmethod
     def _generate_video_url(filename, user_id):
-        """生成视频访问URL"""
+        """生成视频访问URL（包含租户ID）"""
         base_url = os.getenv('VIDEO_BASE_URL', 'https://yourdomain.com')
-        # 生成包含日期和用户ID目录的完整URL路径
+        # 获取租户ID
+        tenant_id = get_current_tenant_id(user_id)
+        if tenant_id is None:
+            tenant_id = 1  # 默认租户
+        
+        # 生成包含租户ID、日期和用户ID目录的完整URL路径
         date_dir = datetime.now().strftime('%Y-%m-%d')
-        return f"{base_url}/videos/{date_dir}/{user_id}/{filename}"
+        return f"{base_url}/video/tenant_{tenant_id}/user_{user_id}/{date_dir}/{filename}"
 
 
 class VideoTranslateResource(Resource):
@@ -185,6 +193,8 @@ class VideoTranslateResource(Resource):
                     data[key] = value.lower() in ('true', '1', 'yes')
                 elif key == 'lip_sync_type':
                     data[key] = int(value)
+                elif key == 'dynamic_duration':
+                    data[key] = value.lower() in ('true', '1', 'yes')
                 elif not ('[' in key and ']' in key):  # 不是数组格式的字段
                     data[key] = value
             
@@ -251,14 +261,21 @@ class VideoTranslateResource(Resource):
                 return APIResponse.error('target_languages参数不能为空', 400)
             
             # 查询视频记录
-            video = VideoTranslate.query.filter_by(
+            user_id = get_jwt_identity()
+            tenant_id = get_current_tenant_id(user_id)
+            
+            query = VideoTranslate.query.filter_by(
                 id=data['video_id'],
-                customer_id=get_jwt_identity(),
+                customer_id=user_id,
                 deleted_flag='N'
-            ).first()
+            )
+            if tenant_id:
+                query = query.filter_by(tenant_id=tenant_id)
+            
+            video = query.first()
             
             if not video:
-                current_app.logger.error(f"视频记录不存在，video_id: {data['video_id']}, customer_id: {get_jwt_identity()}")
+                current_app.logger.error(f"视频记录不存在，video_id: {data['video_id']}, customer_id: {user_id}")
                 return APIResponse.error('视频记录不存在', 404)
             
             current_app.logger.info(f"找到视频记录: {video.id}, 状态: {video.status}")
@@ -267,12 +284,16 @@ class VideoTranslateResource(Resource):
                 return APIResponse.error('视频状态不允许翻译', 400)
             
             # 检查是否已经存在相同的翻译任务
-            existing_translations = VideoTranslate.query.filter_by(
-                customer_id=get_jwt_identity(),
+            query2 = VideoTranslate.query.filter_by(
+                customer_id=user_id,
                 video_url=video.video_url,
                 source_language=data['source_language'],
                 deleted_flag='N'
-            ).filter(
+            )
+            if tenant_id:
+                query2 = query2.filter_by(tenant_id=tenant_id)
+            
+            existing_translations = query2.filter(
                 VideoTranslate.target_language.in_(target_languages)
             ).all()
             
@@ -281,14 +302,9 @@ class VideoTranslateResource(Resource):
                 current_app.logger.warning(f"已存在相同翻译任务: {existing_langs}")
                 return APIResponse.error(f'已存在相同翻译任务: {", ".join(existing_langs)}', 400)
             
-            # 初始化Akool服务
-            client_id = os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
-            client_secret = os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
-            if not client_id or not client_secret:
-                return APIResponse.error('Akool认证信息未配置', 500)
-            
-            current_app.logger.info("初始化Akool服务，Client ID: {}...".format(client_id[:10]))
-            akool_service = AkoolVideoService(client_id, client_secret)
+            # 检查队列状态
+            from app.utils.video_queue_manager import video_queue_manager
+            queue_status = video_queue_manager.get_queue_status()
             
             # 生成翻译组ID
             import uuid
@@ -297,48 +313,74 @@ class VideoTranslateResource(Resource):
             # 生成Webhook URL
             webhook_url = self._generate_webhook_url(video.id)
             
-            # 调用Akool API（支持多语言和语音映射）
+            # 准备语音映射
             voices_map = data.get('voices_map', {})
             
-            current_app.logger.info("调用Akool API创建翻译任务")
-            current_app.logger.info("视频URL: {}".format(video.video_url))
-            current_app.logger.info("源语言: {}".format(data['source_language']))
-            current_app.logger.info("目标语言: {}".format(target_languages))
-            current_app.logger.info("语音映射: {}".format(voices_map))
+            # 计算可用槽位
+            current_processing = queue_status['current_processing']
+            slots_available = max(0, queue_status['max_concurrent'] - current_processing)
+            languages_to_start = len(target_languages)
             
-            result = akool_service.create_translation(
-                video_url=video.video_url,
-                source_language=data['source_language'],
-                target_languages=target_languages,
-                lipsync=data.get('lipsync_enabled', False),
-                webhook_url=webhook_url,
-                speaker_num=data.get('speaker_num', 0),
-                voice_id=data.get('voice_id'),
-                voices_map=voices_map,  # 传递语音映射
-                terminology_ids=terminology_ids,  # 传递术语库
-                style=data.get('style', 'professional'),  # 传递翻译风格
-                caption_type=data.get('caption_type', 0)  # 传递字幕类型
-            )
+            # 初始化Akool服务（使用租户配置）
+            current_app.logger.info(f"初始化Akool服务，租户ID: {tenant_id}")
+            akool_service = AkoolVideoService(tenant_id=tenant_id)
             
-            # 处理Akool返回的结果
-            akool_results = result.get('all_results', [])
-            if not akool_results:
-                # 如果没有all_results，尝试从data中获取
-                akool_data = result.get('data', {})
-                if akool_data:
-                    akool_results = [{'code': 1000, 'data': akool_data}]
-                else:
-                    akool_results = []
+            # 检查是否需要立即调用Akool API
+            # 只有当有可用槽位时才调用API，否则直接创建queued记录
+            if slots_available > 0:
+                # 有可用槽位，调用Akool API创建任务
+                current_app.logger.info("调用Akool API创建翻译任务")
+                current_app.logger.info("视频URL: {}".format(video.video_url))
+                current_app.logger.info("源语言: {}".format(data['source_language']))
+                current_app.logger.info("目标语言: {}".format(target_languages))
+                current_app.logger.info("语音映射: {}".format(voices_map))
+                
+                result = akool_service.create_translation(
+                    video_url=video.video_url,
+                    source_language=data['source_language'],
+                    target_languages=target_languages,
+                    lipsync=data.get('lipsync_enabled', False),
+                    webhook_url=webhook_url,
+                    speaker_num=data.get('speaker_num', 0),
+                    voice_id=data.get('voice_id'),
+                    voices_map=voices_map,
+                    terminology_ids=terminology_ids,
+                    style=data.get('style', 'professional'),
+                    caption_type=data.get('caption_type', 0),
+                    dynamic_duration=data.get('dynamic_duration', False)
+                )
+                
+                # 处理Akool返回的结果
+                akool_results = result.get('all_results', [])
+                if not akool_results:
+                    akool_data = result.get('data', {})
+                    if akool_data:
+                        akool_results = [{'code': 1000, 'data': akool_data}]
+                    else:
+                        akool_results = []
+            else:
+                # 没有可用槽位，不调用API，设置为queued状态
+                current_app.logger.info(f"队列已满（{current_processing}/{queue_status['max_concurrent']}），任务将进入队列")
+                akool_results = []
             
             created_videos = []
+            started_count = 0
             
             # 为每个目标语言创建视频记录
             for i, target_lang in enumerate(target_languages):
-                # 获取对应的Akool结果
-                akool_result = akool_results[i] if i < len(akool_results) else {}
-                akool_data = akool_result.get('data', {})
+                # 判断是否应该立即启动还是进入队列
+                # 如果当前已处理的视频数+已启动的<最大并发数，则立即启动
+                if (current_processing + started_count) < queue_status['max_concurrent']:
+                    status = 'processing'
+                    started_count += 1
+                    # 只有processing状态的任务才有akool_task_id
+                    akool_result = akool_results[i] if i < len(akool_results) else {}
+                    akool_data = akool_result.get('data', {})
+                    akool_task_id = akool_data.get('_id')
+                else:
+                    status = 'queued'
+                    akool_task_id = None  # queued任务暂时没有akool_task_id
                 
-                # 创建新的视频翻译记录
                 new_video = VideoTranslate(
                     customer_id=video.customer_id,
                     filename=video.filename,
@@ -347,53 +389,79 @@ class VideoTranslateResource(Resource):
                     video_url=video.video_url,
                     source_language=data['source_language'],
                     target_language=target_lang,
-                    akool_task_id=akool_data.get('_id'),
-                    status='processing',
+                    akool_task_id=akool_task_id,
+                    status=status,
                     lipsync_enabled=data.get('lipsync_enabled', False),
                     webhook_url=webhook_url,
                     file_size=video.file_size,
                     duration=video.duration,
-                    # 新增字段
                     voice_id=voices_map.get(target_lang) if voices_map else None,
                     voice_name=data.get('voice_name'),
                     voice_gender=data.get('voice_gender'),
                     voice_language=data.get('voice_language'),
                     voice_preview_url=data.get('voice_preview_url'),
                     lip_sync_type=data.get('lip_sync_type', 0),
-                    parent_video_id=video.id,  # 所有翻译记录都指向原始视频
+                    parent_video_id=video.id,
                     translation_group_id=translation_group_id,
-                    # 术语库字段
                     terminology_ids=json.dumps(terminology_ids) if terminology_ids else None,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow()
                 )
                 
+                # 设置租户ID（从原视频继承）
+                if hasattr(video, 'tenant_id') and video.tenant_id:
+                    new_video.tenant_id = video.tenant_id
+                
                 db.session.add(new_video)
                 created_videos.append(new_video)
             
             # 更新原始视频记录状态
-            video.status = 'processing'
+            # 如果有任何一个任务在处理，就标记为processing，否则标记为queued
+            video.status = 'processing' if started_count > 0 else 'queued'
             video.updated_at = datetime.utcnow()
             
             db.session.commit()
+            
+            # 生成返回消息
+            if started_count == languages_to_start:
+                message = '已启动{}个语言的翻译任务'.format(languages_to_start)
+                final_status = 'processing'
+            elif started_count > 0:
+                message = f'已启动{started_count}个语言，{languages_to_start - started_count}个已加入队列'
+                final_status = 'partially_queued'
+            else:
+                message = f'当前系统资源紧张（{current_processing}/{queue_status["max_concurrent"]}），您的{languages_to_start}个任务已加入队列，将在资源释放后自动开始'
+                final_status = 'queued'
             
             return APIResponse.success({
                 'translation_group_id': translation_group_id,
                 'created_videos': [v.id for v in created_videos],
                 'target_languages': target_languages,
-                'status': 'processing',
-                'message': '已启动{}个语言的翻译任务'.format(len(target_languages))
+                'status': final_status,
+                'message': message,
+                'started_count': started_count,
+                'queued_count': languages_to_start - started_count
             })
             
         except Exception as e:
             db.session.rollback()
-            current_app.logger.error("启动视频翻译失败：{}".format(str(e)))
+            error_msg = str(e)
+            current_app.logger.error("启动视频翻译失败：{}".format(error_msg))
             
             # 检查是否是语音必选错误
-            if 'voice_id is required' in str(e) or 'voices_map' in str(e) or 'This language' in str(e):
+            if 'voice_id is required' in error_msg or 'voices_map' in error_msg or 'This language' in error_msg:
                 return APIResponse.error('某些语言必须选择AI语音，请为所有目标语言选择对应的AI语音', 400)
             
-            return APIResponse.error('启动翻译失败', 500)
+            # 检查是否是Akool认证问题
+            if 'Akool认证信息未配置' in error_msg:
+                return APIResponse.error('Akool认证信息未配置，请联系管理员', 500)
+            
+            # 检查是否是Akool API错误
+            if 'Akool API错误' in error_msg or 'Akool' in error_msg:
+                return APIResponse.error(f'Akool API错误: {error_msg}', 500)
+            
+            # 返回详细错误信息
+            return APIResponse.error(f'启动翻译失败: {error_msg}', 500)
     
     @staticmethod
     def _generate_webhook_url(video_id):
@@ -410,22 +478,25 @@ class VideoStatusResource(Resource):
     def get(self, video_id):
         """查询视频翻译状态"""
         try:
-            video = VideoTranslate.query.filter_by(
+            user_id = get_jwt_identity()
+            tenant_id = get_current_tenant_id(user_id)
+            
+            query = VideoTranslate.query.filter_by(
                 id=video_id,
-                customer_id=get_jwt_identity(),
+                customer_id=user_id,
                 deleted_flag='N'
-            ).first_or_404()
+            )
+            if tenant_id:
+                query = query.filter_by(tenant_id=tenant_id)
+            
+            video = query.first_or_404()
             
             # 如果正在处理中，查询Akool状态
             if video.status == 'processing' and video.akool_task_id:
                 try:
-                    client_id = os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
-                    client_secret = os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
-                    if client_id and client_secret:
-                        akool_service = AkoolVideoService(client_id, client_secret)
-                        akool_status = akool_service.get_task_status(video.akool_task_id)
-                    else:
-                        akool_status = None
+                    # 使用租户配置初始化Akool服务
+                    akool_service = AkoolVideoService(tenant_id=tenant_id)
+                    akool_status = akool_service.get_task_status(video.akool_task_id)
                     
                     if akool_status:
                         video_status = akool_status.get('video_status')
@@ -464,16 +535,23 @@ class VideoListResource(Resource):
     def get(self):
         """获取用户视频列表"""
         try:
-            current_app.logger.info("获取视频列表请求，用户ID: {}".format(get_jwt_identity()))
+            user_id = get_jwt_identity()
+            tenant_id = get_current_tenant_id(user_id)
+            
+            current_app.logger.info("获取视频列表请求，用户ID: {}".format(user_id))
             page = request.args.get('page', 1, type=int)
             per_page = request.args.get('per_page', 10, type=int)
             status = request.args.get('status')
             current_app.logger.info("查询参数: page={}, per_page={}, status={}".format(page, per_page, status))
             
             query = VideoTranslate.query.filter_by(
-                customer_id=get_jwt_identity(),
+                customer_id=user_id,
                 deleted_flag='N'
-            ).filter(
+            )
+            if tenant_id:
+                query = query.filter_by(tenant_id=tenant_id)
+            
+            query = query.filter(
                 VideoTranslate.target_language.isnot(None)  # 只显示有目标语言的记录（翻译任务）
             )
             
@@ -518,13 +596,20 @@ class VideoDeleteResource(Resource):
     def delete(self, video_id):
         """软删除视频"""
         try:
-            video = VideoTranslate.query.filter_by(
-                id=video_id,
-                customer_id=get_jwt_identity(),
-                deleted_flag='N'
-            ).first_or_404()
+            user_id = get_jwt_identity()
+            tenant_id = get_current_tenant_id(user_id)
             
-            customer = Customer.query.get(get_jwt_identity())
+            query = VideoTranslate.query.filter_by(
+                id=video_id,
+                customer_id=user_id,
+                deleted_flag='N'
+            )
+            if tenant_id:
+                query = query.filter_by(tenant_id=tenant_id)
+            
+            video = query.first_or_404()
+            
+            customer = Customer.query.get(user_id)
             
             # 记录删除前的存储空间
             old_storage = customer.storage
@@ -558,11 +643,18 @@ class VideoDownloadResource(Resource):
     def get(self, video_id):
         """代理下载视频文件"""
         try:
-            video = VideoTranslate.query.filter_by(
+            user_id = get_jwt_identity()
+            tenant_id = get_current_tenant_id(user_id)
+            
+            query = VideoTranslate.query.filter_by(
                 id=video_id,
-                customer_id=get_jwt_identity(),
+                customer_id=user_id,
                 deleted_flag='N'
-            ).first_or_404()
+            )
+            if tenant_id:
+                query = query.filter_by(tenant_id=tenant_id)
+            
+            video = query.first_or_404()
             
             if not video.translated_video_url:
                 return APIResponse.error('翻译视频不存在', 404)
@@ -606,32 +698,38 @@ class VideoLanguagesResource(Resource):
     def get(self):
         """获取Akool支持的语言列表"""
         try:
-            # 检查Client ID和Client Secret是否存在
-            client_id = os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
-            client_secret = os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
-            if not client_id or not client_secret:
-                current_app.logger.error("AKOOL_CLIENT_ID/AKOOL_CLIENT_SECRET, client_Id/client_Secret 或 CLIENT_ID/CLIENT_SECRET 环境变量未设置")
-                return APIResponse.error('Akool认证信息未配置', 500)
+            # 从JWT获取用户ID和租户ID（可选）
+            tenant_id = None
+            try:
+                user_id = get_jwt_identity()
+                current_app.logger.info(f"🔍 VideoLanguagesResource: user_id={user_id}")
+                tenant_id = get_current_tenant_id(user_id)
+                current_app.logger.info(f"🔍 VideoLanguagesResource: tenant_id={tenant_id}")
+            except Exception as e:
+                # 如果没有登录，使用默认租户
+                current_app.logger.warning(f"⚠️ VideoLanguagesResource: 无法获取租户ID: {e}")
             
-            akool_service = AkoolVideoService(client_id, client_secret)
+            if not tenant_id:
+                current_app.logger.warning(f"⚠️ tenant_id为None，尝试使用租户ID=1")
+                tenant_id = 1
+            
+            current_app.logger.info(f"🔍 VideoLanguagesResource: 最终使用 tenant_id={tenant_id}")
+            
+            # 使用租户配置初始化Akool服务
+            akool_service = AkoolVideoService(tenant_id=tenant_id)
             languages = akool_service.get_languages()
+            
+            if not languages:
+                current_app.logger.error("Akool API返回空的语言列表")
+                return APIResponse.error('无法获取语言列表', 500)
             
             return APIResponse.success({
                 'languages': languages
             })
             
-        except ValueError as e:
-            current_app.logger.error(f"认证信息配置错误：{str(e)}")
-            # 返回默认语言列表
-            return APIResponse.success({
-                'languages': self._get_default_languages()
-            })
         except Exception as e:
             current_app.logger.error(f"获取语言列表失败：{str(e)}")
-            # 返回默认语言列表
-            return APIResponse.success({
-                'languages': self._get_default_languages()
-            })
+            return APIResponse.error(f'获取语言列表失败: {str(e)}', 500)
 
 
 class VideoVoicesResource(Resource):
@@ -645,14 +743,25 @@ class VideoVoicesResource(Resource):
             page = request.args.get('page', 1, type=int)
             size = request.args.get('size', 100, type=int)
             
-            # 检查Client ID和Client Secret是否存在
-            client_id = os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
-            client_secret = os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
-            if not client_id or not client_secret:
-                current_app.logger.error("Akool认证信息未配置")
-                return APIResponse.error('Akool认证信息未配置', 500)
+            # 从JWT获取用户ID和租户ID（可选）
+            tenant_id = None
+            try:
+                user_id = get_jwt_identity()
+                current_app.logger.info(f"🔍 VideoVoicesResource: user_id={user_id}")
+                tenant_id = get_current_tenant_id(user_id)
+                current_app.logger.info(f"🔍 VideoVoicesResource: tenant_id={tenant_id}")
+            except Exception as e:
+                # 如果没有登录，使用默认租户
+                current_app.logger.warning(f"⚠️ VideoVoicesResource: 无法获取租户ID: {e}")
             
-            akool_service = AkoolVideoService(client_id, client_secret)
+            if not tenant_id:
+                current_app.logger.warning(f"⚠️ tenant_id为None，尝试使用租户ID=1")
+                tenant_id = 1
+            
+            current_app.logger.info(f"🔍 VideoVoicesResource: 最终使用 tenant_id={tenant_id}")
+            
+            # 使用租户配置初始化Akool服务
+            akool_service = AkoolVideoService(tenant_id=tenant_id)
             voices_data = akool_service.get_ai_voices(language_code, page, size)
             
             if voices_data:
@@ -669,31 +778,6 @@ class VideoVoicesResource(Resource):
         except Exception as e:
             current_app.logger.error(f"获取AI语音列表失败：{str(e)}")
             return APIResponse.error('获取AI语音列表失败', 500)
-    
-    def _get_default_languages(self):
-        """获取默认语言列表"""
-        return [
-            {"lang_code": "en", "lang_name": "English"},
-            {"lang_code": "zh", "lang_name": "Chinese (Simplified)"},
-            {"lang_code": "ja", "lang_name": "Japanese"},
-            {"lang_code": "ko", "lang_name": "Korean"},
-            {"lang_code": "fr", "lang_name": "French"},
-            {"lang_code": "de", "lang_name": "German"},
-            {"lang_code": "es", "lang_name": "Spanish"},
-            {"lang_code": "it", "lang_name": "Italian"},
-            {"lang_code": "pt", "lang_name": "Portuguese"},
-            {"lang_code": "ru", "lang_name": "Russian"},
-            {"lang_code": "ar", "lang_name": "Arabic"},
-            {"lang_code": "hi", "lang_name": "Hindi"},
-            {"lang_code": "th", "lang_name": "Thai"},
-            {"lang_code": "vi", "lang_name": "Vietnamese"},
-            {"lang_code": "id", "lang_name": "Indonesian"},
-            {"lang_code": "ms", "lang_name": "Malay"},
-            {"lang_code": "tl", "lang_name": "Filipino"},
-            {"lang_code": "tr", "lang_name": "Turkish"},
-            {"lang_code": "pl", "lang_name": "Polish"},
-            {"lang_code": "nl", "lang_name": "Dutch"}
-        ]
 
 
 class VideoTokenInfoResource(Resource):

@@ -39,6 +39,46 @@ const constantRoute = [
           noCache: true,
           requiresAuth: true
         }
+      },
+      {
+        path: '/tools',
+        component: () => import('@/pages/tools/index.vue'),
+        name: 'tools',
+        meta: {
+          title: '工具',
+          noCache: true,
+          requiresAuth: true
+        }
+      },
+      {
+        path: '/tools/image-translate',
+        component: () => import('@/pages/tools/image-translate/index.vue'),
+        name: 'image-translate',
+        meta: {
+          title: '图片翻译',
+          noCache: true,
+          requiresAuth: true
+        }
+      },
+      {
+        path: '/tools/image-translate/list',
+        component: () => import('@/pages/tools/image-translate/list.vue'),
+        name: 'image-translate-list',
+        meta: {
+          title: '翻译任务列表',
+          noCache: true,
+          requiresAuth: true
+        }
+      },
+      {
+        path: '/tools/pdf-to-image',
+        component: () => import('@/pages/tools/pdf-to-image/index.vue'),
+        name: 'pdf-to-image',
+        meta: {
+          title: 'PDF转图片',
+          noCache: true,
+          requiresAuth: true
+        }
       }
     ]
   },

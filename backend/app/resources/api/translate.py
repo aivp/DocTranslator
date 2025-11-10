@@ -19,6 +19,8 @@ from app.utils.response import APIResponse
 from app.utils.check_utils import AIChecker
 from app.utils.token_checker import require_valid_token
 from app.resources.task.translate_service import TranslateEngine
+from app.utils.tenant_helper import get_current_tenant_id
+from app.utils.tenant_path import get_tenant_translate_dir
 
 # 定义翻译配置（硬编码示例）
 TRANSLATE_SETTINGS = {
@@ -92,15 +94,10 @@ class TranslateStartResource(Resource):
             if customer.status == 'disabled':
                 return APIResponse.error("用户状态异常", 403)
 
-            # 生成绝对路径（跨平台兼容）
+            # 生成绝对路径（跨平台兼容，包含租户ID）
             def get_absolute_storage_path(filename, user_id):
-                # 使用配置文件中的UPLOAD_BASE_DIR（保持与file_utils.py一致）
-                base_dir = Path(current_app.config['UPLOAD_BASE_DIR'])
-                # 按用户ID和日期创建子目录（如 storage/translate/user_123/2024-01-20）
-                date_str = datetime.now().strftime('%Y-%m-%d')
-                # 创建目标目录（如果不存在）
-                target_dir = base_dir / "translate" / f"user_{user_id}" / date_str
-                target_dir.mkdir(parents=True, exist_ok=True)
+                # 获取租户翻译目录
+                target_dir = Path(get_tenant_translate_dir(user_id))
                 
                 # 生成唯一文件名，避免多次翻译同一文件时的冲突
                 import uuid
@@ -136,6 +133,9 @@ class TranslateStartResource(Resource):
                     print(f"🔄 使用Doc2x方法，文件名改为: {origin_filename}")
                 else:
                     print(f"🎯 使用直接翻译方法，保持原文件名: {origin_filename}")
+            else:
+                # 非PDF文件不涉及PDF方法
+                pdf_translate_method = None
 
             # 获取翻译类型（取最后一个type值）
             translate_type = data.get('type[2]', 'trans_all_only_inherit')
@@ -145,15 +145,55 @@ class TranslateStartResource(Resource):
             if not translate:
                 return APIResponse.error("未找到对应的翻译记录", 404)
 
-            # 从系统里面获取api_setting 分组的配置
-            api_settings = Setting.query.filter(
-                Setting.group == 'api_setting',  # 只查询 api_setting 分组
-                Setting.deleted_flag == 'N'  # 未删除的记录
-            ).all()
-            # 转换成字典
-            translate_settings = {}
-            for setting in api_settings:
-                translate_settings[setting.alias] = setting.value
+            # 设置租户ID
+            tenant_id = get_current_tenant_id(user_id)
+            if tenant_id:
+                translate.tenant_id = tenant_id
+            
+            # 从数据库获取租户的API配置（优先使用租户配置，其次全局配置）
+            from app.utils.api_key_helper import get_dashscope_key
+            
+            try:
+                # 获取API Key（支持租户级配置）
+                api_key = get_dashscope_key(tenant_id)
+                
+                # 获取API URL（也从数据库读取，支持租户级配置）
+                api_url = None
+                if tenant_id:
+                    tenant_url_setting = Setting.query.filter_by(
+                        alias='api_url',
+                        group='api_setting',
+                        tenant_id=tenant_id,
+                        deleted_flag='N'
+                    ).first()
+                    if tenant_url_setting and tenant_url_setting.value:
+                        api_url = tenant_url_setting.value.strip()
+                
+                # 如果租户没有配置URL，使用全局配置
+                if not api_url:
+                    global_url_setting = Setting.query.filter_by(
+                        alias='api_url',
+                        group='api_setting',
+                        tenant_id=None,
+                        deleted_flag='N'
+                    ).first()
+                    if global_url_setting and global_url_setting.value:
+                        api_url = global_url_setting.value.strip()
+                
+                # 如果还没有URL，使用默认值
+                if not api_url:
+                    api_url = 'https://llm-api.forklift-ai.com/'
+                
+                # 保存到数据库记录
+                translate.api_url = api_url
+                translate.api_key = api_key
+                current_app.logger.info(f"✅ 已从数据库获取API配置: url={api_url}, key_len={len(api_key)}")
+                
+            except ValueError as e:
+                # 如果获取失败，返回错误
+                current_app.logger.error(f"❌ 获取API配置失败: {str(e)}")
+                return APIResponse.error(str(e), 400)
+            
             # 更新翻译记录
             translate.server = data.get('server', 'openai')
             translate.origin_filename = origin_filename
@@ -166,13 +206,6 @@ class TranslateStartResource(Resource):
             translate.type = translate_type
             translate.prompt = data['prompt']
             translate.threads = int(data['threads'])
-            # 会员用户下使用系统的api_url和api_key
-            if customer.level == 'vip':
-                translate.api_url = translate_settings.get('api_url', '').strip()
-                translate.api_key = translate_settings.get('api_key', '').strip()
-            else:
-                translate.api_url = data.get('api_url', '')
-                translate.api_key = data.get('api_key', '')
             translate.backup_model = data.get('backup_model', '')
             translate.origin_lang = data.get('origin_lang', '')
             translate.size = data.get('size', 0)  # 更新文件大小
@@ -233,7 +266,11 @@ class TranslateStartResource(Resource):
                 translate.prompt = ''  # 清空提示词内容
             translate.doc2x_flag = data.get('doc2x_flag', 'N')
             translate.doc2x_secret_key = data.get('doc2x_secret_key', 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0')
-            translate.pdf_translate_method = data.get('pdf_translate_method', 'direct')
+            # 统一以上面解析出的 pdf_translate_method 为准，避免批量请求未传时被错误回退为 direct
+            if pdf_translate_method:
+                translate.pdf_translate_method = pdf_translate_method
+            else:
+                translate.pdf_translate_method = data.get('pdf_translate_method', 'direct')
             # 流式翻译配置 - 硬编码策略
             file_size_mb = float(translate.size) / (1024 * 1024) if translate.size else 0
             
@@ -262,6 +299,51 @@ class TranslateStartResource(Resource):
             # 保存到数据库
             customer.storage += int(translate.size)
             db.session.commit()
+            
+            # 健康检查：先测试API密钥是否有效（仅对qwen模型）
+            if translate.model == 'qwen-mt-plus':
+                current_app.logger.info("🔍 开始API健康检查...")
+                try:
+                    from openai import OpenAI
+                    # 直接调用OpenAI API测试，不通过qwen_translate
+                    client = OpenAI(
+                        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        api_key=api_key,
+                        timeout=10.0
+                    )
+                    
+                    # 测试请求
+                    response = client.chat.completions.create(
+                        model="qwen-turbo",
+                        messages=[{"role": "user", "content": "hello"}],
+                        timeout=10.0
+                    )
+                    
+                    current_app.logger.info(f"✅ API健康检查通过")
+                except Exception as e:
+                    error_msg = str(e)
+                    error_type = type(e).__name__
+                    current_app.logger.error(f"❌ API健康检查异常: {error_type} - {error_msg}")
+                    
+                    # 提取错误信息
+                    import re
+                    
+                    # 先尝试提取Python字典格式的message
+                    match = re.search(r"['\"]message['\"]:\s*['\"](.*?)['\"](?:\s*,|\s*)", error_msg)
+                    if match:
+                        error_message = match.group(1).strip()
+                        current_app.logger.error(f"提取到的错误信息: {error_message}")
+                        db.session.commit()
+                        return APIResponse.error(f"{error_message} 请联系管理员处理！", 400)
+                    
+                    # 检测认证错误
+                    if "Incorrect API key" in error_msg or "401" in error_msg or "AuthenticationError" in error_type or "authentication" in error_msg.lower():
+                        current_app.logger.error(f"检测到认证错误")
+                        db.session.commit()
+                        return APIResponse.error("API密钥验证失败，请联系管理员处理！", 400)
+                    
+                    db.session.commit()
+                    return APIResponse.error("模型认证失败，请联系管理员处理！", 400)
             
             # 检查资源状态，决定是直接启动还是加入队列
             from app.utils.queue_manager import queue_manager
@@ -292,12 +374,15 @@ class TranslateStartResource(Resource):
                 translate.status = 'queued'
                 db.session.commit()
                 
+                # 对于用户，只显示通用的资源紧张消息，不显示具体限制详情
+                user_message = "系统资源紧张，任务已加入队列，等待系统资源释放后自动开始"
+                
                 return APIResponse.success({
                     "task_id": translate.id,
                     "uuid": translate.uuid,
                     "target_path": target_abs_path,
                     "status": "queued",
-                    "message": f"系统繁忙，任务已加入队列。{reason}"
+                    "message": user_message
                 })
 
         except Exception as e:
@@ -320,10 +405,15 @@ class TranslateListResource(Resource):
             skip_uuids = request.args.get('skip_uuids', '').split(',') if request.args.get('skip_uuids') else []
 
             # 构建查询
+            user_id = get_jwt_identity()
+            tenant_id = get_current_tenant_id(user_id)
+            
             query = Translate.query.filter_by(deleted_flag='N')
             
-            # 添加用户ID过滤，确保用户只能看到自己的任务
-            query = query.filter_by(customer_id=get_jwt_identity())
+            # 添加用户ID和租户ID过滤，确保用户只能看到自己租户的任务
+            query = query.filter_by(customer_id=user_id)
+            if tenant_id:
+                query = query.filter_by(tenant_id=tenant_id)
             
             # 过滤掉正在翻译中的任务
             if skip_uuids and skip_uuids[0]:
@@ -335,6 +425,17 @@ class TranslateListResource(Resource):
                 if status_filter not in valid_statuses:
                     return APIResponse.error(f"Invalid status value: {status_filter}"), 400
                 query = query.filter_by(status=status_filter)
+
+            # 按完成时间倒序排列（最新的在顶部）
+            # 使用 coalesce 处理 NULL 值：没有完成时间的任务排在最后
+            from sqlalchemy import func
+            from datetime import datetime
+            # 将 NULL 值替换为很远的过去日期，这样未完成的任务会排在最后
+            min_date = datetime(1970, 1, 1)
+            query = query.order_by(
+                func.coalesce(Translate.end_at, min_date).desc(),
+                Translate.id.desc()
+            )
 
             # 执行分页查询
             pagination = query.paginate(page=page, per_page=limit, error_out=False)
@@ -393,6 +494,7 @@ class TranslateListResource(Resource):
                     'target_filepath': t.target_filepath,
                     'uuid': t.uuid,
                     'server': t.server,
+                    'failed_reason': t.failed_reason if t.failed_reason else None,  # 失败原因
                 })
 
             # 返回响应数据
@@ -867,11 +969,18 @@ class TranslateFinishCountResource(Resource):
     @jwt_required()
     def get(self):
         """获取已完成翻译数量[^3]"""
-        count = Translate.query.filter_by(
-            customer_id=get_jwt_identity(),
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
+        query = Translate.query.filter_by(
+            customer_id=user_id,
             status='done',
             deleted_flag='N'
-        ).count()
+        )
+        if tenant_id:
+            query = query.filter_by(tenant_id=tenant_id)
+        
+        count = query.count()
         return APIResponse.success({'total': count})
 
 
@@ -1055,15 +1164,21 @@ class QueueStatusResource(Resource):
         try:
             from app.utils.queue_manager import queue_manager
             
-            # 获取系统队列状态
+            # 获取系统队列状态（系统级共享，不需要租户过滤）
             system_status = queue_manager.get_queue_status()
             
-            # 获取当前用户的任务状态
+            # 获取当前用户的任务状态（需要租户过滤）
             user_id = get_jwt_identity()
-            user_tasks = Translate.query.filter_by(
+            tenant_id = get_current_tenant_id(user_id)
+            
+            query = Translate.query.filter_by(
                 customer_id=user_id,
                 deleted_flag='N'
-            ).filter(
+            )
+            if tenant_id:
+                query = query.filter_by(tenant_id=tenant_id)
+            
+            user_tasks = query.filter(
                 Translate.status.in_(['queued', 'process', 'changing'])
             ).order_by(Translate.created_at.desc()).all()
             

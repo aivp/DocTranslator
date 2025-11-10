@@ -75,7 +75,9 @@ function createService() {
           logout()
           break
         case 403:
-          error.message = '拒绝访问'
+          // 优先显示后端返回的具体错误信息
+          const backendMessage403 = get(error, 'response.data.message')
+          error.message = backendMessage403 || '拒绝访问'
           break
         case 404:
           error.message = '请求地址出错'
@@ -84,7 +86,9 @@ function createService() {
           error.message = '请求超时'
           break
         case 500:
-          error.message = '服务器内部错误'
+          // 优先显示后端返回的具体错误信息
+          const backendMessage500 = get(error, 'response.data.message')
+          error.message = backendMessage500 || '服务器内部错误'
           break
         case 501:
           error.message = '服务未实现'
@@ -124,7 +128,7 @@ function createRequest(service: AxiosInstance) {
       },
       timeout: 10000,
       //本地开发环境开发，接口配置修改.env.development 正式环境读取动态变量
-      baseURL: '/api/api/admin',
+      baseURL: '/api/admin',
       // baseURL: (import.meta.env.MODE != "production" ? import.meta.env.VITE_BASE_API : globalApi) + "/api/admin",
       data: {},
     }

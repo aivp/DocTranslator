@@ -7,6 +7,7 @@ import { Search, Refresh, CirclePlus } from "@element-plus/icons-vue"
 import { usePagination } from "@/hooks/usePagination"
 import { cloneDeep } from "lodash-es"
 import Register from "./components/register.vue"
+import { formatDateTime } from "@/utils"
 
 defineOptions({
   // 命名当前组件
@@ -123,32 +124,6 @@ const registerSuccess = () => {
   getCustomerData()
 }
 
-// 时间格式化函数 - 转换为GMT+8
-const formatToGMT8 = (dateString: string) => {
-  if (!dateString) return ''
-  
-  try {
-    // 创建Date对象，会自动处理时区
-    const date = new Date(dateString)
-    
-    // 转换为GMT+8时间
-    const gmt8Time = new Date(date.getTime() + (8 * 60 * 60 * 1000))
-    
-    // 格式化输出
-    return gmt8Time.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZone: 'Asia/Shanghai'
-    })
-  } catch (error) {
-    console.error('时间格式化错误:', error)
-    return dateString
-  }
-}
 
 /** 监听分页参数的变化 */
 watch([() => paginationData.currentPage, () => paginationData.pageSize], getCustomerData, { immediate: true })
@@ -194,9 +169,10 @@ watch([() => paginationData.currentPage, () => paginationData.pageSize], getCust
               <el-tag v-else type="danger" effect="plain">禁用</el-tag>
             </template>
           </el-table-column>
+          <el-table-column prop="tenant_name" label="所属租户" align="left" width="120" />
           <el-table-column prop="created_at" label="注册时间" align="left">
             <template #default="{ row }">
-              {{ formatToGMT8(row.created_at) }}
+              {{ formatDateTime(row.created_at) }}
             </template>
           </el-table-column>
           <el-table-column fixed="right" label="操作" width="100" align="left">

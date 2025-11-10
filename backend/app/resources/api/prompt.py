@@ -10,6 +10,7 @@ from app.models.customer import Customer
 from app.models.prompt import Prompt, PromptFav
 from app.utils.response import APIResponse
 from app.utils.token_checker import require_valid_token
+from app.utils.tenant_helper import get_current_tenant_id
 
 
 # 获取提示词列表
@@ -19,7 +20,12 @@ class MyPromptListResource(Resource):
     def get(self):
         """获取我的提示词列表[^1]"""
         # 直接查询所有数据（不解析查询参数）
-        query = Prompt.query.filter_by(customer_id=get_jwt_identity(), deleted_flag='N')
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
+        query = Prompt.query.filter_by(customer_id=user_id, deleted_flag='N')
+        if tenant_id:
+            query = query.filter_by(tenant_id=tenant_id)
         prompts = [{
             'id': p.id,
             'title': p.title,
@@ -41,16 +47,30 @@ class MyPromptListResource(Resource):
 
 # 获取共享提示词列表
 class SharedPromptListResource(Resource):
+    @require_valid_token  # 先检查token
+    @jwt_required()
     def get(self):
-        """获取共享提示词列表[^4]"""
+        """获取共享提示词列表[^4] - 只显示同一租户内的共享提示词"""
         # 从查询字符串中解析参数
         parser = reqparse.RequestParser()
         parser.add_argument('page', type=int, default=1, location='args')  # 分页参数
         parser.add_argument('limit', type=int, default=10, location='args')  # 分页参数
         parser.add_argument('porder', type=str, default='latest', location='args')  # 排序参数
         args = parser.parse_args()
+        
+        # 获取当前用户的租户ID
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
 
         # 查询共享的提示词
+        filters = [
+            Prompt.share_flag == 'Y',
+            Prompt.deleted_flag == 'N'
+        ]
+        # 添加租户过滤 - 只显示同一租户内的共享提示词
+        if tenant_id:
+            filters.append(Prompt.tenant_id == tenant_id)
+        
         query = db.session.query(
             Prompt,  # 获取完整的 Prompt 信息
             func.count(PromptFav.id).label('fav_count'),  # 动态计算收藏量
@@ -59,10 +79,7 @@ class SharedPromptListResource(Resource):
             PromptFav, Prompt.id == PromptFav.prompt_id
         ).outerjoin(
             Customer, Prompt.customer_id == Customer.id  # 通过 customer_id 关联 Customer
-        ).filter(
-            Prompt.share_flag == 'Y',
-            Prompt.deleted_flag == 'N'
-        ).group_by(
+        ).filter(*filters).group_by(
             Prompt.id
         )
 
@@ -103,11 +120,18 @@ class EditPromptResource(Resource):
     @jwt_required()
     def post(self, id):
         """修改提示词内容[^3]"""
-        prompt = Prompt.query.filter_by(
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
+        query = Prompt.query.filter_by(
             id=id,
-            customer_id=get_jwt_identity(),
+            customer_id=user_id,
             deleted_flag='N'
-        ).first_or_404()
+        )
+        if tenant_id:
+            query = query.filter_by(tenant_id=tenant_id)
+        
+        prompt = query.first_or_404()
 
         data = request.form
         if 'title' in data:
@@ -159,11 +183,18 @@ class SharePromptResource(Resource):
         :param id: prompt 的 ID（路径参数）
         """
         # 根据 id 和当前用户查询 prompt
-        prompt = Prompt.query.filter_by(
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
+        query = Prompt.query.filter_by(
             id=id,
-            customer_id=get_jwt_identity(),
+            customer_id=user_id,
             deleted_flag='N'
-        ).first_or_404()
+        )
+        if tenant_id:
+            query = query.filter_by(tenant_id=tenant_id)
+        
+        prompt = query.first_or_404()
 
         # 从请求体中获取 share_flag
         data = request.form  # 或者 request.form 如果是表单数据
@@ -189,16 +220,23 @@ class CopyPromptResource(Resource):
             deleted_flag='N'
         ).first_or_404()
 
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
         new_prompt = Prompt(
             title=f"{original.title} (副本)",
             content=original.content,
             role_content=original.role_content,
             task_content=original.task_content,
             requirements_content=original.requirements_content,
-            customer_id=get_jwt_identity(),
+            customer_id=user_id,
             share_flag='N',
             added_count=0
         )
+        
+        # 设置租户ID
+        if tenant_id:
+            new_prompt.tenant_id = tenant_id
         print('打印原始内容长度',len(original.content))  # 打印原始内容长度
         print('打印新内容长度',len(new_prompt.content))  # 打印新内容长度
 
@@ -263,16 +301,24 @@ class CreatePromptResource(Resource):
         full_content = f"# 角色\n{data['role_content']}\n\n# 任务\n{data['task_content']}\n\n# 翻译要求\n{data['requirements_content']}\n\n# 待翻译文本\n{{text_to_translate}}"
 
         # 创建时自动设置 created_at 为当前时间
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
         prompt = Prompt(
             title=data['title'],
             content=full_content,  # 拼接后的完整内容
             role_content=data['role_content'],
             task_content=data['task_content'],
             requirements_content=data['requirements_content'],
-            customer_id=get_jwt_identity(),
+            customer_id=user_id,
             share_flag=data.get('share_flag', 'N'),
             created_at=date.today()  # 自动设置当前时间
         )
+        
+        # 设置租户ID
+        if tenant_id:
+            prompt.tenant_id = tenant_id
+        
         db.session.add(prompt)
         db.session.commit()
         return APIResponse.success({
@@ -287,10 +333,17 @@ class DeletePromptResource(Resource):
     @jwt_required()
     def delete(self, id):
         """删除提示词[^8]"""
-        prompt = Prompt.query.filter_by(
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
+        query = Prompt.query.filter_by(
             id=id,
-            customer_id=get_jwt_identity()
-        ).first_or_404()
+            customer_id=user_id
+        )
+        if tenant_id:
+            query = query.filter_by(tenant_id=tenant_id)
+        
+        prompt = query.first_or_404()
 
         prompt.deleted_flag = 'Y'
         db.session.commit()

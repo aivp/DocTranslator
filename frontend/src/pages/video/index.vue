@@ -3,14 +3,15 @@
     <div class="container">
       <!-- 视频上传区域 -->
       <div class="upload-container">
-        <el-upload
+          <el-upload
           ref="uploadRef"
           class="dropzone"
           drag
           :action="upload_url"
           :accept="video_accepts"
           auto-upload
-          :limit="1"
+          :limit="5"
+          multiple
           :on-success="uploadSuccess"
           :on-error="uploadError"
           :on-exceed="handleExceed"
@@ -24,29 +25,29 @@
             </div>
           </div>
           <div class="right_box">
-            <div class="title pc_show">拖入/点击按钮选择视频文件</div>
+            <div class="title pc_show">拖入/点击按钮选择视频文件（最多5个）</div>
             <button class="upload_btn" type="button">
               <i class="el-icon-upload" style="margin-right: 8px;"></i>
               <span>上传视频</span>
             </button>
-            <div class="title phone_show">点击按钮选择视频文件</div>
+            <div class="title phone_show">点击按钮选择视频文件（最多5个）</div>
             <div class="tips">支持格式：MP4、AVI、MOV、WMV、FLV、MKV、WEBM，建议文件≤300MB</div>
             <div class="file-count-tip success" 
-                 v-if="currentVideo">
-              已选择：{{ currentVideo.name }}
+                 v-if="currentVideos && currentVideos.length > 0">
+              已选择：{{ currentVideos.length }}个视频
             </div>
           </div>
         </el-upload>
       </div>
 
       <!-- 生成翻译按钮区域 -->
-      <div class="generate-container" v-if="currentVideo">
+      <div class="generate-container" v-if="currentVideos && currentVideos.length > 0">
         <div class="video-preview">
           <div class="video-frame">
             <i class="el-icon-video-camera" style="font-size: 48px; color: #409EFF;"></i>
             <div class="video-info">
-              <div class="video-name">{{ currentVideo.name }}</div>
-              <div class="video-size">{{ formatFileSize(currentVideo.size) }}</div>
+              <div class="video-name">已选择 {{ currentVideos.length }} 个视频</div>
+              <div class="video-size">{{ getTotalVideoSize() }}</div>
             </div>
           </div>
           <div class="action-buttons">
@@ -56,7 +57,7 @@
               class="generate-btn"
               @click="openTranslateDialog">
               <i class="el-icon-magic-stick" style="margin-right: 8px;"></i>
-              生成翻译 >
+              批量生成翻译 >
             </el-button>
           </div>
         </div>
@@ -70,6 +71,7 @@
             <el-select v-model="statusFilter" placeholder="筛选状态" @change="loadVideoList" style="width: 150px;">
               <el-option label="全部" value=""></el-option>
               <el-option label="已上传" value="uploaded"></el-option>
+              <el-option label="队列中" value="queued"></el-option>
               <el-option label="处理中" value="processing"></el-option>
               <el-option label="已完成" value="completed"></el-option>
               <el-option label="已失败" value="failed"></el-option>
@@ -169,7 +171,7 @@
                 编辑
               </el-button>
               <el-button 
-                v-if="scope.row.status === 'processing'"
+                v-if="scope.row.status === 'processing' || scope.row.status === 'queued'"
                 type="warning" 
                 size="mini"
                 :loading="scope.row.refreshing"
@@ -396,6 +398,15 @@
           </el-select>
           <div class="form-tip">选择是否在视频中添加字幕，以及字幕的显示方式</div>
         </el-form-item>
+        
+        <el-form-item label="动态时长">
+          <el-switch
+            v-model="translateForm.dynamic_duration"
+            active-text="启用"
+            inactive-text="禁用">
+          </el-switch>
+          <div class="form-tip">启用后可改善视频语速，自动调整视频时长以适应翻译后的语音节奏</div>
+        </el-form-item>
       </el-form>
       
       <template #footer>
@@ -420,6 +431,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/store/user'
 import { videoApi } from '@/api/video'
 import request from '@/utils/request'
+import { formatDate } from '@/utils/tools'
 
 export default {
   name: 'VideoTranslate',
@@ -428,7 +440,7 @@ export default {
     
     // 响应式数据
     const uploadRef = ref()
-    const currentVideo = ref(null)
+    const currentVideos = ref([]) // 改为数组支持多个视频
     const fileListShow = ref(false)
     const loading = ref(false)
     const isTranslating = ref(false)
@@ -458,7 +470,7 @@ export default {
     
     // 翻译表单
     const translateForm = reactive({
-      video_id: null,
+      video_ids: [], // 改为数组支持多个视频ID
       source_language: 'auto',
       target_languages: [], // 改为数组支持多选
       speaker_num: 0,
@@ -467,7 +479,8 @@ export default {
       voices_map: {}, // 改为对象，存储每个语言对应的语音ID
       terminology_ids: [], // 新增术语库ID列表
       style: 'professional', // 新增翻译风格参数
-      caption_type: 0 // 新增字幕类型：0无，1原始字幕，2目标字幕，3翻译替换，4翻译字幕
+      caption_type: 0, // 新增字幕类型：0无，1原始字幕，2目标字幕，3翻译替换，4翻译字幕
+      dynamic_duration: false // 新增动态时长参数，可改善语速
     })
     
     // 翻译风格选项
@@ -527,14 +540,14 @@ export default {
     
     const uploadSuccess = (response, file) => {
       if (response.code === 200) {
-        currentVideo.value = {
+        // 添加视频到数组
+        currentVideos.value.push({
           id: response.data.id,
-          name: response.data.filename,
+          name: response.data.original_filename || response.data.filename,
           url: response.data.video_url,
           size: response.data.file_size
-        }
-        translateForm.video_id = response.data.id
-        ElMessage.success('视频上传成功!')
+        })
+        ElMessage.success(`视频上传成功! (${currentVideos.value.length}/5)`)
         loadVideoList()
       } else {
         ElMessage.error(response.message || '上传失败')
@@ -547,7 +560,7 @@ export default {
     }
     
     const handleExceed = () => {
-      ElMessage.warning('最多只能上传一个视频文件')
+      ElMessage.warning('最多只能上传5个视频文件')
     }
     
     const handleFileChange = (file, fileList) => {
@@ -555,15 +568,15 @@ export default {
     }
     
     const delUploadFile = () => {
-      currentVideo.value = null
-      translateForm.video_id = null
+      // 清空数组
+      currentVideos.value = []
       resetForm()
       return true
     }
     
     const resetForm = () => {
       Object.assign(translateForm, {
-        video_id: null,
+        video_ids: [], // 改为数组
         source_language: 'auto',
         target_languages: [], // 改为数组
         speaker_num: 0,
@@ -572,7 +585,8 @@ export default {
         voices_map: {}, // 改为对象
         terminology_ids: [], // 新增术语库ID列表
         style: 'professional', // 新增翻译风格参数
-        caption_type: 0 // 新增字幕类型
+        caption_type: 0, // 新增字幕类型
+        dynamic_duration: false // 新增动态时长参数
       })
       
       // 重置语音选择
@@ -586,7 +600,7 @@ export default {
     
     // 打开翻译设置弹窗
     const openTranslateDialog = () => {
-      if (!currentVideo.value) {
+      if (!currentVideos.value || currentVideos.value.length === 0) {
         ElMessage.warning('请先上传视频')
         return
       }
@@ -594,8 +608,8 @@ export default {
       // 重置表单
       resetForm()
       
-      // 设置视频ID
-      translateForm.video_id = currentVideo.value.id
+      // 设置视频ID数组
+      translateForm.video_ids = currentVideos.value.map(v => v.id)
       
       // 加载术语库
       loadTerminologies()
@@ -613,6 +627,13 @@ export default {
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
     }
     
+    // 计算总文件大小
+    const getTotalVideoSize = () => {
+      if (!currentVideos.value || currentVideos.value.length === 0) return '0 B'
+      const totalSize = currentVideos.value.reduce((sum, video) => sum + (video.size || 0), 0)
+      return formatFileSize(totalSize)
+    }
+    
     const startTranslate = async () => {
       // 验证表单
       if (!translateFormRef.value) return
@@ -623,59 +644,85 @@ export default {
         return
       }
       
-      if (!canStartTranslate.value) return
+      if (!currentVideos.value || currentVideos.value.length === 0) {
+        ElMessage.error('请先上传视频')
+        return
+      }
+      
+      if (!translateForm.target_languages || translateForm.target_languages.length === 0) {
+        ElMessage.error('请选择目标语言')
+        return
+      }
       
       isTranslating.value = true
+      
       try {
-        // 构建请求数据
-        const requestData = {
-          ...translateForm,
-          voices_map: voiceMap.value // 使用语音映射对象
-        }
+        const videoIds = translateForm.video_ids
+        const totalTasks = videoIds.length * translateForm.target_languages.length
         
-        // 添加调试日志
-        console.log('发送翻译请求数据:', requestData)
-        console.log('当前视频:', currentVideo.value)
-        console.log('语音映射:', voiceMap.value)
+        ElMessage.info(`开始批量翻译 ${videoIds.length} 个视频，共 ${totalTasks} 个任务...`)
         
-        // 验证必要参数
-        if (!requestData.video_id) {
-          ElMessage.error('视频ID不能为空')
-          isTranslating.value = false
-          return
-        }
-        if (!requestData.target_languages || requestData.target_languages.length === 0) {
-          ElMessage.error('请选择目标语言')
-          isTranslating.value = false
-          return
-        }
+        let successCount = 0
+        let failCount = 0
         
-        // 语音选择默认可选，只有当API返回错误时才提示必选
-        
-        const response = await videoApi.startTranslate(requestData)
-        if (response.code === 200) {
-          ElMessage.success('翻译任务已启动!')
-          translateDialogVisible.value = false
-          loadVideoList()
-          resetForm()
-          currentVideo.value = null
-          uploadRef.value.clearFiles()
+        // 循环为每个视频发送翻译请求
+        for (let i = 0; i < videoIds.length; i++) {
+          const videoId = videoIds[i]
           
-          // 启动自动刷新
-          setTimeout(() => {
-            startAutoRefresh()
-          }, 1000)
-        } else {
-          // 检查是否是语音必选错误
-          if (response.message && response.message.includes('必须选择AI语音')) {
-            ElMessage.error(response.message)
-          } else {
-            ElMessage.error(response.message || '启动翻译失败')
+          try {
+            const requestData = {
+              video_id: videoId,
+              source_language: translateForm.source_language,
+              target_languages: translateForm.target_languages,
+              speaker_num: translateForm.speaker_num,
+              lipsync_enabled: translateForm.lipsync_enabled,
+              lip_sync_type: translateForm.lip_sync_type,
+              voices_map: voiceMap.value,
+              terminology_ids: translateForm.terminology_ids,
+              style: translateForm.style,
+              caption_type: translateForm.caption_type,
+              dynamic_duration: translateForm.dynamic_duration
+            }
+            
+            const response = await videoApi.startTranslate(requestData)
+            
+            if (response.code === 200) {
+              successCount++
+              console.log(`视频 ${i + 1}/${videoIds.length} 翻译任务已启动`)
+            } else {
+              failCount++
+              const errorMsg = response.message || response.msg || '未知错误'
+              console.error(`视频 ${i + 1}/${videoIds.length} 翻译失败:`, errorMsg)
+              ElMessage.error(`视频 ${i + 1} 翻译失败: ${errorMsg}`)
+            }
+          } catch (error) {
+            failCount++
+            const errorMsg = error.message || error.toString() || '网络错误'
+            console.error(`视频 ${i + 1}/${videoIds.length} 翻译异常:`, error)
+            ElMessage.error(`视频 ${i + 1} 翻译异常: ${errorMsg}`)
           }
         }
+        
+        // 显示结果
+        if (successCount > 0) {
+          ElMessage.success(`批量翻译已启动! 成功: ${successCount} 个视频，失败: ${failCount} 个`)
+        } else {
+          ElMessage.error(`批量翻译全部失败，共尝试 ${videoIds.length} 个视频`)
+        }
+        
+        translateDialogVisible.value = false
+        loadVideoList()
+        resetForm()
+        currentVideos.value = []
+        uploadRef.value.clearFiles()
+        
+        // 启动自动刷新
+        setTimeout(() => {
+          startAutoRefresh()
+        }, 1000)
       } catch (error) {
-        console.error('Start translate error:', error)
-        ElMessage.error('启动翻译失败，请重试')
+        console.error('Batch translate error:', error)
+        ElMessage.error('批量翻译失败，请重试')
       } finally {
         isTranslating.value = false
       }
@@ -697,9 +744,11 @@ export default {
           videoList.value = response.data.videos
           total.value = response.data.total
           
-          // 检查是否有处理中的视频，启动或停止自动刷新
-          const processingVideos = videoList.value.filter(video => video.status === 'processing')
-          if (processingVideos.length > 0) {
+          // 检查是否有处理中或队列中的视频，启动或停止自动刷新
+          const activeVideos = videoList.value.filter(video => 
+            video.status === 'processing' || video.status === 'queued'
+          )
+          if (activeVideos.length > 0) {
             startAutoRefresh()
           } else {
             stopAutoRefresh()
@@ -940,13 +989,13 @@ export default {
     }
     
     const editVideo = (video) => {
-      currentVideo.value = {
+      currentVideos.value = [{
         id: video.id,
-        name: video.filename,
+        name: video.original_filename || video.filename,
         url: video.video_url,
         size: video.file_size
-      }
-      translateForm.video_id = video.id
+      }]
+      translateForm.video_ids = [video.id]
       translateForm.source_language = video.source_language
       translateForm.target_languages = video.target_language ? [video.target_language] : []
       translateForm.lipsync_enabled = video.lipsync_enabled
@@ -1028,6 +1077,7 @@ export default {
     const getStatusType = (status) => {
       const types = {
         'uploaded': 'info',
+        'queued': 'warning',
         'processing': 'warning',
         'completed': 'success',
         'failed': 'danger',
@@ -1039,6 +1089,7 @@ export default {
     const getStatusText = (status) => {
       const texts = {
         'uploaded': '已上传',
+        'queued': '队列中',
         'processing': '处理中',
         'completed': '已完成',
         'failed': '已失败',
@@ -1051,17 +1102,14 @@ export default {
       const classes = {
         'completed': 'status-completed',
         'expired': 'status-expired',
+        'queued': 'status-queued',
         'processing': 'status-processing',
         'failed': 'status-failed'
       }
       return classes[status] || ''
     }
     
-    const formatDate = (dateString) => {
-      if (!dateString) return ''
-      const date = new Date(dateString)
-      return date.toLocaleString('zh-CN')
-    }
+    // formatDate已从@/utils/tools导入
     
     // 自动刷新定时器
     let autoRefreshTimer = null
@@ -1132,7 +1180,7 @@ export default {
     return {
       // 响应式数据
       uploadRef,
-      currentVideo,
+      currentVideos, // 改为数组
       fileListShow,
       loading,
       isTranslating,
@@ -1148,7 +1196,6 @@ export default {
       translateRules,
       translateFormRef,
       translateDialogVisible,
-      canStartTranslate,
       
       // 新增：AI语音相关数据
       availableVoices,
@@ -1196,6 +1243,7 @@ export default {
       getStatusText,
       getStatusClass,
       formatFileSize,
+      getTotalVideoSize, // 新增
       formatDate,
       userStore
     }
@@ -1614,6 +1662,10 @@ export default {
 
 .status-processing {
   color: #e6a23c;
+}
+
+.status-queued {
+  color: #909399;
 }
 
 .status-failed {

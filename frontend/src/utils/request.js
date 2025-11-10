@@ -15,7 +15,7 @@ const service = axios.create({
   transformRequest: [function(data, headers) {
     if (data instanceof FormData) {
       return data
-    } else if (headers['Content-Type'] === 'application/json') {
+    } else if (headers['Content-Type'] === 'application/json' || headers['content-type'] === 'application/json') {
       // JSON请求不进行转换
       return JSON.stringify(data)
     } else {
@@ -43,9 +43,12 @@ service.interceptors.request.use(
     config.headers['withCredentials']=true  // 携带凭据（如 Cookies）
     
     // 设置Content-Type
-    if (config.data && !(config.data instanceof FormData) && !config.headers['Content-Type']) {
-      // 如果没有指定Content-Type，默认为application/x-www-form-urlencoded
-      config.headers['Content-Type'] = 'application/x-www-form-urlencoded'
+    if (config.data && !(config.data instanceof FormData)) {
+      // 如果已经指定了Content-Type，使用指定的值
+      // 否则默认为application/x-www-form-urlencoded
+      if (!config.headers['Content-Type'] && !config.headers['content-type']) {
+        config.headers['Content-Type'] = 'application/x-www-form-urlencoded'
+      }
     }
     
       // config.headers['language'] = localStorage.getItem('language')||'zh';
@@ -61,6 +64,31 @@ service.interceptors.request.use(
 // response interceptor
 service.interceptors.response.use(
   response => {
+    // 如果是 blob 响应（文件下载），直接返回
+    if (response.config.responseType === 'blob' || response.data instanceof Blob) {
+      // 检查是否是错误响应（错误响应可能是 JSON 格式的 blob）
+      if (response.data.type && response.data.type.includes('application/json')) {
+        // 错误响应，需要解析
+        return response.data.text().then(text => {
+          try {
+            const errorData = JSON.parse(text)
+            if (errorData.code === 401) {
+              ElMessage.error('身份过期，请重新登录')
+              router.push('/login')
+              return Promise.reject(new Error('Unauthorized'))
+            }
+            ElMessage.error(errorData.message || '下载失败')
+            return Promise.reject(new Error(errorData.message || '下载失败'))
+          } catch (e) {
+            ElMessage.error('下载失败')
+            return Promise.reject(new Error('下载失败'))
+          }
+        })
+      }
+      // 正常的文件响应，直接返回 blob
+      return response.data
+    }
+    
     const res = response.data
     console.log('API响应数据:', res) // 添加调试信息
     
@@ -112,7 +140,12 @@ service.interceptors.response.use(
           router.push('/login')
           break  
         case 403:
-          ElMessage.error('用户状态异常或权限不足!')
+          // 优先显示后端返回的具体错误信息
+          ElMessage.error(errorMessage || '用户状态异常或权限不足')
+          break
+        case 400:
+          // 优先显示后端返回的具体错误信息
+          ElMessage.error(errorMessage || '请求错误')
           break
         case 500:
           ElMessage.error(errorMessage)

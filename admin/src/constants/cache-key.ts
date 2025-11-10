@@ -8,6 +8,8 @@ class CacheKey {
   static readonly ACTIVE_THEME_NAME = `${SYSTEM_NAME}-active-theme-name-key`
   static readonly VISITED_VIEWS = `${SYSTEM_NAME}-visited-views-key`
   static readonly CACHED_VIEWS = `${SYSTEM_NAME}-cached-views-key`
+  static readonly IS_SUPER_ADMIN = `${SYSTEM_NAME}-is-super-admin-key`
+  static readonly TENANT_ID = `${SYSTEM_NAME}-tenant-id-key`
 }
 
 export default CacheKey

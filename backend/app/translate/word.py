@@ -227,7 +227,9 @@ def start_with_okapi(trans, start_time):
                                         text, target_lang, "auto", 
                                         prompt=temp_trans.get('prompt'),
                                         prompt_id=temp_trans.get('prompt_id'),
-                                        texts=texts, index=index
+                                        texts=texts, index=index,
+                                        tenant_id=temp_trans.get('tenant_id'),
+                                        api_key=temp_trans.get('api_key')
                                     )
                                 else:
                                     translated = to_translate.translate_text(
@@ -242,7 +244,9 @@ def start_with_okapi(trans, start_time):
                                         text, target_lang, "auto", 
                                         prompt=self.trans.get('prompt'),
                                         prompt_id=self.trans.get('prompt_id'),
-                                        texts=texts, index=index
+                                        texts=texts, index=index,
+                                        tenant_id=self.trans.get('tenant_id'),
+                                        api_key=self.trans.get('api_key')
                                     )
                                 else:
                                     translated = to_translate.translate_text(
@@ -257,7 +261,8 @@ def start_with_okapi(trans, start_time):
                                     text, target_lang, "auto", 
                                     prompt=self.trans.get('prompt'),
                                     prompt_id=self.trans.get('prompt_id'),
-                                    texts=texts, index=index
+                                    texts=texts, index=index,
+                                    api_key=self.trans.get('api_key')
                                 )
                             else:
                                 translated = to_translate.translate_text(

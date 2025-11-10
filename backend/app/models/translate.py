@@ -10,6 +10,7 @@ class Translate(db.Model):
     translate_no = db.Column(db.String(32))                         # 任务编号
     uuid = db.Column(db.String(64))                                 # 任务UUID
     customer_id = db.Column(db.Integer, default=0)                  # 关联用户ID
+    tenant_id = db.Column(db.Integer, default=1)                    # 租户ID
     rand_user_id = db.Column(db.String(64))                         # 随机用户ID（新增字段）[^3]
     origin_filename = db.Column(db.String(520), nullable=False)     # 原始文件名（带路径）
     origin_filepath = db.Column(db.String(520), nullable=False)     # 原始文件存储路径

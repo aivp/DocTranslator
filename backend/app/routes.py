@@ -11,7 +11,12 @@ from app.resources.admin.translate import AdminTranslateListResource, \
     AdminTranslateStatisticsResource, AdminTranslateDownloadResource, \
     AdminTranslateDownloadBatchResource
 from app.resources.admin.users import AdminUserListResource, AdminCreateUserResource, \
-    AdminUserDetailResource, AdminUpdateUserResource, AdminDeleteUserResource
+    AdminUserDetailResource, AdminUpdateUserResource, AdminDeleteUserResource, AdminResetPasswordResource
+from app.resources.admin.tenant import AdminTenantListResource, AdminTenantDetailResource, \
+    AdminCreateTenantResource, AdminUpdateTenantResource, AdminDeleteTenantResource, \
+    AdminAssignCustomerToTenantResource, AdminAssignUserToTenantResource, AdminTenantStorageQuotaResource
+from app.resources.admin.dashboard import DashboardStatisticsResource, DashboardTrendResource, \
+    DashboardStatusDistributionResource, DashboardRecentTasksResource, DashboardSystemStatusResource
 from app.resources.api.AccountResource import ChangePasswordResource, EmailChangePasswordResource, \
     StorageInfoResource, UserInfoResource, SendChangeCodeResource
 from flask_restful import Resource
@@ -39,6 +44,7 @@ from app.resources.api.translate import TranslateListResource, TranslateSettingR
     TranslateDownloadAllResource, TranslateProgressResource, QueueStatusResource
 from app.resources.api.video import VideoUploadResource, VideoTranslateResource, VideoStatusResource, \
     VideoListResource, VideoDeleteResource, VideoDownloadResource, VideoLanguagesResource, VideoVoicesResource, VideoWebhookResource, VideoTokenInfoResource
+from app.resources.api.tools import ImageUploadResource, ImageTranslateResource, ImageTranslateBatchResource, ImageTranslateStatusResource, ImageListResource, ImageDeleteResource, ImageBatchDeleteResource, ImageTranslateRetryResource, ImageTranslateBatchDownloadResource, PDFToImageResource
 
 
 def register_routes(api):
@@ -143,6 +149,18 @@ def register_routes(api):
     api.add_resource(VideoWebhookResource, '/api/video/webhook/<int:video_id>')
     api.add_resource(VideoTokenInfoResource, '/api/video/token-info')
 
+    # 工具接口
+    api.add_resource(ImageUploadResource, '/api/tools/image-upload')
+    api.add_resource(ImageTranslateResource, '/api/tools/image-translate')
+    api.add_resource(ImageTranslateBatchResource, '/api/tools/image-translate/batch')
+    api.add_resource(ImageTranslateStatusResource, '/api/tools/image-translate/status/<int:image_id>')
+    api.add_resource(ImageListResource, '/api/tools/images')
+    api.add_resource(ImageDeleteResource, '/api/tools/image/<int:image_id>')
+    api.add_resource(ImageBatchDeleteResource, '/api/tools/images/batch-delete')
+    api.add_resource(ImageTranslateRetryResource, '/api/tools/image-translate/retry/<int:image_id>')
+    api.add_resource(ImageTranslateBatchDownloadResource, '/api/tools/images/batch-download')
+    api.add_resource(PDFToImageResource, '/api/tools/pdf-to-image')
+
 
 # -------admin-----------
     api.add_resource(AdminLoginResource, '/api/admin/login')
@@ -160,6 +178,17 @@ def register_routes(api):
     api.add_resource(AdminUserDetailResource, '/api/admin/user/<int:id>')
     api.add_resource(AdminUpdateUserResource, '/api/admin/user/<int:id>')
     api.add_resource(AdminDeleteUserResource, '/api/admin/user/<int:id>')
+    api.add_resource(AdminResetPasswordResource, '/api/admin/user/<int:id>/reset-password')
+
+    # 租户管理接口（超级管理员专用）
+    api.add_resource(AdminTenantListResource, '/api/admin/tenants')
+    api.add_resource(AdminTenantDetailResource, '/api/admin/tenant/<int:id>')
+    api.add_resource(AdminCreateTenantResource, '/api/admin/tenant')
+    api.add_resource(AdminUpdateTenantResource, '/api/admin/tenant/<int:id>')
+    api.add_resource(AdminDeleteTenantResource, '/api/admin/tenant/<int:id>')
+    api.add_resource(AdminAssignCustomerToTenantResource, '/api/admin/tenant/assign-customer')
+    api.add_resource(AdminAssignUserToTenantResource, '/api/admin/tenant/assign-user')
+    api.add_resource(AdminTenantStorageQuotaResource, '/api/admin/tenant/<int:id>/storage-quota')
 
     api.add_resource(AdminTranslateListResource, '/api/admin/translates')
     api.add_resource(AdminTranslateDeteleResource, '/api/admin/translate/<int:id>')
@@ -178,7 +207,17 @@ def register_routes(api):
     api.add_resource(AdminSettingSiteResource, '/api/admin/setting/site')
 
     # 系统文件存储管理
-    api.add_resource(SystemStorageResource, '/api/admin/system/storage')
+    api.add_resource(SystemStorageResource, '/api/admin/system/storages')
+    
+    # 看板API
+    api.add_resource(DashboardStatisticsResource, '/api/admin/dashboard/statistics')
+    api.add_resource(DashboardTrendResource, '/api/admin/dashboard/trend')
+    api.add_resource(DashboardStatusDistributionResource, '/api/admin/dashboard/status-distribution')
+    api.add_resource(DashboardRecentTasksResource, '/api/admin/dashboard/recent-tasks')
+    api.add_resource(DashboardSystemStatusResource, '/api/admin/dashboard/system-status')
+    
     print("✅ 路由配置完成")  # 添加调试输出
+    print("✅ 文件存储管理路由已注册: /api/admin/system/storages")  # 添加调试输出
+    print("✅ 看板路由已注册")  # 添加调试输出
     # api.add_resource(TodoListResource, '/todos')
     # api.add_resource(TodoResource, '/todos/<int:todo_id>')

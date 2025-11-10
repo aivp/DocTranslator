@@ -14,6 +14,7 @@ class Comparison(db.Model):
     added_count = db.Column(db.Integer, default=0)                  # 被添加次数（之前遗漏的字段）[^2]
     content = db.Column(db.Text, nullable=True)                     # 术语内容（已废弃，保留用于兼容）
     customer_id = db.Column(db.Integer, default=0)                  # 创建用户ID
+    tenant_id = db.Column(db.Integer, default=1)                    # 租户ID
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)                            # 更新时间
     deleted_flag = db.Column(db.Enum('N', 'Y'), default='N')        # 删除标记

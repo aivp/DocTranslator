@@ -6,6 +6,9 @@
     <el-form-item label="" required prop="password">
       <el-input v-model="user.password" type="password" show-password placeholder="密码" />
     </el-form-item>
+    <el-form-item label="" required prop="tenant_code">
+      <el-input v-model="user.tenant_code" placeholder="租户代码" />
+    </el-form-item>
     <!-- 隐藏忘记密码功能 -->
     <!-- <div class="flex_right">
       <el-text class="forget" @click="doForget">忘记密码?</el-text>
@@ -25,10 +28,12 @@ const form = ref()
 const user = reactive({
   email: '',
   password: '',
+  tenant_code: ''
 })
 const rules = reactive({
   email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
   password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
+  tenant_code: [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
 })
 function doLogin(form) {
   form.validate((valid, fields) => {

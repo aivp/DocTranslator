@@ -31,6 +31,13 @@ router.beforeEach(async (to, _from, next) => {
     return next({ path: "/" })
   }
 
+  // 检查页面是否需要超级管理员权限
+  if (to.meta?.requiresSuperAdmin && !userStore.isSuperAdmin) {
+    ElMessage.warning("只有超级管理员才能访问此页面")
+    NProgress.done()
+    return next("/403") // 重定向到403页面
+  }
+
   // 如果用户已经获得其权限角色
   if (userStore.roles.length !== 0) return next()
 

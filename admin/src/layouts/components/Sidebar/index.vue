@@ -4,6 +4,7 @@ import { useRoute } from "vue-router"
 import { useAppStore } from "@/store/modules/app"
 import { usePermissionStore } from "@/store/modules/permission"
 import { useSettingsStore } from "@/store/modules/settings"
+import { useUserStore } from "@/store/modules/user"
 import SidebarItem from "./SidebarItem.vue"
 import Logo from "../Logo/index.vue"
 import { useDevice } from "@/hooks/useDevice"
@@ -20,6 +21,7 @@ const route = useRoute()
 const appStore = useAppStore()
 const permissionStore = usePermissionStore()
 const settingsStore = useSettingsStore()
+const userStore = useUserStore()
 
 const activeMenu = computed(() => {
   const {
@@ -28,7 +30,19 @@ const activeMenu = computed(() => {
   } = route
   return activeMenu ? activeMenu : path
 })
-const noHiddenRoutes = computed(() => permissionStore.routes.filter((item) => !item.meta?.hidden))
+
+// 过滤菜单：隐藏需要超级管理员权限但当前用户不是超级管理员的菜单
+const noHiddenRoutes = computed(() => {
+  return permissionStore.routes.filter((item) => {
+    // 如果菜单标记为隐藏，则过滤掉
+    if (item.meta?.hidden) return false
+    
+    // 如果菜单需要超级管理员权限，但当前用户不是超级管理员，则过滤掉
+    if (item.meta?.requiresSuperAdmin && !userStore.isSuperAdmin) return false
+    
+    return true
+  })
+})
 const isCollapse = computed(() => !appStore.sidebar.opened)
 const isLogo = computed(() => isLeft.value && settingsStore.showLogo)
 const backgroundColor = computed(() => (isLeft.value ? v3SidebarMenuBgColor : undefined))

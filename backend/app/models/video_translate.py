@@ -1,4 +1,5 @@
 from datetime import datetime
+import math
 from app.extensions import db
 
 
@@ -8,6 +9,7 @@ class VideoTranslate(db.Model):
     
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     customer_id = db.Column(db.Integer, nullable=False, comment='用户ID')
+    tenant_id = db.Column(db.Integer, default=1, comment='租户ID')
     filename = db.Column(db.String(520), nullable=False, comment='视频文件名(存储后的文件名)')
     original_filename = db.Column(db.String(520), nullable=False, comment='原始文件名')
     filepath = db.Column(db.String(520), nullable=False, comment='视频文件存储路径')
@@ -15,7 +17,7 @@ class VideoTranslate(db.Model):
     source_language = db.Column(db.String(32), nullable=False, comment='源语言')
     target_language = db.Column(db.String(32), nullable=False, comment='目标语言')
     akool_task_id = db.Column(db.String(128), comment='Akool任务ID')
-    status = db.Column(db.Enum('uploaded', 'processing', 'completed', 'failed', 'expired'), 
+    status = db.Column(db.Enum('uploaded', 'queued', 'processing', 'completed', 'failed', 'expired'), 
                       default='uploaded', comment='翻译状态')
     translated_video_url = db.Column(db.String(1024), comment='翻译后视频URL')
     lipsync_enabled = db.Column(db.Boolean, default=False, comment='是否启用唇语同步')
@@ -93,7 +95,9 @@ class VideoTranslate(db.Model):
         """检查是否过期"""
         if not self.expires_at:
             return False
-        return datetime.utcnow() > self.expires_at
+        # 如果剩余时间少于1天，也视为过期
+        time_left = (self.expires_at - datetime.utcnow()).total_seconds()
+        return time_left <= 0
 
     def get_status_info(self):
         """获取状态信息"""
@@ -107,12 +111,26 @@ class VideoTranslate(db.Model):
                     'can_download': False
                 }
             elif self.expires_at:
-                days_left = (self.expires_at - now).days
+                # 计算剩余天数（含小数部分）
+                days_left = (self.expires_at - now).total_seconds() / 86400
+                
+                # 向下取整后+1，确保范围是1-7
+                # 例如：6.5天 -> floor(6.5)=6 -> 显示7天
+                #      6.0天 -> floor(6.0)=6 -> 显示7天
+                #      5.9天 -> floor(5.9)=5 -> 显示6天
+                #      0.5天 -> floor(0.5)=0 -> 显示1天
+                #      0.0天 -> floor(0.0)=0 -> 显示1天
+                #      -0.1天 -> floor(-0.1)=-1 -> (-1)+1=0 -> 需要特殊处理
+                display_days = math.floor(days_left) + 1
+                
+                # 确保范围是1-7
+                display_days = min(max(display_days, 1), 7)
+                
                 return {
                     'status': 'completed',
-                    'message': f'视频有效，{days_left}天后过期',
+                    'message': f'视频有效，{display_days}天后过期',
                     'can_download': True,
-                    'days_left': days_left
+                    'days_left': display_days
                 }
             else:
                 return {
@@ -120,6 +138,12 @@ class VideoTranslate(db.Model):
                     'message': '视频有效',
                     'can_download': True
                 }
+        elif self.status == 'queued':
+            return {
+                'status': 'queued',
+                'message': '等待队列中...',
+                'can_download': False
+            }
         elif self.status == 'processing':
             return {
                 'status': 'processing',

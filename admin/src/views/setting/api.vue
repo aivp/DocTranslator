@@ -1,129 +1,186 @@
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { type FormInstance, ElMessage } from 'element-plus'
+import { useUserStore } from '@/store/modules/user'
 import { getApiSettingData, setApiSettingData } from '@/api/setting'
+import { getTenantListApi } from '@/api/tenant'
+import type { TenantData } from '@/api/tenant/types/tenant'
 
 defineOptions({
   // 命名当前组件
   name: '接口配置',
 })
+
+const userStore = useUserStore()
+const isSuperAdmin = computed(() => userStore.isSuperAdmin)
+const tenantId = computed(() => userStore.tenantId)
+
 const loading = ref(false)
+const tenants = ref<TenantData[]>([])
+const selectedTenantId = ref<number | undefined>(undefined)
 const setting = ref({
-  api_url: '',
-  api_key: '',
-  models: '',
-  default_model: '',
-  default_backup: '',
+  dashscope_key: '',
+  akool_client_id: '',
+  akool_client_secret: '',
 })
 
-const models = ref<string[]>([])
-const settingForm = ref<FormInstance | null>(null)
-
 const rules = {
-  api_url: [{ required: true, message: '请填写接口配置', trigger: 'blur' }],
-  api_key: [{ required: true, message: '请填写API秘钥', trigger: 'blur' }],
-  models: [{ required: true, message: '请填写模型配置', trigger: 'blur' }],
+  // 所有字段都是可选的，不需要必填验证
 }
 
 onMounted(async () => {
   loading.value = true
-  await getApiSettingData().then((data) => {
-    if (data.data) {
-      setting.value = data.data
-      const arr: string[] = data.data.models.split(',')
-      models.value = arr.filter((item) => item != '')
+  
+  // 如果是超级管理员，加载租户列表
+  if (isSuperAdmin.value) {
+    try {
+      const tenantData = await getTenantListApi({ page: 1, limit: 100 })
+      if (tenantData.data && tenantData.data.data) {
+        tenants.value = tenantData.data.data
+      }
+    } catch (error) {
+      console.error('加载租户列表失败:', error)
     }
-  })
+  }
+  
+  // 加载配置
+  await loadSetting()
   loading.value = false
 })
 
-function changeModel() {
-  if (!setting.value.models) return
-  const arr: string[] = setting.value.models.split(',')
-  models.value = arr.filter((item) => item != '')
-  if (arr.indexOf(setting.value.default_model) == -1) {
-    setting.value.default_model = ''
-  }
-  if (arr.indexOf(setting.value.default_backup) == -1) {
-    setting.value.default_backup = ''
+// 加载配置
+const loadSetting = async () => {
+  try {
+    const targetTenantId = isSuperAdmin.value ? selectedTenantId.value : (tenantId.value ?? undefined)
+    const data = await getApiSettingData(targetTenantId)
+    
+    if (data.data) {
+      setting.value = {
+        dashscope_key: data.data.dashscope_key || '',
+        akool_client_id: data.data.akool_client_id || '',
+        akool_client_secret: data.data.akool_client_secret || '',
+      }
+    }
+  } catch (error) {
+    console.error('加载配置失败:', error)
   }
 }
 
-function onSubmit(settingForm: FormInstance | null) {
-  console.log(setting.value)
+// 超级管理员切换租户
+const handleTenantChange = async () => {
+  await loadSetting()
+}
 
-  settingForm?.validate((valid, messages) => {
-    console.log(valid)
-    console.log(messages)
-    if (valid) {
-      setApiSettingData({
-        api_url: setting.value.api_url,
-        api_key: setting.value.api_key,
-        models: setting.value.models,
-        default_model: setting.value.default_model,
-        default_backup: setting.value.default_backup,
-      })
-        .then((data) => {
-          if (data.code == 200) {
-            ElMessage.success('保存成功')
-          } else {
-            ElMessage.error(data.message)
-          }
-        })
-        .catch((e) => {
-          ElMessage.error(e)
-        })
-    } else {
-      for (const field in messages) {
-        messages[field].forEach((message) => {
-          ElMessage({
-            message: message['message'],
-            type: 'error',
-          })
-        })
-        break
+// 已删除 changeModel 函数，不再需要
+
+function onSubmit() {
+  const data: any = {
+    dashscope_key: setting.value.dashscope_key,
+    akool_client_id: setting.value.akool_client_id,
+    akool_client_secret: setting.value.akool_client_secret,
+  }
+  
+  // 如果是超级管理员且选择了租户，传递tenant_id
+  if (isSuperAdmin.value && selectedTenantId.value) {
+    data.tenant_id = selectedTenantId.value
+  }
+  
+  setApiSettingData(data)
+    .then((response) => {
+      if (response.code == 200) {
+        ElMessage.success(response.message || '保存成功')
+        // 保存成功后重新加载配置
+        loadSetting()
+      } else {
+        ElMessage.error(response.message || '保存失败')
       }
-    }
-  })
+    })
+    .catch((e) => {
+      ElMessage.error(e.message || '保存失败')
+    })
 }
 </script>
 
 <template>
   <div class="app-container">
     <el-card shadow="never" v-loading="loading" :element-loading-text="'加载中...'">
-      <el-form class="settingForm" ref="settingForm" :model="setting" label-position="top" :rules="rules">
-        <el-form-item label="接口配置" prop="api_url" required>
-          <el-input v-model="setting.api_url" placeholder="https://api.openai.com" />
+      <!-- 超级管理员显示租户选择 -->
+      <div v-if="isSuperAdmin" style="margin-bottom: 20px;">
+        <el-alert
+          type="info"
+          title="全局配置"
+          description="请选择租户来查看或编辑其配置。不选择租户则查看/编辑全局默认配置。"
+          :closable="false"
+          show-icon
+        />
+        <el-select 
+          v-model="selectedTenantId" 
+          placeholder="选择租户（不选择则为全局配置）"
+          clearable
+          @change="handleTenantChange"
+          style="width: 300px; margin-top: 10px;"
+        >
+          <el-option
+            label="全局配置"
+            :value="undefined as any"
+          />
+          <el-option
+            v-for="tenant in tenants"
+            :key="tenant.id"
+            :label="tenant.name"
+            :value="tenant.id"
+          />
+        </el-select>
+      </div>
+      
+      <!-- 租户管理员显示提示 -->
+      <div v-else style="margin-bottom: 20px;">
+        <el-alert
+          type="warning"
+          title="租户配置"
+          description="此为租户级别配置，仅对本租户生效。如未配置，将使用全局配置。"
+          :closable="false"
+          show-icon
+        />
+      </div>
+      
+      <el-form class="settingForm" :model="setting" label-position="top" :rules="rules">
+        <el-form-item label="阿里云 DashScope API 密钥">
+          <el-input 
+            v-model="setting.dashscope_key" 
+            type="password"
+            show-password
+            placeholder="请输入阿里云 DashScope API 密钥" 
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+            用于文本翻译功能的 API 密钥
+          </div>
         </el-form-item>
-        <el-form-item label="API秘钥" prop="api_key" required>
-          <el-input v-model="setting.api_key" placeholder="sk-******" />
+        
+        <el-form-item label="Akool Client ID">
+          <el-input 
+            v-model="setting.akool_client_id" 
+            placeholder="请输入 Akool Client ID" 
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+            用于视频翻译功能的 Client ID
+          </div>
         </el-form-item>
-        <el-form-item label="模型配置" prop="models" required>
-          <el-input
-            type="textarea"
-            resize="none"
-            :rows="3"
-            v-model="setting.models"
-            @blur="changeModel"
-            placeholder="请至少输入1个模型，多个模型用,隔开" />
+        
+        <el-form-item label="Akool Client Secret">
+          <el-input 
+            v-model="setting.akool_client_secret" 
+            type="password"
+            show-password
+            placeholder="请输入 Akool Client Secret" 
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+            用于视频翻译功能的 Client Secret
+          </div>
         </el-form-item>
-        <el-form-item label="默认模型">
-          <el-select v-model="setting.default_model" placeholder="未选择默认模型将采用配置中的第1个" clearable>
-            <el-option v-for="model in models" :key="model" :label="model" :value="model" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="默认备用模型">
-          <el-select v-model="setting.default_backup" placeholder="未选择默认备用模型将采用配置中的第1个" clearable>
-            <el-option
-              v-for="model in models"
-              :key="model"
-              :disabled="setting.default_model == model ? true : false"
-              :label="model"
-              :value="model" />
-          </el-select>
-        </el-form-item>
+        
         <el-form-item class="setting-btns">
-          <el-button type="primary" @click="onSubmit(settingForm)">保存API设置</el-button>
+          <el-button type="primary" @click="onSubmit">保存API设置</el-button>
         </el-form-item>
       </el-form>
     </el-card>

@@ -1,26 +1,30 @@
 
 export interface ApiSetting {
-  api_url: string,
-  api_key: string,
-  models: string,
-  default_model: string,
-  default_backup: string
+  dashscope_key: string
+  akool_client_id: string
+  akool_client_secret: string
+  tenant_id?: number
 }
 
 export type GetApiSettingResponseData = ApiResponseData<ApiSetting>
 
 
 export interface OtherSetting {
-  prompt: string,
-  threads: string,
   email_limit: string,
+  tenant_id?: number
 }
 
 export type GetOtherSettingResponseData = ApiResponseData<OtherSetting>
 
 
 export interface SiteSetting {
-  version: string,
+  version: string
+  site_title: string
+  site_name: string
+  site_logo: string
+  admin_site_title: string
+  update_time?: string | null
+  tenant_id?: number
 }
 
 export type GetSiteSettingResponseData = ApiResponseData<SiteSetting>

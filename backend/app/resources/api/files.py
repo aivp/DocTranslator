@@ -13,6 +13,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import request, current_app
 from datetime import datetime
 from app.utils.token_checker import require_valid_token
+from app.utils.tenant_path import get_tenant_upload_dir
 
 
 class FileUploadResource(Resource):
@@ -49,8 +50,8 @@ class FileUploadResource(Resource):
             return APIResponse.error('用户存储空间不足', 403)
 
         try:
-            # 生成存储路径（按用户ID隔离）
-            save_dir = self.get_upload_dir(user_id)
+            # 生成存储路径（按租户ID和用户ID隔离）
+            save_dir = get_tenant_upload_dir(user_id)
             filename = file.filename
 
             # 直接使用原始文件名
@@ -102,8 +103,13 @@ class FileUploadResource(Resource):
 
     @staticmethod
     def allowed_file(filename):
-        # """验证文件类型是否允许"""# 暂不支持PDF 'pdf',
-        ALLOWED_EXTENSIONS = {'docx', 'xlsx','pdf', 'pptx', 'txt', 'md', 'csv', 'xls', 'doc'}
+        # """验证文件类型是否允许"""
+        # 文档格式
+        DOCUMENT_EXTENSIONS = {'docx', 'xlsx','pdf', 'pptx', 'txt', 'md', 'csv', 'xls', 'doc'}
+        # 图片格式（用于工具页面）
+        IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif'}
+        # 合并所有允许的格式
+        ALLOWED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
         return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
     @staticmethod
@@ -117,16 +123,9 @@ class FileUploadResource(Resource):
 
     @staticmethod
     def get_upload_dir(user_id):
-        """获取按用户ID和日期分类的上传目录"""
-        # 获取上传根目录
-        base_dir = Path(current_app.config['UPLOAD_BASE_DIR'])
-        upload_dir = base_dir / 'uploads' / f'user_{user_id}' / datetime.now().strftime('%Y-%m-%d')
-
-        # 如果目录不存在则创建
-        if not upload_dir.exists():
-            upload_dir.mkdir(parents=True, exist_ok=True)
-
-        return str(upload_dir)
+        """获取按租户ID和用户ID分类的上传目录（已废弃，使用get_tenant_upload_dir）"""
+        # 兼容旧方法，调用新的租户路径工具
+        return get_tenant_upload_dir(user_id)
 
     @staticmethod
     def calculate_md5(file_path):
@@ -156,32 +155,66 @@ class FileDeleteResource(Resource):
             return APIResponse.error('缺少必要参数', 400)
 
         try:
+            user_id = get_jwt_identity()
+            customer = Customer.query.get(user_id)
+            
             # 根据 UUID 查询翻译记录
             translate_record = Translate.query.filter_by(uuid=data['uuid']).first()
-            if not translate_record:
-                return APIResponse.error('文件记录不存在', 404)
+            
+            if translate_record:
+                # 记录存在，正常删除流程
+                file_path = translate_record.origin_filepath
+                file_size = translate_record.origin_filesize or 0
 
-            # 获取文件绝对路径
-            file_path = translate_record.origin_filepath
+                # 删除物理文件
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        current_app.logger.info(f"已删除物理文件：{file_path}")
+                    except Exception as e:
+                        current_app.logger.warning(f"删除物理文件失败：{file_path} - {e}")
 
-            # 删除物理文件
-            if os.path.exists(file_path):
-                os.remove(file_path)
                 # 更新用户存储空间
-                customer = Customer.query.get(get_jwt_identity())
-                customer.storage -= translate_record.origin_filesize
+                if file_size > 0:
+                    customer.storage = max(0, customer.storage - file_size)
+
+                # 删除数据库记录
+                db.session.delete(translate_record)
+                db.session.commit()
+                
+                return APIResponse.success(message='文件删除成功')
             else:
-                current_app.logger.warning(f"文件不存在：{file_path}")
-
-            # 删除数据库记录
-            db.session.delete(translate_record)
-            db.session.commit()
-
-            return APIResponse.success(message='文件删除成功')
+                # 记录不存在，可能是上传中删除的情况
+                # 如果提供了 filepath，尝试删除物理文件
+                file_path = data.get('filepath', '')
+                
+                if file_path and os.path.exists(file_path):
+                    try:
+                        # 获取文件大小
+                        file_size = os.path.getsize(file_path)
+                        # 删除物理文件
+                        os.remove(file_path)
+                        current_app.logger.info(f"已删除物理文件（记录不存在）：{file_path}")
+                        
+                        # 更新用户存储空间
+                        if file_size > 0:
+                            customer.storage = max(0, customer.storage - file_size)
+                            db.session.commit()
+                        
+                        return APIResponse.success(message='文件删除成功')
+                    except Exception as e:
+                        current_app.logger.warning(f"删除物理文件失败（记录不存在）：{file_path} - {e}")
+                        # 即使删除失败，也返回成功，因为记录本身就不存在
+                        return APIResponse.success(message='文件删除成功')
+                else:
+                    # 记录不存在且没有 filepath，可能是上传还没完成
+                    # 返回成功，不报错
+                    current_app.logger.info(f"删除请求：UUID {data['uuid']} 的记录不存在，可能是上传中删除")
+                    return APIResponse.success(message='文件删除成功')
 
         except Exception as e:
             db.session.rollback()
-            current_app.logger.error(f"文件删除失败：{str(e)}")
+            current_app.logger.error(f"文件删除失败：{str(e)}", exc_info=True)
             return APIResponse.error('文件删除失败', 500)
 
 

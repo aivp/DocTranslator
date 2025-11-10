@@ -95,6 +95,40 @@ export const constantRoutes: RouteRecordRaw[] = [
     ],
   },
   {
+    path: '/tenant',
+    component: Layouts,
+    children: [
+      {
+        path: '',
+        component: () => import('@/views/tenant/index.vue'),
+        name: 'tenant',
+        meta: {
+          title: '租户管理',
+          elIcon: 'office-building',
+          affix: true,
+          requiresSuperAdmin: true, // 只有超级管理员才能看到
+        },
+      },
+    ],
+  },
+  {
+    path: '/user',
+    component: Layouts,
+    children: [
+      {
+        path: '',
+        component: () => import('@/views/user/index.vue'),
+        name: 'user',
+        meta: {
+          title: '管理员管理',
+          elIcon: 'Avatar',
+          affix: true,
+          requiresSuperAdmin: true, // 只有超级管理员才能看到
+        },
+      },
+    ],
+  },
+  {
     path: '/setting',
     component: Layouts,
     meta: {
@@ -141,6 +175,7 @@ export const constantRoutes: RouteRecordRaw[] = [
           title: '修改密码',
           elIcon: 'lock',
           affix: true,
+          hidden: true,  // 隐藏左侧菜单，只能通过右上角头像下拉菜单访问
         },
       },
       {

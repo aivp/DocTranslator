@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 
 from app.extensions import db
 from app.models import  Customer, SendCode
+from app.models.tenant import Tenant
+from app.models.tenant_customer import TenantCustomer
 from app.utils.security import hash_password, verify_password
 from app.utils.response import APIResponse
 from app.utils.mail_service import EmailService
@@ -85,6 +87,26 @@ class UserLoginResource(Resource):
 
         if not customer or not verify_password(customer.password, data['password']):
             return APIResponse.error('账号或密码错误', 500)
+        
+        # 获取租户代码（必填）
+        tenant_code = data.get('tenant_code', '').strip()
+        if not tenant_code:
+            return APIResponse.error('请输入租户代码', 400)
+        
+        # 根据租户代码查找租户
+        tenant = Tenant.query.filter_by(tenant_code=tenant_code).first()
+        if not tenant:
+            return APIResponse.error('租户代码不存在，请检查后重试', 400)
+        
+        # 验证该用户是否属于这个租户
+        tenant_customer = TenantCustomer.query.filter_by(
+            customer_id=customer.id,
+            tenant_id=tenant.id
+        ).first()
+        
+        if not tenant_customer:
+            return APIResponse.error('该账号不属于该租户，请检查租户代码', 403)
+        
         # 确保identity是字符串
         access_token = create_access_token(identity=str(customer.id))
         return APIResponse.success({

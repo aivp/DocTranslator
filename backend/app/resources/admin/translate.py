@@ -10,10 +10,13 @@ from flask_restful import Resource, reqparse
 from app import db
 from app.models import Customer
 from app.models.translate import Translate
+from app.models.tenant_customer import TenantCustomer
+from app.models.tenant import Tenant
 from app.utils.response import APIResponse
 from app.utils.validators import (
     validate_id_list
 )
+from app.utils.admin_tenant_helper import get_admin_tenant_id, filter_by_admin_tenant, is_super_admin
 
 
 # 获取翻译记录列表
@@ -33,6 +36,18 @@ class AdminTranslateListResource(Resource):
         query = Translate.query.filter_by(
             deleted_flag='N'
         )
+        
+        # 添加租户过滤
+        # 超级管理员：显示所有翻译任务
+        # 租户管理员：只显示属于该租户的用户的翻译任务
+        tenant_id = get_admin_tenant_id()
+        if tenant_id is not None and not is_super_admin():
+            # 需要通过 TenantCustomer 来过滤
+            query = query.join(
+                TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
+            ).filter(
+                TenantCustomer.tenant_id == tenant_id
+            )
 
         # 检查状态过滤条件
         if args['status']:
@@ -43,7 +58,9 @@ class AdminTranslateListResource(Resource):
         # 检查关键字过滤条件
         if args['keyword']:
             # 模糊匹配 origin_filename 或 customer_email
-            query = query.join(Customer, Translate.customer_id == Customer.id).filter(
+            # 需要通过 distinct() 去重（因为可能已经 join 了 TenantCustomer）
+            query = query.join(Customer, Translate.customer_id == Customer.id).distinct()
+            query = query.filter(
                 (Translate.origin_filename.ilike(f"%{args['keyword']}%")) |
                 (Customer.email.ilike(f"%{args['keyword']}%"))
             )
@@ -65,7 +82,15 @@ class AdminTranslateListResource(Resource):
             # 获取用户邮箱（通过 Customer 模型关联查询）
             customer = Customer.query.get(t.customer_id)
             customer_email = customer.email if customer else "--"
-            customer_no = customer.customer_no if customer.customer_no else t.customer_id
+            customer_no = customer.customer_no if customer and customer.customer_no else t.customer_id
+            
+            # 获取租户信息
+            tenant_customer = TenantCustomer.query.filter_by(customer_id=t.customer_id).first()
+            tenant_name = "--"
+            if tenant_customer:
+                tenant = Tenant.query.get(tenant_customer.tenant_id)
+                tenant_name = tenant.name if tenant else "--"
+            
             # 格式化时间字段
             start_at_str = t.start_at.strftime('%Y-%m-%d %H:%M:%S') if t.start_at else "--"
             end_at_str = t.end_at.strftime('%Y-%m-%d %H:%M:%S') if t.end_at else "--"
@@ -76,6 +101,7 @@ class AdminTranslateListResource(Resource):
                 'customer_no': customer_no,
                 'customer_id': t.customer_id,  # 所属用户 ID
                 'customer_email': customer_email,  # 用户邮箱
+                'tenant_name': tenant_name,  # 租户名称
                 'origin_filename': t.origin_filename,
                 'status': t.status,
                 'process': float(t.process) if t.process is not None else None,  # 转换为 float
@@ -110,10 +136,22 @@ class AdminTranslateDownloadBatchResource(Resource):
                 return {"message": "ids 必须是数组"}, 400
 
             # 查询指定的翻译记录
-            records = Translate.query.filter(
+            tenant_id = get_admin_tenant_id()
+            
+            query = Translate.query.filter(
                 Translate.id.in_(ids),  # 过滤指定 ID
                 Translate.deleted_flag == 'N'  # 只下载未删除的记录
-            ).all()
+            )
+            
+            # 添加租户过滤
+            if tenant_id is not None and not is_super_admin():
+                query = query.join(
+                    TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
+                ).filter(
+                    TenantCustomer.tenant_id == tenant_id
+                )
+            
+            records = query.all()
 
             # 生成内存 ZIP 文件
             zip_buffer = BytesIO()
@@ -146,10 +184,19 @@ class AdminTranslateDownloadResource(Resource):
     def get(self, id):
         """通过 ID 下载单个翻译结果文件[^5]"""
         # 查询翻译记录
-        translate = Translate.query.filter_by(
-            id=id,
-            # customer_id=get_jwt_identity()
-        ).first_or_404()
+        tenant_id = get_admin_tenant_id()
+        
+        query = Translate.query.filter_by(id=id)
+        
+        # 添加租户过滤
+        if tenant_id is not None and not is_super_admin():
+            query = query.join(
+                TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
+            ).filter(
+                TenantCustomer.tenant_id == tenant_id
+            )
+        
+        translate = query.first_or_404()
 
         # 确保文件存在
         if not translate.target_filepath or not os.path.exists(translate.target_filepath):
@@ -176,7 +223,19 @@ class AdminTranslateDeteleResource(Resource):
     def delete(self, id):
         """删除单个翻译记录[^2]"""
         try:
-            record = Translate.query.get_or_404(id)
+            tenant_id = get_admin_tenant_id()
+            
+            query = Translate.query.filter_by(id=id)
+            
+            # 添加租户过滤
+            if tenant_id is not None and not is_super_admin():
+                query = query.join(
+                    TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
+                ).filter(
+                    TenantCustomer.tenant_id == tenant_id
+                )
+            
+            record = query.first_or_404()
             db.session.delete(record)
             db.session.commit()
             return APIResponse.success(message='记录删除成功')
@@ -193,9 +252,23 @@ class AdminTranslateBatchDeleteResource(Resource):
             if len(ids) > 100:
                 return APIResponse.error('单次最多删除100条记录', 400)
 
-            Translate.query.filter(Translate.id.in_(ids)).delete()
+            tenant_id = get_admin_tenant_id()
+            
+            query = Translate.query.filter(Translate.id.in_(ids))
+            
+            # 添加租户过滤
+            if tenant_id is not None and not is_super_admin():
+                query = query.join(
+                    TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
+                ).filter(
+                    TenantCustomer.tenant_id == tenant_id
+                )
+            
+            # 对于批量删除，需要先获取 ids 再删除
+            record_ids = [record.id for record in query.all()]
+            Translate.query.filter(Translate.id.in_(record_ids)).delete(synchronize_session=False)
             db.session.commit()
-            return APIResponse.success(message=f'成功删除{len(ids)}条记录')
+            return APIResponse.success(message=f'成功删除{len(record_ids)}条记录')
         except APIResponse as e:
             return e
         except Exception as e:
@@ -207,7 +280,20 @@ class AdminTranslateRestartResource(Resource):
     def post(self, id):
         """重启翻译任务[^4]"""
         try:
-            record = Translate.query.get_or_404(id)
+            tenant_id = get_admin_tenant_id()
+            
+            query = Translate.query.filter_by(id=id)
+            
+            # 添加租户过滤
+            if tenant_id is not None and not is_super_admin():
+                query = query.join(
+                    TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
+                ).filter(
+                    TenantCustomer.tenant_id == tenant_id
+                )
+            
+            record = query.first_or_404()
+            
             if record.status not in ['failed', 'done']:
                 return APIResponse.error('当前状态无法重启', 400)
 
@@ -228,10 +314,21 @@ class AdminTranslateStatisticsResource(Resource):
     def get(self):
         """获取翻译统计信息[^5]"""
         try:
-            total = Translate.query.count()
-            done_count = Translate.query.filter_by(status='done').count()
-            processing_count = Translate.query.filter_by(status='process').count()
-            failed_count = Translate.query.filter_by(status='failed').count()
+            tenant_id = get_admin_tenant_id()
+            
+            # 构建基础查询
+            base_query = Translate.query
+            if tenant_id is not None and not is_super_admin():
+                base_query = base_query.join(
+                    TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
+                ).filter(
+                    TenantCustomer.tenant_id == tenant_id
+                )
+            
+            total = base_query.count()
+            done_count = base_query.filter(Translate.status == 'done').count()
+            processing_count = base_query.filter(Translate.status == 'process').count()
+            failed_count = base_query.filter(Translate.status == 'failed').count()
 
             return APIResponse.success({
                 'total': total,

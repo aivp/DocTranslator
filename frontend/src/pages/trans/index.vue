@@ -154,7 +154,7 @@
             </div>
             <div :class="item.status == 'done' ? 'table_li' : 'table_li pc_show'">
               <span class="phone_show">完成时间:</span>
-              {{ item.end_at ? item.end_at : '--' }}
+              {{ item.end_at ? formatTime(item.end_at) : '--' }}
             </div>
             <div :class="item.status == 'done' ? 'table_li' : 'table_li pc_show'">
               <span class="phone_show">语言:</span>
@@ -217,6 +217,7 @@ import RetryIcon from '@/components/icons/RetryIcon.vue'
 import DeleteIcon from '../../components/icons/DeleteIcon.vue'
 import DownloadIcon from '../../components/icons/DownloadIcon.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { formatTime } from '@/utils/tools'
 import { Loading } from '@element-plus/icons-vue'
 const API_URL = import.meta.env.VITE_API_URL
 import {
@@ -231,7 +232,8 @@ import {
   doc2xStartService,
   doc2xQueryStatusService,
   getFinishCount,
-  getTranslateProgress
+  getTranslateProgress,
+  getQueueStatus
 } from '@/api/trans'
 import { storage } from '@/api/account'
 import uploadPng from '@assets/upload.png'
@@ -587,38 +589,13 @@ async function startBatchTranslation() {
       comparison_id: form.value.comparison_id,
       prompt_id: form.value.prompt_id,
       doc2x_flag: form.value.doc2x_flag,
-      doc2x_secret_key: form.value.doc2x_secret_key
+      doc2x_secret_key: form.value.doc2x_secret_key,
+      // 明确传递PDF翻译方式，避免后端回退默认值
+      pdf_translate_method: translateStore.common?.pdf_translate_method || 'direct'
     }
     
-    // 先获取当前翻译列表，过滤出需要翻译的文件
-    const res = await translates({ page: 1, limit: 100 })
-    if (res.code !== 200) {
-      ElMessage.error('获取翻译列表失败，无法启动批量翻译')
-      return
-    }
-    
-    const translateList = res.data.data
-    const filesToTranslate = []
-    
-    // 过滤出需要翻译的文件（状态为 'none' 且在当前上传列表中）
-    for (const file of form.value.files) {
-      const existingTask = translateList.find(task => task.uuid === file.uuid)
-      if (existingTask && existingTask.status === 'none') {
-        filesToTranslate.push({
-          ...file,
-          existingTask
-        })
-      } else if (existingTask) {
-        console.log(`文件 ${file.file_name} 状态为 ${existingTask.status}，跳过翻译`)
-      } else {
-        console.log(`文件 ${file.file_name} 未找到对应任务，跳过翻译`)
-      }
-    }
-    
-    if (filesToTranslate.length === 0) {
-      ElMessage.warning('没有需要翻译的文件，所有文件都已完成或正在处理中')
-      return
-    }
+    // 直接以上传返回的文件列表发起任务（通过uuid关联），不依赖列表匹配，避免“未找到对应任务”误判
+    const filesToTranslate = [...form.value.files]
     
     console.log(`实际需要翻译的文件数量: ${filesToTranslate.length}/${form.value.files.length}`)
     
@@ -937,6 +914,8 @@ async function handleTranslate(transform) {
     } else {
       // 单个文件翻译（保持原有逻辑）
       console.log('翻译表单：', form.value)
+      // 明确传递PDF翻译方式，避免后端回退默认值
+      form.value.pdf_translate_method = translateStore.common?.pdf_translate_method || 'direct'
       const res = await transalteFile(form.value)
       if (res.code == 200) {
         // 检查任务状态
@@ -1102,17 +1081,29 @@ function delUploadFile(file, files) {
         // 更新存储空间
         getStorageInfo()
       } else {
+        // 404 错误可能是上传中删除的情况，不显示错误消息
+        if (response.code !== 404) {
+          ElMessage({
+            message: response.message || '文件删除失败，请稍后再试',
+            type: 'error',
+          })
+        } else {
+          // 404 错误时静默处理，只更新存储空间
+          getStorageInfo()
+        }
+      }
+    })
+    .catch((error) => {
+      // 网络错误或其他异常，检查是否是 404
+      if (error.response && error.response.status === 404) {
+        // 404 错误静默处理
+        getStorageInfo()
+      } else {
         ElMessage({
           message: '文件删除失败，请稍后再试',
           type: 'error',
         })
       }
-    })
-    .catch((error) => {
-      ElMessage({
-        message: '文件删除失败，请稍后再试',
-        type: 'error',
-      })
     })
 
   // 从 result.value 中删除对应的文件
@@ -1424,31 +1415,91 @@ async function downAllTransFile() {
     downloadAllButtonState.value.isLoading = true
     downloadAllButtonState.value.disabled = true
     
-    // 直接使用fetch下载文件，不使用request工具
-    const response = await fetch(API_URL + '/translate/download/all', {
-      headers: {
-        'Authorization': 'Bearer ' + userStore.token
+    // 使用更兼容的下载方式，避免HTTP环境下blob URL限制
+    // 方法1：直接使用window.open（浏览器原生下载，兼容HTTP）
+    const downloadUrl = API_URL + '/translate/download/all'
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = `translations_${new Date().toISOString().slice(0, 10)}.zip`
+    
+    // 添加Authorization header通过URL参数或使用fetch后转为data URL
+    // 但更好的方式是后端支持Cookie认证，这里先用fetch获取后再下载
+    try {
+      const response = await fetch(downloadUrl, {
+        headers: {
+          'Authorization': 'Bearer ' + userStore.token
+        }
+      })
+      
+      if (!response.ok) {
+        throw new Error(`下载失败: ${response.status} ${response.statusText}`)
       }
-    })
-    
-    if (!response.ok) {
-      throw new Error('下载失败')
+      
+      // 获取blob
+      const blob = await response.blob()
+      
+      // 尝试多种下载方式以提高兼容性
+      // 方式1：使用blob URL（优先）
+      try {
+        const blobUrl = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.style.display = 'none'
+        a.href = blobUrl
+        a.download = `translations_${new Date().toISOString().slice(0, 10)}.zip`
+        document.body.appendChild(a)
+        a.click()
+        
+        // 延迟清理，确保下载开始
+        setTimeout(() => {
+          document.body.removeChild(a)
+          window.URL.revokeObjectURL(blobUrl)
+        }, 100)
+        
+        ElMessage({
+          message: '批量下载成功！文件已保存到浏览器默认下载目录',
+          type: 'success',
+          duration: 5000
+        })
+      } catch (blobError) {
+        // 方式2：blob URL失败时，尝试使用data URL（适用于小文件）
+        console.warn('blob URL下载失败，尝试data URL方式:', blobError)
+        if (blob.size < 50 * 1024 * 1024) { // 小于50MB才用data URL
+          const reader = new FileReader()
+          reader.onload = function(e) {
+            const dataUrl = e.target.result
+            const a = document.createElement('a')
+            a.style.display = 'none'
+            a.href = dataUrl
+            a.download = `translations_${new Date().toISOString().slice(0, 10)}.zip`
+            document.body.appendChild(a)
+            a.click()
+            setTimeout(() => {
+              document.body.removeChild(a)
+            }, 100)
+            ElMessage({
+              message: '批量下载成功！文件已保存到浏览器默认下载目录',
+              type: 'success',
+              duration: 5000
+            })
+          }
+          reader.onerror = () => {
+            throw new Error('文件读取失败')
+          }
+          reader.readAsDataURL(blob)
+        } else {
+          throw new Error('文件过大，无法使用备用下载方式。请配置HTTPS或使用单个文件下载。')
+        }
+      }
+    } catch (error) {
+      console.error('下载失败:', error)
+      // 如果是HTTP环境下的blob限制，给出友好提示
+      if (error.message && error.message.includes('blob')) {
+        ElMessage.error('当前环境不支持批量下载，请使用HTTPS或逐个下载文件')
+      } else {
+        ElMessage.error(`文件下载失败: ${error.message || '未知错误'}，请稍后重试`)
+      }
+      throw error
     }
-    
-    // 获取文件流并创建下载
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    
-    // 创建下载链接
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `translations_${new Date().toISOString().slice(0, 10)}.zip`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    window.URL.revokeObjectURL(url)
-    
-    ElMessage.success('批量下载成功！')
   } catch (error) {
     console.error('下载失败:', error)
     ElMessage.error('文件下载失败，请稍后重试')

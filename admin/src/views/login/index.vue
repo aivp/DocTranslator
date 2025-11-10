@@ -19,6 +19,7 @@ const loading = ref(false)
 const loginFormData = reactive({
   email: '',
   password: '',
+  tenant_code: '', // 租户代码（租户管理员必填，超级管理员可选）
   // code: ""
 })
 /** 登录表单校验规则 */
@@ -28,6 +29,7 @@ const loginFormRules = {
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 6, max: 16, message: '长度在 6 到 16 个字符', trigger: 'blur' },
   ],
+  // tenant_code 不需要前端校验，由后端根据角色判断
   // code: [{ required: true, message: "请输入验证码", trigger: "blur" }]
 }
 
@@ -43,8 +45,9 @@ const handleLogin = () => {
           ElMessage.success('登录成功')
           router.push({ path: '/' })
         })
-        .catch(() => {
+        .catch((error) => {
           loginFormData.password = ''
+          // 错误信息已由全局拦截器统一处理
         })
         .finally(() => {
           loading.value = false
@@ -102,6 +105,14 @@ const handleLogin = () => {
               tabindex="2"
               size="large"
               show-password />
+          </el-form-item>
+          <el-form-item label="租户代码（租户管理员必填，超级管理员可不填）">
+            <el-input
+              v-model.trim="loginFormData.tenant_code"
+              placeholder="请输入租户代码"
+              type="text"
+              tabindex="3"
+              size="large" />
           </el-form-item>
           <!-- <el-form-item prop="code">
             <el-input

@@ -17,6 +17,7 @@ from sqlalchemy import func
 from datetime import datetime
 from app.utils.token_checker import require_valid_token
 from app.utils.validators import validate_pagination_params
+from app.utils.tenant_helper import get_current_tenant_id
 
 # 获取logger
 logger = logging.getLogger(__name__)
@@ -27,16 +28,23 @@ class MyComparisonListResource(Resource):
     @jwt_required()
     def get(self):
         """获取我的术语表列表[^1]"""
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
         # 连表查询：comparison 表 + comparison_sub 表
+        filters = [
+            Comparison.customer_id == user_id,
+            Comparison.deleted_flag == 'N'
+        ]
+        if tenant_id:
+            filters.append(Comparison.tenant_id == tenant_id)
+        
         query = db.session.query(
             Comparison,
             func.count(ComparisonSub.id).label('term_count')  # 统计术语数量
         ).outerjoin(
             ComparisonSub, Comparison.id == ComparisonSub.comparison_sub_id
-        ).filter(
-            Comparison.customer_id == get_jwt_identity(),
-            Comparison.deleted_flag == 'N'
-        ).group_by(
+        ).filter(*filters).group_by(
             Comparison.id
         ).order_by(
             Comparison.created_at.desc()  # 按创建时间倒序
@@ -89,15 +97,27 @@ class SharedComparisonListResource(Resource):
     @require_valid_token
     @jwt_required()
     def get(self):
-        """获取共享术语表列表[^3]"""
+        """获取共享术语表列表[^3] - 只显示同一租户内的共享术语表"""
         # 从查询字符串中解析参数
         parser = reqparse.RequestParser()
         parser.add_argument('page', type=int, default=1, location='args')  # 分页参数
         parser.add_argument('limit', type=int, default=10, location='args')  # 分页参数
         parser.add_argument('order', type=str, default='latest', location='args')  # 排序参数
         args = parser.parse_args()
+        
+        # 获取当前用户的租户ID
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
 
         # 查询共享的术语表，并关联 Customer 表获取用户 email
+        filters = [
+            Comparison.share_flag == 'Y',
+            Comparison.deleted_flag == 'N'
+        ]
+        # 添加租户过滤 - 只显示同一租户内的共享术语表
+        if tenant_id:
+            filters.append(Comparison.tenant_id == tenant_id)
+        
         query = db.session.query(
             Comparison,
             func.count(ComparisonFav.id).label('fav_count'),  # 动态计算收藏量
@@ -106,10 +126,7 @@ class SharedComparisonListResource(Resource):
             ComparisonFav, Comparison.id == ComparisonFav.comparison_id
         ).outerjoin(
             Customer, Comparison.customer_id == Customer.id  # 通过 customer_id 关联 Customer
-        ).filter(
-            Comparison.share_flag == 'Y',
-            Comparison.deleted_flag == 'N'
-        ).group_by(
+        ).filter(*filters).group_by(
             Comparison.id
         )
 
@@ -415,16 +432,23 @@ class CreateComparisonResource(Resource):
         current_time = datetime.now(timezone)
 
         # 创建术语表
+        user_id = get_jwt_identity()
+        tenant_id = get_current_tenant_id(user_id)
+        
         comparison = Comparison(
             title=data['title'],
             origin_lang=data['origin_lang'],
             target_lang=data['target_lang'],
             content=content_str,  # 插入转换后的 content 字符串
-            customer_id=get_jwt_identity(),
+            customer_id=user_id,
             share_flag=data.get('share_flag', 'N'),
             created_at=current_time,  # 显式赋值
             updated_at=current_time  # 显式赋值
         )
+        
+        # 设置租户ID
+        if tenant_id:
+            comparison.tenant_id = tenant_id
         db.session.add(comparison)
         db.session.commit()
         return APIResponse.success({

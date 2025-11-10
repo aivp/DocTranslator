@@ -5,7 +5,10 @@ from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_requir
 
 from app import db
 from app.models.user import User
+from app.models.tenant import Tenant
+from app.models.tenant_user import TenantUser
 from app.utils.response import APIResponse
+from app.utils.admin_tenant_helper import is_super_admin, get_admin_tenant_id
 
 
 
@@ -29,17 +32,47 @@ class AdminLoginResource(Resource):
                 current_app.logger.warning(f"用户不存在：{data['email']}")
                 return APIResponse.unauthorized('账号或密码错误')
 
-            # 直接比较明文密码
-            if admin.password != data['password']:
+            # 使用哈希验证密码
+            if not admin.check_password(data['password']):
                 current_app.logger.warning(f"密码错误：{data['email']}")
                 return APIResponse.error('账号或密码错误')
 
+            # 判断是否为超级管理员
+            is_super = is_super_admin(admin.id)
+            tenant_id = get_admin_tenant_id(admin.id)
+            
+            # 如果是租户管理员，需要验证租户代码
+            if not is_super:
+                tenant_code = data.get('tenant_code', '').strip()
+                if not tenant_code:
+                    return APIResponse.error('租户管理员必须输入租户代码', 400)
+                
+                # 根据租户代码查找租户
+                tenant = Tenant.query.filter_by(tenant_code=tenant_code).first()
+                if not tenant:
+                    return APIResponse.error('租户代码不存在，请检查后重试', 400)
+                
+                # 验证该管理员是否属于这个租户
+                tenant_user = TenantUser.query.filter_by(
+                    user_id=admin.id,
+                    tenant_id=tenant.id
+                ).first()
+                
+                if not tenant_user:
+                    return APIResponse.error('该账号不属于该租户，请检查租户代码', 403)
+                
+                # 使用租户ID更新tenant_id
+                tenant_id = tenant.id
+            
             # 生成JWT令牌
             access_token = create_access_token(identity=str(admin.id))
+            
             return APIResponse.success({
                 'token': access_token,
                 'email': admin.email,
-                'name': admin.name
+                'name': admin.name,
+                'is_super_admin': is_super,
+                'tenant_id': tenant_id
             })
 
         except Exception as e:
@@ -65,8 +98,8 @@ class AdminChangePasswordResource(Resource):
             if not admin:
                 return APIResponse.error('管理员不存在', 404)
 
-            # 验证旧密码
-            if admin.password != data['old_password']:
+            # 验证旧密码（使用哈希验证）
+            if not admin.check_password(data['old_password']):
                 return APIResponse.error(message='旧密码错误')
 
             # 更新邮箱（如果 user 不为空）
@@ -78,7 +111,7 @@ class AdminChangePasswordResource(Resource):
                 if data['new_password'] and data['confirm_password']:
                     if data['new_password'] != data['confirm_password']:
                         return APIResponse.error('新密码和确认密码不一致', 400)
-                    admin.password = data['new_password']  # 明文存储
+                    admin.set_password(data['new_password'])  # 哈希加密存储
 
             # 保存到数据库
             db.session.commit()

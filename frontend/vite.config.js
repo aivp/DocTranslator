@@ -6,7 +6,7 @@ const resolve = (dir) => path.resolve(process.cwd(), dir)
 
 // https://vitejs.dev/config/
 export default defineConfig({
-    base: './', // 确保这里没有设置为 '/'
+    base: '/', // 使用绝对路径，确保静态资源从根路径加载
     plugins: [vue(),createSvgIconsPlugin({
       // 指定需要缓存的图标文件夹
       iconDirs: [resolve('src/icons/svg')],
@@ -27,10 +27,10 @@ export default defineConfig({
         alias: {
           '@': path.resolve(__dirname, './src'),
           '@assets': path.resolve(__dirname, './src/assets'),
-        },
-        base: '/',
-        build:{
-            assetsDir:"static",
         }
+    },
+    build: {
+        assetsDir: "assets",
+        outDir: "dist"
     }
 })

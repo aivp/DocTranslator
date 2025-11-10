@@ -17,6 +17,7 @@ export interface GetTranslateData {
   start_at: string
   end_at: string
   status: boolean
+  tenant_name?: string  // 租户名称
 }
 
 export type GetTranslateResponseData = ApiResponseData<{

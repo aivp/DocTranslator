@@ -4,6 +4,7 @@ import json
 import time
 from flask import current_app
 from typing import Dict, List, Optional
+from app.utils.api_key_helper import get_akool_client_id, get_akool_client_secret
 
 
 class AkoolVideoService:
@@ -13,10 +14,25 @@ class AkoolVideoService:
     _cached_token = None
     _token_expires_at = 0
     
-    def __init__(self, client_id: str = None, client_secret: str = None):
-        self.client_id = client_id or os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
-        self.client_secret = client_secret or os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
+    def __init__(self, client_id: str = None, client_secret: str = None, tenant_id: int = None):
+        # 优先使用传入的参数，否则从数据库/环境变量获取
+        if client_id is None:
+            client_id = get_akool_client_id(tenant_id)
+        if client_secret is None:
+            client_secret = get_akool_client_secret(tenant_id)
+        
+        # 只有在从参数获取失败时才从环境变量获取
+        if client_id is None:
+            client_id = os.getenv('CLIENT_ID') or os.getenv('AKOOL_CLIENT_ID') or os.getenv('client_Id')
+        if client_secret is None:
+            client_secret = os.getenv('CLIENT_SECRET') or os.getenv('AKOOL_CLIENT_SECRET') or os.getenv('client_Secret')
+        
+        self.client_id = client_id
+        self.client_secret = client_secret
         self.base_url = "https://openapi.akool.com/api/open/v3"
+        
+        # 详细日志输出
+        current_app.logger.info(f"Akool服务初始化: client_id存在={bool(self.client_id)}, client_secret存在={bool(self.client_secret)}")
         
         if not self.client_id or not self.client_secret:
             raise ValueError("Akool Client ID and Client Secret are required")
@@ -78,7 +94,8 @@ class AkoolVideoService:
         url = f"{self.base_url}{endpoint}"
         headers = {
             'Authorization': f'Bearer {self.access_token}',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-api-key': self.client_id  # 添加API key作为备用认证
         }
         
         try:
@@ -106,7 +123,8 @@ class AkoolVideoService:
                 # 重试请求
                 headers = {
                     'Authorization': f'Bearer {self.access_token}',
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'x-api-key': self.client_id  # 添加API key作为备用认证
                 }
                 if method.upper() == 'GET':
                     response = requests.get(url, headers=headers, params=data)
@@ -176,34 +194,29 @@ class AkoolVideoService:
                           webhook_url: str = None, speaker_num: int = 0,
                           voice_id: str = None, voices_map: Dict = None, 
                           terminology_ids: List = None, style: str = 'professional',
-                          caption_type: int = 0) -> Dict:
+                          caption_type: int = 0, dynamic_duration: bool = False) -> Dict:
         """创建视频翻译任务（支持多语言和语音映射）"""
         # 如果target_languages是字符串，转换为列表
         if isinstance(target_languages, str):
             target_languages = [target_languages]
         
-        # 构建基础数据
+        # 构建基础数据（根据最新Akool文档，只保留支持的参数）
         data = {
             'url': video_url,
             'source_language': source_language,
             'language': ','.join(target_languages),  # 转换为逗号分隔的字符串
-            'lipsync': lipsync,
-            'speaker_num': speaker_num,
-            'remove_bgm': True,  # 添加背景音乐移除参数
-            'caption_type': caption_type,  # 使用传入的字幕类型参数
-            'caption_url': ''  # 添加字幕URL参数
         }
         
-        # 添加studio_voice参数
-        data['studio_voice'] = {
-            'no_translate_words': [],
-            'fixed_words': {},
-            'pronounced_words': {},
-            'style': style
-        }
+        # 可选参数
+        if lipsync:
+            data['lipsync'] = lipsync
+        if speaker_num:
+            data['speaker_num'] = speaker_num
+        # dynamic_duration 参数始终包含在请求体中（参考图二方式）
+        data['dynamic_duration'] = dynamic_duration
         
-        # 处理术语库（fixed_words）
-        if terminology_ids and isinstance(terminology_ids, list):
+        # 处理术语库（如果有）
+        if terminology_ids and isinstance(terminology_ids, list) and len(terminology_ids) > 0:
             try:
                 from app.models.comparison import Comparison
                 fixed_words = {}
@@ -212,14 +225,12 @@ class AkoolVideoService:
                     if isinstance(term_id, str) and term_id.isdigit():
                         term_id = int(term_id)
                     
-                    # 获取术语库内容
                     comparison = Comparison.query.filter_by(
                         id=term_id,
                         deleted_flag='N'
                     ).first()
                     
                     if comparison:
-                        # 获取术语库的术语列表（ComparisonSub 没有 deleted_flag 字段）
                         terms = comparison.terms.all()
                         for term in terms:
                             source = term.original.strip() if term.original else ""
@@ -228,7 +239,10 @@ class AkoolVideoService:
                                 fixed_words[source] = target
                 
                 if fixed_words:
-                    data['studio_voice']['fixed_words'] = fixed_words
+                    # 使用studio_voice参数存储术语库
+                    data['studio_voice'] = {
+                        'fixed_words': fixed_words
+                    }
                     current_app.logger.info("加载术语库，固定词汇数量: {}".format(len(fixed_words)))
                     
             except Exception as e:
@@ -252,8 +266,8 @@ class AkoolVideoService:
             data['voice_id'] = voice_id
         
         # 添加Webhook URL（如果提供）
-        if webhook_url:
-            data['webhookUrl'] = webhook_url
+        # if webhook_url:
+        #     data['webhookUrl'] = webhook_url
             
         try:
             current_app.logger.info("创建翻译任务，数据: {}".format(data))

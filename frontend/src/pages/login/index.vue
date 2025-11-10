@@ -25,6 +25,13 @@
                 prefix-icon="el-icon-lock"
               />
             </el-form-item>
+            <el-form-item prop="tenant_code">
+              <el-input
+                v-model="loginForm.tenant_code"
+                placeholder="租户代码"
+                prefix-icon="el-icon-office-building"
+              />
+            </el-form-item>
             <!-- 隐藏忘记密码功能 -->
             <!-- <div class="auth-actions">
               <el-link type="primary" class="forget-link" @click="goToForgot"> 忘记密码? </el-link>
@@ -115,11 +122,13 @@ const loginLoading = ref(false)
 // 登录表单
 const loginForm = reactive({
   email: '',
-  password: ''
+  password: '',
+  tenant_code: ''
 })
 const loginRules = reactive({
   email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
-  password: [{ required: true, message: '请填写密码', trigger: 'blur' }]
+  password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
+  tenant_code: [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
 })
 
 // 注册功能已隐藏

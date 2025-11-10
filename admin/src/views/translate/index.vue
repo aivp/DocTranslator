@@ -12,6 +12,7 @@ import { type FormInstance, ElMessage, ElMessageBox } from "element-plus"
 import { Search, Refresh, CirclePlus, Download, Delete, RefreshRight } from "@element-plus/icons-vue"
 import { usePagination } from "@/hooks/usePagination"
 import { cloneDeep } from "lodash-es"
+import { formatDateTime } from "@/utils"
 const BASE_URL = import.meta.env.VITE_BASE_API
 defineOptions({
   // 命名当前组件
@@ -160,6 +161,7 @@ watch([() => paginationData.currentPage, () => paginationData.pageSize], getTabl
           <el-table-column prop="customer_no" width="80" label="用户ID" align="left" />
           <el-table-column prop="customer_email" label="用户邮箱" width="150" align="left" />
           <el-table-column prop="origin_filename" label="文档名称" align="left" />
+          <el-table-column prop="tenant_name" label="所属租户" width="120" align="left" />
           <el-table-column prop="status" label="任务状态" align="left" width="120">
             <template #default="scope">
               <el-tag v-if="scope.row.status == 'none'" type="primary" effect="plain">未完成</el-tag>
@@ -168,7 +170,11 @@ watch([() => paginationData.currentPage, () => paginationData.pageSize], getTabl
               <el-tag v-else type="success" effect="plain">已完成</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="start_at" label="任务开始时间" align="left" />
+          <el-table-column prop="start_at" label="任务开始时间" align="left">
+            <template #default="{ row }">
+              {{ formatDateTime(row.start_at) }}
+            </template>
+          </el-table-column>
           <el-table-column prop="spend_time" label="完成用时" width="100" align="left" />
           <el-table-column prop="deleted_flag" label="用户是否删除" align="left" width="120">
             <template #default="scope">

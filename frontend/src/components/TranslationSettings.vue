@@ -93,8 +93,8 @@
         <!-- PDF翻译方法选择 -->
         <el-form-item label="PDF翻译方法" width="100%">
           <el-radio-group v-model="settingsForm.common.pdf_translate_method" @change="handlePdfMethodToggle">
-            <el-radio label="direct">直接翻译（保留PDF格式）</el-radio>
-            <el-radio label="doc2x">Doc2x转换后翻译</el-radio>
+            <el-radio label="direct">直接翻译（保留PDF格式，速度较慢）</el-radio>
+            <el-radio label="doc2x">Doc2x转换后翻译（转word格式翻译，速度较快）</el-radio>
           </el-radio-group>
         </el-form-item>
       </template>

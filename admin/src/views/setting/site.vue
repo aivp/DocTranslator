@@ -1,9 +1,19 @@
-<script setup>
-import { ref, onMounted } from 'vue'
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/store/modules/user'
 import { getSiteSettingData, setSiteSettingData } from '@/api/setting'
-import { useSystemStore } from '@/store/modules/system'
-const systemStore = useSystemStore()
+import { getTenantListApi } from '@/api/tenant'
+import type { TenantData } from '@/api/tenant/types/tenant'
+
+const userStore = useUserStore()
+const isSuperAdmin = computed(() => userStore.isSuperAdmin)
+const tenantId = computed(() => userStore.tenantId)
+
+const loading = ref(false)
+const tenants = ref<TenantData[]>([])
+const selectedTenantId = ref<number | undefined>(undefined)
+
 // 表单数据
 const setting = ref({
   admin_site_title: '',
@@ -11,10 +21,10 @@ const setting = ref({
   site_name: '',
   site_title: '',
   version: '',
-  update_time: null,
+  update_time: null as string | null,
 })
 
-const settingForm = ref(null)
+const settingForm = ref<any>(null)
 const isSubmitting = ref(false)
 
 // 标准表单验证规则（不含HTTPS校验）
@@ -23,14 +33,7 @@ const rules = {
   site_title: [{ required: false, message: '请输入站点标题', trigger: 'blur' }],
 }
 
-// 获取本地存储站点配置
-const getLocalSettings = () => {
-  try {
-    setting.value = systemStore.site_settings
-  } catch (e) {
-    ElMessage.error('配置加载失败')
-  }
-}
+// 移除旧的本地存储逻辑，现在从API加载
 
 // 核心校验函数
 const validateHttpsLogo = () => {
@@ -63,31 +66,121 @@ const onSubmit = async () => {
     if (!validateHttpsLogo()) return
 
     isSubmitting.value = true
-    setting.value.update_time = Date.now().toString() // 时间戳，判断是否需要更新
-    const { code } = await setSiteSettingData(setting.value)
+    
+    const data: any = {
+      ...setting.value,
+      update_time: Date.now().toString() // 时间戳，判断是否需要更新
+    }
+    
+    // 如果是超级管理员且选择了租户，传递tenant_id
+    if (isSuperAdmin.value && selectedTenantId.value) {
+      data.tenant_id = selectedTenantId.value
+    }
+    
+    const { code, message } = await setSiteSettingData(data)
 
     if (code === 200) {
-      // 本地存储更新
-      systemStore.updateSiteSettings(setting.value)
-      ElMessage.success('配置保存成功')
-      setTimeout(() => location.reload(), 800) // 平滑刷新
+      ElMessage.success(message || '站点设置保存成功')
+      // 保存成功后重新加载配置
+      await loadSetting()
     }
   } catch (error) {
     console.error('保存失败:', error)
+    ElMessage.error('保存失败')
   } finally {
     isSubmitting.value = false
   }
 }
 
 // 初始化
-onMounted(()=>{
-  setting.value = systemStore.site_settings
+onMounted(async () => {
+  loading.value = true
+  
+  // 如果是超级管理员，加载租户列表
+  if (isSuperAdmin.value) {
+    try {
+      const tenantData = await getTenantListApi({ page: 1, limit: 100 })
+      if (tenantData.data && tenantData.data.data) {
+        tenants.value = tenantData.data.data
+      }
+    } catch (error) {
+      console.error('加载租户列表失败:', error)
+    }
+  }
+  
+  // 加载配置
+  await loadSetting()
+  loading.value = false
 })
+
+// 加载配置
+const loadSetting = async () => {
+  try {
+    const targetTenantId = isSuperAdmin.value ? selectedTenantId.value : tenantId.value
+    const res = await getSiteSettingData(targetTenantId ?? undefined)
+    
+    if (res.data) {
+      // 兼容类型转换
+      setting.value = {
+        ...res.data,
+        update_time: res.data.update_time ?? null
+      } as any
+    }
+  } catch (error) {
+    console.error('加载配置失败:', error)
+    ElMessage.error('加载配置失败')
+  }
+}
+
+// 超级管理员切换租户
+const handleTenantChange = async () => {
+  await loadSetting()
+}
 </script>
 
 <template>
   <div class="app-container">
-    <el-card shadow="never">
+    <el-card shadow="never" v-loading="loading" :element-loading-text="'加载中...'">
+      <!-- 超级管理员显示租户选择 -->
+      <div v-if="isSuperAdmin" style="margin-bottom: 20px;">
+        <el-alert
+          type="info"
+          title="全局配置"
+          description="请选择租户来查看或编辑其配置。不选择租户则查看/编辑全局默认配置。"
+          :closable="false"
+          show-icon
+        />
+        <el-select 
+          v-model="selectedTenantId" 
+          placeholder="选择租户（不选择则为全局配置）"
+          clearable
+          @change="handleTenantChange"
+          style="width: 300px; margin-top: 10px;"
+        >
+          <el-option
+            label="全局配置"
+            :value="undefined as any"
+          />
+          <el-option
+            v-for="tenant in tenants"
+            :key="tenant.id"
+            :label="tenant.name"
+            :value="tenant.id"
+          />
+        </el-select>
+      </div>
+      
+      <!-- 租户管理员显示提示 -->
+      <div v-else style="margin-bottom: 20px;">
+        <el-alert
+          type="warning"
+          title="租户配置"
+          description="此为租户级别配置，仅对本租户生效。如未配置，将使用全局配置。"
+          :closable="false"
+          show-icon
+        />
+      </div>
+      
       <el-form ref="settingForm" :model="setting" :rules="rules" label-width="120px" label-position="top">
         <!-- Logo URL 输入 -->
         <el-form-item label="站点LOGO地址：" prop="site_logo">

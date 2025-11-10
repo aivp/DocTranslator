@@ -15,6 +15,7 @@ class Setting(db.Model):
     deleted_flag = db.Column(db.Enum('N', 'Y'), default='N')  # 删除标记
     group = db.Column(db.String(32))  # 分组
     remark = db.Column(db.String(255))  # 备注
+    tenant_id = db.Column(db.Integer, nullable=True)  # 租户ID：NULL=全局配置，有值=租户级配置
 
     def to_dict(self):
         return {
@@ -23,5 +24,6 @@ class Setting(db.Model):
             'value': self.value,
             'serialized': self.serialized,
             'group': self.group,
-            'remark': self.remark
+            'remark': self.remark,
+            'tenant_id': self.tenant_id
         }

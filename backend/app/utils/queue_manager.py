@@ -14,15 +14,18 @@ logger = logging.getLogger(__name__)
 class QueueManager:
     def __init__(self):
         self.max_concurrent_tasks = 10  # 最大并发任务数改为10
-        self.max_memory_gb = 8  # 最大内存占用(GB)
-        self.critical_memory_gb = 6  # 临界内存阈值(GB) - 超过此值开始积极清理
-        self.emergency_memory_gb = 15  # 紧急内存阈值(GB) - 超过此值动态暂停任务
+        self.max_memory_gb = 10  # 最大内存占用(GB)
+        self.critical_memory_gb = 8  # 临界内存阈值(GB) - 超过此值开始积极清理
+        self.emergency_memory_gb = 12  # 紧急内存阈值(GB) - 超过此值动态暂停任务
         self.task_pause_duration = 30  # 任务暂停时长(秒) - 增加到30秒
         self.emergency_pause_active = False  # 紧急暂停状态标志
         self.emergency_start_time = None  # 紧急保护开始时间
         self.emergency_timeout_minutes = 5  # 紧急保护超时时间(分钟)
         self.memory_release_check_minutes = 2  # 内存释放检查时间(分钟)
-        self.max_pdf_tasks = 3  # 最大PDF翻译任务数
+        self.max_pdf_tasks = 2  # 最大PDF翻译任务数（已废弃，使用下面的分别限制）
+        self.max_large_pdf_tasks = 1  # 最大大PDF翻译任务数（超过25页）
+        self.max_small_pdf_tasks = 3  # 最大小PDF翻译任务数（25页以内）
+        self.large_pdf_page_threshold = 25  # 大PDF页数阈值
         self.queue_lock = threading.Lock()
         self.monitor_thread = None
         self.running = False
@@ -160,13 +163,46 @@ class QueueManager:
             
             # 获取当前进程内存使用量（字节）
             memory_bytes = get_memory_usage()
+            if memory_bytes == 0:
+                # 内存监控不可用，返回0但不报错（避免日志污染）
+                return 0.0
             return memory_bytes / (1024**3)  # 转换为GB
         except Exception as e:
-            logger.error(f"获取内存使用量失败: {e}")
+            # 使用debug级别，避免频繁的警告日志
+            logger.debug(f"获取内存使用量失败: {type(e).__name__}: {e}")
             return 0.0
     
+    def _is_large_pdf(self, file_path):
+        """判断PDF是否为大PDF（超过阈值页数）
+        
+        Args:
+            file_path: PDF文件路径
+            
+        Returns:
+            bool: True表示大PDF，False表示小PDF（默认）
+        """
+        try:
+            import os
+            import fitz
+            
+            if not file_path or not os.path.exists(file_path):
+                return False  # 文件不存在，默认当作小PDF
+            
+            # 打开PDF检查页数
+            doc = fitz.open(file_path)
+            page_count = doc.page_count
+            doc.close()
+            
+            is_large = page_count > self.large_pdf_page_threshold
+            logger.debug(f"PDF {os.path.basename(file_path)} 页数: {page_count}, 是否大PDF: {is_large}")
+            return is_large
+            
+        except Exception as e:
+            logger.warning(f"判断PDF大小失败: {e}，默认当作小PDF")
+            return False  # 出错时默认当作小PDF
+    
     def _get_current_pdf_tasks(self):
-        """获取当前运行的PDF翻译任务数量"""
+        """获取当前运行的PDF翻译任务数量（返回大PDF和小PDF的任务数）"""
         try:
             from app.models.translate import Translate
             
@@ -175,18 +211,32 @@ class QueueManager:
             
             # 在应用上下文中执行数据库操作
             with app.app_context():
-                # 统计正在运行的PDF任务
+                # 获取所有正在运行的PDF任务
                 pdf_tasks = Translate.query.filter(
                     Translate.status.in_(['process', 'changing']),
                     Translate.deleted_flag == 'N',
                     Translate.origin_filepath.like('%.pdf')
-                ).count()
+                ).all()
                 
-                return pdf_tasks
+                # 分别统计大PDF和小PDF
+                large_pdf_count = 0
+                small_pdf_count = 0
+                
+                for task in pdf_tasks:
+                    if self._is_large_pdf(task.origin_filepath):
+                        large_pdf_count += 1
+                    else:
+                        small_pdf_count += 1
+                
+                return {
+                    'total': len(pdf_tasks),
+                    'large': large_pdf_count,
+                    'small': small_pdf_count
+                }
                 
         except Exception as e:
             logger.error(f"获取PDF任务数量失败: {e}")
-            return 0
+            return {'total': 0, 'large': 0, 'small': 0}
     
     def _force_memory_cleanup(self):
         """强制内存清理 - 安全模式，不伤害运行中的任务"""
@@ -483,31 +533,55 @@ class QueueManager:
         
         Args:
             queued_tasks: 队列中的任务列表
-            current_pdf_tasks: 当前运行的PDF任务数
+            current_pdf_tasks: 当前运行的PDF任务数（字典，包含 'total', 'large', 'small'）
             
         Returns:
             Translate: 要启动的任务，如果没有合适的则返回None
         """
         try:
+            # 从字典中提取大PDF和小PDF的任务数
+            current_large_pdf = current_pdf_tasks.get('large', 0)
+            current_small_pdf = current_pdf_tasks.get('small', 0)
+            
+            # 计算小PDF的可用配额：小PDF配额 - 当前大PDF数量（大PDF占用小PDF配额）
+            # 例如：小PDF配额3，当前有1个大PDF，则小PDF可用配额为 3-1=2
+            available_small_pdf_slots = self.max_small_pdf_tasks - current_large_pdf
+            
             # 按队列顺序遍历任务
             for task in queued_tasks:
                 is_pdf = task.origin_filepath.lower().endswith('.pdf')
                 
                 if is_pdf:
-                    # 如果是PDF任务，检查PDF任务数是否未达上限
-                    if current_pdf_tasks < self.max_pdf_tasks:
-                        logger.info(f"选择PDF任务 {task.id} (当前PDF任务: {current_pdf_tasks}/{self.max_pdf_tasks})")
-                        return task
+                    # 如果是PDF任务，判断是大PDF还是小PDF
+                    is_large = self._is_large_pdf(task.origin_filepath)
+                    
+                    if is_large:
+                        # 大PDF任务：检查大PDF任务数是否未达上限
+                        if current_large_pdf < self.max_large_pdf_tasks:
+                            logger.info(f"选择PDF任务 {task.id} 开始处理")
+                            logger.debug(f"选择大PDF任务 {task.id} (当前大PDF: {current_large_pdf}/{self.max_large_pdf_tasks})")
+                            return task
+                        else:
+                            logger.debug(f"跳过大PDF任务 {task.id} (大PDF已达上限: {current_large_pdf}/{self.max_large_pdf_tasks})")
+                            continue
                     else:
-                        logger.debug(f"跳过PDF任务 {task.id} (PDF任务已达上限: {current_pdf_tasks}/{self.max_pdf_tasks})")
-                        continue  # 跳过这个PDF任务，继续找下一个
+                        # 小PDF任务：检查可用的小PDF配额
+                        if current_small_pdf < available_small_pdf_slots:
+                            logger.info(f"选择PDF任务 {task.id} 开始处理")
+                            logger.debug(f"选择小PDF任务 {task.id} (当前小PDF: {current_small_pdf}, 可用配额: {available_small_pdf_slots}, 大PDF占用: {current_large_pdf})")
+                            return task
+                        else:
+                            logger.debug(f"跳过小PDF任务 {task.id} (小PDF配额不足: {current_small_pdf}/{available_small_pdf_slots}, 大PDF占用: {current_large_pdf})")
+                            continue
                 else:
                     # 如果不是PDF任务，直接选择
-                    logger.info(f"选择非PDF任务 {task.id} (PDF任务: {current_pdf_tasks}/{self.max_pdf_tasks})")
+                    logger.info(f"选择非PDF任务 {task.id} 开始处理")
+                    logger.debug(f"选择非PDF任务 {task.id} (大PDF: {current_large_pdf}, 小PDF: {current_small_pdf})")
                     return task
             
             # 如果遍历完所有任务都没有找到合适的，返回None
-            logger.info(f"队列中没有符合条件的任务启动 (PDF任务: {current_pdf_tasks}/{self.max_pdf_tasks})")
+            logger.debug(f"队列中没有符合条件的任务启动 (大PDF: {current_large_pdf}/{self.max_large_pdf_tasks}, 小PDF: {current_small_pdf}/{available_small_pdf_slots})")
+            logger.info("队列中没有符合条件的任务启动，等待资源释放")
             return None
             
         except Exception as e:
@@ -556,15 +630,23 @@ class QueueManager:
                 running_count = current_tasks
                 process_count = Translate.query.filter_by(status='process', deleted_flag='N').count()
                 changing_count = Translate.query.filter_by(status='changing', deleted_flag='N').count()
-                pdf_tasks_count = self._get_current_pdf_tasks()
+                pdf_tasks_info = self._get_current_pdf_tasks()
+                
+                # 计算小PDF可用配额
+                available_small_pdf_slots = self.max_small_pdf_tasks - pdf_tasks_info.get('large', 0)
                 
                 return {
                     'queued_count': queued_count,
                     'running_count': running_count,
                     'process_count': process_count,
                     'changing_count': changing_count,
-                    'pdf_tasks_count': pdf_tasks_count,
-                    'pdf_tasks_limit': self.max_pdf_tasks,
+                    'pdf_tasks_count': pdf_tasks_info.get('total', 0),  # 保持向后兼容
+                    'pdf_tasks_limit': self.max_pdf_tasks,  # 保持向后兼容
+                    'large_pdf_count': pdf_tasks_info.get('large', 0),
+                    'small_pdf_count': pdf_tasks_info.get('small', 0),
+                    'large_pdf_limit': self.max_large_pdf_tasks,
+                    'small_pdf_limit': self.max_small_pdf_tasks,
+                    'available_small_pdf_slots': max(0, available_small_pdf_slots),
                     'memory_usage_gb': round(memory_gb, 2),
                     'memory_limit_gb': self.max_memory_gb,
                     'task_limit': self.max_concurrent_tasks,
@@ -572,9 +654,13 @@ class QueueManager:
                     'resource_status': {
                         'tasks_ok': current_tasks < self.max_concurrent_tasks,
                         'memory_ok': memory_gb < self.max_memory_gb,
-                        'pdf_tasks_ok': pdf_tasks_count < self.max_pdf_tasks,
+                        'pdf_tasks_ok': pdf_tasks_info.get('total', 0) < self.max_pdf_tasks,  # 保持向后兼容
+                        'large_pdf_ok': pdf_tasks_info.get('large', 0) < self.max_large_pdf_tasks,
+                        'small_pdf_ok': pdf_tasks_info.get('small', 0) < available_small_pdf_slots,
                         'current_tasks': current_tasks,
-                        'current_pdf_tasks': pdf_tasks_count,
+                        'current_pdf_tasks': pdf_tasks_info.get('total', 0),  # 保持向后兼容
+                        'current_large_pdf': pdf_tasks_info.get('large', 0),
+                        'current_small_pdf': pdf_tasks_info.get('small', 0),
                         'current_memory_gb': round(memory_gb, 2)
                     }
                 }
@@ -605,9 +691,22 @@ class QueueManager:
             
             # 检查PDF任务限制
             if file_path and file_path.lower().endswith('.pdf'):
-                current_pdf_tasks = self._get_current_pdf_tasks()
-                if current_pdf_tasks >= self.max_pdf_tasks:
-                    return False, f"PDF翻译任务数已达上限 ({current_pdf_tasks}/{self.max_pdf_tasks})"
+                pdf_tasks_info = self._get_current_pdf_tasks()
+                current_large_pdf = pdf_tasks_info.get('large', 0)
+                current_small_pdf = pdf_tasks_info.get('small', 0)
+                
+                # 判断要启动的PDF是大PDF还是小PDF
+                is_large = self._is_large_pdf(file_path)
+                
+                if is_large:
+                    # 检查大PDF限制
+                    if current_large_pdf >= self.max_large_pdf_tasks:
+                        return False, "系统资源紧张"
+                else:
+                    # 检查小PDF限制（需要考虑大PDF占用）
+                    available_small_pdf_slots = self.max_small_pdf_tasks - current_large_pdf
+                    if current_small_pdf >= available_small_pdf_slots:
+                        return False, "系统资源紧张"
             
             return True, "资源充足，可以启动"
             

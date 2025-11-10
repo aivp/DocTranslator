@@ -75,8 +75,8 @@ class TranslateEngine:
                     self._complete_task(success)
             except Exception as e:
                 app.logger.error(f"任务执行异常: {str(e)}", exc_info=True)
-                # 异常时也更新状态为失败
-                self._complete_task(False)
+                # 异常时也更新状态为失败，并传递失败原因
+                self._complete_task(False, failed_reason=f"任务执行异常: {str(e)}")
             finally:
                 # 注销任务并释放资源
                 unregister_task(task_id)
@@ -99,7 +99,7 @@ class TranslateEngine:
                 
                 db.session.remove()  # 清理线程局部session
     
-    def _complete_task(self, success):
+    def _complete_task(self, success, failed_reason=None):
         """更新任务状态（只在任务真正完成或失败时调用）"""
         try:
             task = db.session.query(Translate).get(self.task_id)
@@ -112,6 +112,11 @@ class TranslateEngine:
                 task.status = 'done' if success else 'failed'
                 task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
                 task.process = 100.00 if success else task.process  # 失败时保持当前进度
+                
+                # 如果失败且有原因，设置失败原因
+                if not success and failed_reason:
+                    task.failed_reason = failed_reason
+                
                 db.session.commit()
                 self.app.logger.info(f"任务 {self.task_id} 状态已更新为 {task.status}")
         except Exception as e:
@@ -124,16 +129,32 @@ class TranslateEngine:
             # 初始化翻译配置
             self._init_translate_config(task)
 
-            # 构建符合要求的 trans 字典
+            # 构建符合要求的 trans 字典（api_key已在启动接口中获取并保存到task中）
             trans_config = self._build_trans_config(task)
+            
+            # 验证API Key是否存在
+            if not trans_config.get('api_key'):
+                error_msg = "未配置翻译模型，请联系管理员"
+                current_app.logger.error(error_msg)
+                self._complete_task(False, failed_reason=error_msg)
+                return False
+            
+            current_app.logger.info(f"✅ 使用数据库中的API Key，长度={len(trans_config['api_key'])}")
             
             # 将取消事件添加到配置中
             trans_config['cancel_event'] = cancel_event
 
             # 调用 main_wrapper 执行翻译
             return main_wrapper(task_id=task.id, config=trans_config,origin_path=task.origin_filepath)
+        except ValueError as e:
+            # API Key配置错误，特殊处理
+            error_msg = str(e)
+            current_app.logger.error(f"翻译执行失败（配置错误）: {error_msg}")
+            self._complete_task(False, failed_reason=error_msg)
+            return False
         except Exception as e:
             current_app.logger.error(f"翻译执行失败: {str(e)}", exc_info=True)
+            self._complete_task(False, failed_reason=f"翻译执行失败: {str(e)}")
             return False
 
     def _prepare_task(self):
@@ -177,6 +198,9 @@ class TranslateEngine:
         current_app.logger.info(f"  task.prompt_id值: {repr(task.prompt_id)}")
         current_app.logger.info(f"  task.prompt_id是否为空: {not task.prompt_id}")
         
+        # 获取租户ID（在整个翻译任务中只获取一次）
+        tenant_id = getattr(task, 'tenant_id', None)
+        
         config = {
             'id': task.id,  # 任务ID
             'target_lang': task.lang,
@@ -204,6 +228,7 @@ class TranslateEngine:
             'extension': os.path.splitext(task.origin_filepath)[1],  # 动态获取文件扩展名
             'pdf_translate_method': getattr(task, 'pdf_translate_method', None),  # PDF翻译方法
             'user_id': task.customer_id,  # 添加用户ID，用于文件隔离
+            'tenant_id': tenant_id,  # 添加租户ID，用于API Key获取
             # 流式翻译配置
             'use_streaming': getattr(task, 'use_streaming', False),  # 是否启用流式翻译
             'streaming_chunk_size': getattr(task, 'streaming_chunk_size', 10)  # 流式翻译块大小

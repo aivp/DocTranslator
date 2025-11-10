@@ -1434,11 +1434,11 @@ def start_large_pdf_translation(trans, total_pages):
         # 导入大文件翻译器
         from .large_pdf_translator import LargePDFTranslator
         
-        # 创建大文件翻译器，使用与小PDF相同的线程配置
+        # 创建大文件翻译器，使用更保守的配置以避免内存崩溃
         translator = LargePDFTranslator(
             input_pdf_path=str(original_path),
-            batch_size=5,  # 减小批次大小，降低内存占用
-            max_workers=30,  # 与小PDF保持一致，使用系统默认30线程
+            batch_size=3,  # 减小批次大小，降低内存占用
+            max_workers=15,  # 与小PDF保持一致，使用系统默认30线程
             target_lang=trans.get('lang', 'zh'),  # 使用 'lang' 字段与翻译函数一致
             user_id=trans.get('user_id')  # 传递用户ID用于临时文件隔离
         )
@@ -1808,10 +1808,11 @@ class DirectPDFTranslator:
             from flask import current_app
             
             # 获取uploads基础目录
-            # output_file 格式：/app/storage/translate/user_2/2025-10-21/file.pdf
+            # output_file 格式：/app/storage/translate/tenant_1/user_2/2025-10-21/file.pdf
             # 临时文件应创建在：/app/storage/uploads/temp_user_2/translate_xxx/
-            base_dir = os.path.dirname(output_file)  # /app/storage/translate/user_2/2025-10-21
-            user_dir = os.path.dirname(base_dir)  # /app/storage/translate/user_2
+            base_dir = os.path.dirname(output_file)  # /app/storage/translate/tenant_1/user_2/2025-10-21
+            date_dir = os.path.dirname(base_dir)  # /app/storage/translate/tenant_1/user_2
+            user_dir = os.path.dirname(date_dir)  # /app/storage/translate/tenant_1
             storage_base = os.path.dirname(os.path.dirname(user_dir))  # /app/storage
             uploads_base = os.path.join(storage_base, 'uploads')
             

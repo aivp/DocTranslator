@@ -5,6 +5,7 @@ export interface CreateOrUpdateCustomerRequestData {
   level: string
   add_storage: number
   storage: number
+  tenant_id?: number  // 超级管理员必须指定，租户管理员自动关联
   // status: boolean
 }
 
@@ -34,4 +35,5 @@ export interface RegisterData {
   email: string
   password?: string
   level: string
+  tenant_id?: number  // 超级管理员必须指定，租户管理员自动关联
 }

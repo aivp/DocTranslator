@@ -15,6 +15,7 @@ class Prompt(db.Model):
     task_content = db.Column(db.Text, nullable=True)                # 任务内容
     requirements_content = db.Column(db.Text, nullable=True)       # 翻译要求内容
     customer_id = db.Column(db.Integer, default=0)                 # 创建用户ID
+    tenant_id = db.Column(db.Integer, default=1)                    # 租户ID
     created_at = db.Column(db.Date,default=date.today)                            # 创建时间
     updated_at = db.Column(db.Date,onupdate=date.today)                            # 更新时间
     deleted_flag = db.Column(db.Enum('N', 'Y'), default='N')       # 删除标记

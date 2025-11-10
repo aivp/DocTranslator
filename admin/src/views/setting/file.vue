@@ -217,6 +217,108 @@
             <el-empty description="暂无翻译文件" />
           </div>
         </el-tab-pane>
+
+        <!-- 视频文件标签页 -->
+        <el-tab-pane name="video">
+          <template #label>
+            <div class="tab-label">
+              <el-icon class="tab-icon video"><VideoPlay /></el-icon>
+              <span>视频文件</span>
+              <el-tag size="small" effect="light" class="size-tag">
+                {{ formatSize(fileData.video?.size || 0) }}
+              </el-tag>
+            </div>
+          </template>
+
+          <!-- 视频文件内容区 -->
+          <template v-if="hasData('video')">
+            <div class="category-actions">
+              <el-button
+                type="danger"
+                size="small"
+                @click="confirmDelete('category', 'video')"
+                class="delete-category-btn"
+              >
+                <el-icon><Delete /></el-icon>删除全部文件
+              </el-button>
+            </div>
+
+            <el-collapse v-model="expandedDates.video" accordion class="date-collapse">
+              <el-collapse-item
+                v-for="(dateData, date) in fileData.video.dates"
+                :key="date"
+                :name="date"
+                class="date-item"
+              >
+                <template #title>
+                  <div class="date-header">
+                    <el-icon size="20" class="date-icon"><Calendar /></el-icon>
+                    <span class="date-text">{{ date }}</span>
+                    <div class="date-meta">
+                      <span class="file-count">{{ dateData.files.length }}个文件</span>
+                      <span class="date-size">共{{ formatSize(dateData.size) }}</span>
+                    </div>
+                    <div class="date-actions">
+                      <el-button
+                        type="danger"
+                        size="small"
+                        plain
+                        @click.stop="confirmDelete('date', `video/${date}`)"
+                        class="delete-date-btn"
+                      >
+                        <el-icon><Delete /></el-icon>删除本日所有文件
+                      </el-button>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="file-table-container">
+                  <el-table :data="dateData.files" border stripe empty-text="该日期没有文件" class="file-table">
+                    <el-table-column label="文件名" width="220">
+                      <template #default="{ row }">
+                        <div class="file-name-cell">
+                          <el-icon class="file-icon">
+                            <VideoPlay />
+                          </el-icon>
+                          <span class="file-name">{{ row.name }}</span>
+                        </div>
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column label="大小" width="120">
+                      <template #default="{ row }">
+                        <el-tag size="small" effect="plain">
+                          {{ formatSize(row.size) }}
+                        </el-tag>
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column label="文件路径" min-width="300">
+                      <template #default="{ row }">
+                        <el-tooltip :content="row.path" placement="top">
+                          <span class="file-path">{{ row.path }}</span>
+                        </el-tooltip>
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column label="操作" width="120" align="center">
+                      <template #default="{ row }">
+                        <el-popconfirm title="确定要删除此文件吗？" @confirm="handleDeleteFile(row.path)">
+                          <template #reference>
+                            <el-button type="danger" size="small" round> 删除 </el-button>
+                          </template>
+                        </el-popconfirm>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </template>
+          <div v-else class="empty-container">
+            <el-empty description="暂无视频文件" />
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -234,7 +336,8 @@ import {
   Collection,
   Notebook,
   Upload,
-  Files
+  Files,
+  VideoPlay
 } from "@element-plus/icons-vue"
 import { getFileList, deleteFile } from "@/api/setting/file"
 import { ElMessage, ElMessageBox } from "element-plus"
@@ -243,12 +346,14 @@ import { ElMessage, ElMessageBox } from "element-plus"
 const loading = ref(false)
 const fileData = ref({
   uploads: { size: 0, dates: {} },
-  translate: { size: 0, dates: {} }
+  translate: { size: 0, dates: {} },
+  video: { size: 0, dates: {} }
 })
 const activeTab = ref("uploads")
 const expandedDates = ref({
   uploads: [],
-  translate: []
+  translate: [],
+  video: []
 })
 
 // 计算是否有数据
@@ -267,10 +372,11 @@ const loadData = async () => {
     loading.value = true
     const res = await getFileList()
     if (res.code === 200) {
-      // 合并数据确保两个分类都存在
+      // 合并数据确保三个分类都存在
       fileData.value = {
         uploads: res.data.uploads || { size: 0, dates: {} },
-        translate: res.data.translate || { size: 0, dates: {} }
+        translate: res.data.translate || { size: 0, dates: {} },
+        video: res.data.video || { size: 0, dates: {} }
       }
 
       // 默认展开每个分类的第一个日期
@@ -422,6 +528,10 @@ const confirmDelete = (type, target) => {
 
 .tab-icon.translate {
   color: var(--el-color-warning);
+}
+
+.tab-icon.video {
+  color: var(--el-color-danger);
 }
 
 .size-tag {

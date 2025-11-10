@@ -367,7 +367,8 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                 prompt=trans.get('prompt'),
                 prompt_id=trans.get('prompt_id'),
                 texts=None,  # translate_text函数中没有texts数组
-                index=None   # translate_text函数中没有index
+                index=None,   # translate_text函数中没有index
+                api_key=trans.get('api_key')  # 从配置中获取API Key
             )
         else:
             # OpenAI 翻译 (兼容新旧版本)
@@ -414,7 +415,8 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                         prompt=trans.get('prompt'),
                         prompt_id=trans.get('prompt_id'),
                         texts=None,  # 备用方案中没有texts数组
-                        index=None   # 备用方案中没有index
+                        index=None,   # 备用方案中没有index
+                        api_key=trans.get('api_key')  # 从配置中获取API Key
                     )
                 except:
                     return text  # 最后返回原文
@@ -713,14 +715,14 @@ def get(trans, event, texts, index):
                         logging.info(f"✅ 跳过表格分隔行翻译: {element_type}, 内容: {repr(text['text'])}")
                     elif model == 'qwen-mt-plus':
                         logging.info(f"🔍 调用 qwen_translate (MD文件): texts={texts is not None}, index={index}")
-                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), texts=texts, index=index)
+                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), texts=texts, index=index, tenant_id=trans.get('tenant_id'), api_key=trans.get('api_key'))
                     else:
                         content = req(text['text'], target_lang, model, prompt, True)
                 else:
                     # 统一处理：只要是qwen-mt-plus模型，都使用带上下文的翻译
                     if model == 'qwen-mt-plus':
                         logging.info(f"🔍 调用 qwen_translate (统一处理): texts={texts is not None}, index={index}")
-                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), texts=texts, index=index)
+                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), texts=texts, index=index, tenant_id=trans.get('tenant_id'), api_key=trans.get('api_key'))
                     else:
                         # 其他模型：根据是否有上下文选择翻译方式
                         if 'context_text' in text and text.get('context_type') == 'body':

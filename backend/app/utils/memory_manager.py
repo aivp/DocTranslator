@@ -6,7 +6,6 @@
 """
 
 import os
-import psutil
 import gc
 import ctypes
 import logging
@@ -15,6 +14,17 @@ from flask import current_app
 
 logger = logging.getLogger(__name__)
 
+# 尝试导入psutil，如果失败则使用备用方案
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError as e:
+    PSUTIL_AVAILABLE = False
+    logger.warning(f"psutil模块未安装: {e}，将使用备用内存监控方案")
+except Exception as e:
+    PSUTIL_AVAILABLE = False
+    logger.warning(f"psutil模块导入失败: {e}，将使用备用内存监控方案")
+
 # 全局锁，防止并发执行内存清理
 _cleanup_lock = threading.Lock()
 _last_cleanup_time = 0
@@ -22,11 +32,23 @@ _cleanup_interval = 300  # 5分钟内最多清理一次
 
 def get_memory_usage():
     """获取当前进程的内存使用量（字节）"""
+    if not PSUTIL_AVAILABLE:
+        # psutil不可用时，使用备用方案：返回0表示无法获取
+        logger.debug("psutil不可用，无法获取内存使用量")
+        return 0
+    
     try:
         process = psutil.Process(os.getpid())
-        return process.memory_info().rss
+        memory_info = process.memory_info()
+        return memory_info.rss
+    except psutil.AccessDenied as e:
+        logger.warning(f"获取内存使用量失败：权限不足 ({e})")
+        return 0
+    except psutil.NoSuchProcess as e:
+        logger.warning(f"获取内存使用量失败：进程不存在 ({e})")
+        return 0
     except Exception as e:
-        logger.warning(f"获取内存使用量失败: {e}")
+        logger.warning(f"获取内存使用量失败：{type(e).__name__}: {e}")
         return 0
 
 def force_memory_release():

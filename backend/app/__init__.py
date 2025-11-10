@@ -104,9 +104,29 @@ def create_app(config_class=None):
             from app.utils.queue_manager import queue_manager
             queue_manager.set_app(app)  # 设置应用实例
             queue_manager.start_monitor()
-            app.logger.info("队列管理器已启动")
+            app.logger.info("文件翻译队列管理器已启动")
         except Exception as e:
-            app.logger.error(f"启动队列管理器失败: {e}")
+            app.logger.error(f"启动文件翻译队列管理器失败: {e}")
+    
+    # 初始化视频队列管理器
+    with app.app_context():
+        try:
+            from app.utils.video_queue_manager import video_queue_manager
+            video_queue_manager.set_app(app)  # 设置应用实例
+            video_queue_manager.start_monitor()
+            app.logger.info("视频翻译队列管理器已启动")
+        except Exception as e:
+            app.logger.error(f"启动视频翻译队列管理器失败: {e}")
+    
+    # 初始化图片翻译队列管理器
+    with app.app_context():
+        try:
+            from app.utils.image_translate_queue_manager import image_translate_queue_manager
+            image_translate_queue_manager.set_app(app)  # 设置应用实例
+            image_translate_queue_manager.start_monitor()
+            app.logger.info("图片翻译队列管理器已启动")
+        except Exception as e:
+            app.logger.error(f"启动图片翻译队列管理器失败: {e}")
     
     # 开发环境路由打印
     # if app.debug:

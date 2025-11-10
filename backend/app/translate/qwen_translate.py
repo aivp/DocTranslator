@@ -7,9 +7,13 @@ import os
 import time
 import re
 from openai import OpenAI
+from app.utils.api_key_helper import get_dashscope_key, get_current_tenant_id_from_request
 
-# 从环境变量获取API密钥
+# 兼容旧代码：保持全局变量
 dashscope_key = os.environ.get('DASH_SCOPE_KEY', '')
+
+# 在模块级别缓存 API Key（以 tenant_id 为 key）
+_api_key_cache = {}
 
 def is_pure_symbol(text: str) -> bool:
     """
@@ -149,7 +153,7 @@ def handle_429_error(attempt, error_msg):
         logging.error("达到429错误最大重试次数 (100)，返回原文")
         return False  # 停止重试
 
-def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10, texts=None, index=None):
+def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10, texts=None, index=None, tenant_id=None, api_key=None):
     """
     使用阿里云Qwen-MT翻译模型进行翻译
     
@@ -187,27 +191,31 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
     
     for attempt in range(max_retries):
         try:
-            # 检查API密钥
-            if not dashscope_key:
+            # 使用传入的api_key（已在启动接口中从数据库获取并传入）
+            if not api_key:
+                # 如果没有传入，尝试从环境变量获取（兼容旧逻辑）
+                api_key = os.environ.get('DASH_SCOPE_KEY', '')
+            
+            if not api_key:
                 logging.error("❌ DASH_SCOPE_KEY未设置或为空")
-                return text
+                return "[错误: 未配置翻译模型，请联系管理员]"
                 
             logging.info(f"🔄 Qwen翻译尝试 {attempt + 1}/{max_retries}")
             
             # 初始化 OpenAI 客户端
             client = OpenAI(
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                api_key=dashscope_key,
+                api_key=api_key,
                 timeout=60.0  # 增加超时时间
             ) 
             
             # 添加调试日志，查看prompt_id参数的实际值
-            logging.info(f"🔍 调试信息 - prompt_id参数:")
-            logging.info(f"  prompt_id类型: {type(prompt_id)}")
-            logging.info(f"  prompt_id值: {repr(prompt_id)}")
-            logging.info(f"  prompt_id是否为空: {not prompt_id}")
-            logging.info(f"  prompt_id是否大于0: {prompt_id and int(prompt_id) > 0}")
-            logging.info(f"  判断结果 - 是否使用prompt方式: {bool(prompt_id and int(prompt_id) > 0)}")
+            # logging.info(f"🔍 调试信息 - prompt_id参数:")
+            # logging.info(f"  prompt_id类型: {type(prompt_id)}")
+            # logging.info(f"  prompt_id值: {repr(prompt_id)}")
+            # logging.info(f"  prompt_id是否为空: {not prompt_id}")
+            # logging.info(f"  prompt_id是否大于0: {prompt_id and int(prompt_id) > 0}")
+            # logging.info(f"  判断结果 - 是否使用prompt方式: {bool(prompt_id and int(prompt_id) > 0)}")
             
             # 根据是否有prompt_id选择翻译方式
             # 检查prompt_id是否存在且大于0
@@ -323,31 +331,31 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 messages = [{"role": "user", "content": final_prompt}]
                 
                 # 添加详细的请求参数日志
-                logging.info(f"🔧 Qwen翻译请求参数:")
-                logging.info(f"  model: qwen-mt-plus")
-                logging.info(f"  use_prompt: True")
-                logging.info(f"  prompt_template: {prompt[:100]}...")
-                logging.info(f"  text: {text[:100]}...")
+                # logging.info(f"🔧 Qwen翻译请求参数:")
+                # logging.info(f"  model: qwen-mt-plus")
+                # logging.info(f"  use_prompt: True")
+                # logging.info(f"  prompt_template: {prompt[:100]}...")
+                # logging.info(f"  text: {text[:100]}...")
                 
                 # 打印完整的请求内容
-                print("=" * 80)
-                print("🚀 QWEN-MT-PLUS 提示词翻译请求")
-                print("=" * 80)
-                print(f"📝 原始文本: {text}")
-                print(f"📋 提示词模板: {prompt}")
+                # print("=" * 80)
+                # print("🚀 QWEN-MT-PLUS 提示词翻译请求")
+                # print("=" * 80)
+                # print(f"📝 原始文本: {text}")
+                # print(f"📋 提示词模板: {prompt}")
                 
                 # 明确显示上下文信息
-                if context_info:
-                    print(f"🔗 上下文信息:")
-                    print(f"   - 前文: {context_before[:100] if 'context_before' in locals() and context_before else '♂'}")
-                    print(f"   - 后文: {context_after[:100] if 'context_after' in locals() and context_after else '♂'}")
-                    print(f"   - 上下文信息: {context_info}")
+                # if context_info:
+                #     print(f"🔗 上下文信息:")
+                #     print(f"   - 前文: {context_before[:100] if 'context_before' in locals() and context_before else '♂'}")
+                #     print(f"   - 后文: {context_after[:100] if 'context_after' in locals() and context_after else '♂'}")
+                #     print(f"   - 上下文信息: {context_info}")
                 
-                print(f"🔗 最终请求内容: {final_prompt}")
-                print(f"📡 API请求参数:")
-                print(f"   - model: qwen-mt-plus")
-                print(f"   - messages: {messages}")
-                print("=" * 80)
+                # print(f"🔗 最终请求内容: {final_prompt}")
+                # print(f"📡 API请求参数:")
+                # print(f"   - model: qwen-mt-plus")
+                # print(f"   - messages: {messages}")
+                # print("=" * 80)
                 
                 # 等待请求间隔
                 wait_for_rate_limit()
@@ -384,17 +392,19 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                     logging.info(f"📚 使用自定义术语: {len(terms)} 个术语")
                 
                 # 硬编码domains参数 - 工程车辆和政府文件领域
-                translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
-                logging.info(f"🎯 使用硬编码领域提示: 工程车辆和政府文件")
+                # translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
+                # 针对占位符特殊优化
+                translation_options["domains"] = "The text originates from the domains of engineering vehicles, machinery, as well as government and official documents. It covers heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices, encompassing professional terminologies related to vehicle design, mechanical engineering, hydraulic systems, electrical control, safety standards, operating procedures, official wording, bureaucratic terminologies, administrative processes, legal citations, and institutional communication. Attention should be paid to technical accuracy, industry-specific jargon, professional engineering expressions, a formal and authoritative tone, bureaucratic sentence patterns, document structure, and administrative nomenclature. Do not translate the symbol '♂' during translation; retain it as is. The translation should conform to the formal and precise technical description style applicable to engineering documents and technical manuals, as well as the rigorous, formal, and official style suitable for government communication and administrative document fields."
+                # logging.info(f"🎯 使用硬编码领域提示: 工程车辆和政府文件")
                     
-                # 添加详细的请求参数日志
-                logging.info(f"🔧 Qwen翻译请求参数:")
-                logging.info(f"  model: qwen-mt-plus")
-                logging.info(f"  use_prompt: False")
-                logging.info(f"  source_lang: {source_lang}")
-                logging.info(f"  target_lang: {target_language}")
-                logging.info(f"  translation_options: {translation_options}")
-                logging.info(f"  text: {text[:100]}...")
+                # # 添加详细的请求参数日志
+                # logging.info(f"🔧 Qwen翻译请求参数:")
+                # logging.info(f"  model: qwen-mt-plus")
+                # logging.info(f"  use_prompt: False")
+                # logging.info(f"  source_lang: {source_lang}")
+                # logging.info(f"  target_lang: {target_language}")
+                # logging.info(f"  translation_options: {translation_options}")
+                # logging.info(f"  text: {text[:100]}...")
                 
                 # 等待请求间隔
                 wait_for_rate_limit()
@@ -425,14 +435,14 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 return ""  # 直接返回空字符串，不重试
             
             # 打印响应结果
-            if prompt:  # 只有使用提示词时才打印
-                print("=" * 80)
-                print("✅ QWEN-MT-PLUS 提示词翻译响应")
-                print("=" * 80)
-                print(f"📝 原始文本: {text}")
-                print(f"🎯 翻译结果: {translated_text}")
-                print(f"⏱️ API调用用时: {api_duration:.3f}秒")
-                print("=" * 80)
+            # if prompt:  # 只有使用提示词时才打印
+            #     print("=" * 80)
+            #     print("✅ QWEN-MT-PLUS 提示词翻译响应")
+            #     print("=" * 80)
+            #     print(f"📝 原始文本: {text}")
+            #     print(f"🎯 翻译结果: {translated_text}")
+            #     print(f"⏱️ API调用用时: {api_duration:.3f}秒")
+            #     print("=" * 80)
             
             # 检查翻译结果质量（暂时注释掉）
             # if _is_translation_result_abnormal(translated_text):
@@ -445,7 +455,7 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             total_duration = api_end_time - start_time
             
             logging.info(f"✅ 翻译成功: {translated_text[:100]}...")
-            logging.info(f"⏱️ API调用用时: {api_duration:.3f}秒, 总用时: {total_duration:.3f}秒")
+            # logging.info(f"⏱️ API调用用时: {api_duration:.3f}秒, 总用时: {total_duration:.3f}秒")
             return translated_text
             
         except Exception as e:

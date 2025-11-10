@@ -12,10 +12,15 @@ from .session import Session
 from .message import Message
 from .pwdResetToken import PasswordResetToken
 from .job import Job, FailedJob, JobBatch
+from .tenant import Tenant
+from .tenant_customer import TenantCustomer
+from .tenant_user import TenantUser
+from .image_translate import ImageTranslate
 
 __all__ = [
     'User', 'Customer', 'Setting', 'Translate', 'SendCode',
     'Prompt', 'PromptFav', 'Comparison', 'ComparisonSub', 'ComparisonFav',
     'Cache', 'CacheLock', 'Migration', 'Session', 'Message', 
-    'PasswordResetToken', 'Job', 'FailedJob', 'JobBatch'
+    'PasswordResetToken', 'Job', 'FailedJob', 'JobBatch',
+    'Tenant', 'TenantCustomer', 'TenantUser', 'ImageTranslate'
 ]
