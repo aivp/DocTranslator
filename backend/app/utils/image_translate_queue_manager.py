@@ -362,7 +362,13 @@ class ImageTranslateQueueManager:
                 "input": input_params
             }
             
-            logger.info(f"创建Qwen-MT-Image翻译任务: source_lang={source_language}, target_lang={target_language}")
+            # 打印详细的请求参数
+            logger.info(f"📤 [队列管理器] 创建Qwen-MT-Image翻译任务")
+            logger.info(f"📤 [队列管理器] API URL: {api_url}")
+            logger.info(f"📤 [队列管理器] 请求参数 - source_lang: {source_language}, target_lang: {target_language}")
+            logger.info(f"📤 [队列管理器] 请求参数 - image_url: {image_url}")
+            logger.info(f"📤 [队列管理器] 完整Payload: {payload}")
+            logger.info(f"📤 [队列管理器] API Key长度: {len(api_key) if api_key else 0}")
             
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -370,7 +376,11 @@ class ImageTranslateQueueManager:
                 "X-DashScope-Async": "enable"
             }
             
+            logger.info(f"📤 [队列管理器] 请求Headers: Content-Type={headers.get('Content-Type')}, X-DashScope-Async={headers.get('X-DashScope-Async')}")
+            
             response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+            
+            logger.info(f"📥 [队列管理器] Qwen-MT-Image API响应状态码: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
