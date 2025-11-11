@@ -130,6 +130,12 @@ class ImageTranslateResource(Resource):
             
             data = request.get_json(silent=True)
             
+            # 打印请求参数（用于调试）
+            current_app.logger.info(f"📥 图片翻译请求参数: {data}")
+            current_app.logger.info(f"📥 请求URL: {request.url}")
+            current_app.logger.info(f"📥 请求方法: {request.method}")
+            current_app.logger.info(f"📥 Content-Type: {request.content_type}")
+            
             # 验证必要参数
             if not data:
                 current_app.logger.error("请求参数为空或JSON解析失败")
@@ -138,6 +144,9 @@ class ImageTranslateResource(Resource):
             image_id = data.get('image_id')
             source_language = data.get('source_language')
             target_language = data.get('target_language', 'zh')
+            
+            # 打印解析后的参数
+            current_app.logger.info(f"📋 解析后的参数: image_id={image_id}, source_language={source_language}, target_language={target_language}")
             
             # 验证参数
             if not image_id:
@@ -202,8 +211,14 @@ class ImageTranslateResource(Resource):
                 if not image_url_for_api:
                     return APIResponse.error('无法生成图片访问URL，请检查文件路径', 400)
             
+            # 打印调用API前的参数
+            current_app.logger.info(f"🚀 准备调用Qwen-MT-Image API: image_url={image_url_for_api}, source_language={source_language}, target_language={target_language}")
+            
             # 调用 Qwen-MT-Image API 创建任务（只提交，不等待结果）
             task_result = self._create_qwen_mt_image_task(api_key, image_url_for_api, source_language, target_language)
+            
+            # 打印API调用结果
+            current_app.logger.info(f"📤 Qwen-MT-Image API调用结果: success={task_result.get('success')}, task_id={task_result.get('task_id')}, error={task_result.get('error')}")
             
             if not task_result.get('success'):
                 return APIResponse.error(task_result.get('error', '创建翻译任务失败'), 500)
@@ -260,7 +275,13 @@ class ImageTranslateResource(Resource):
                 "input": input_params
             }
             
-            current_app.logger.info(f"创建Qwen-MT-Image翻译任务: source_lang={source_language}, target_lang={target_language}, image_url={image_url}")
+            # 打印详细的请求参数
+            current_app.logger.info(f"📤 创建Qwen-MT-Image翻译任务")
+            current_app.logger.info(f"📤 API URL: {api_url}")
+            current_app.logger.info(f"📤 请求参数 - source_lang: {source_language}, target_lang: {target_language}")
+            current_app.logger.info(f"📤 请求参数 - image_url: {image_url}")
+            current_app.logger.info(f"📤 完整Payload: {payload}")
+            current_app.logger.info(f"📤 API Key长度: {len(api_key) if api_key else 0}")
             
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -268,12 +289,16 @@ class ImageTranslateResource(Resource):
                 "X-DashScope-Async": "enable"  # 启用异步模式
             }
             
+            current_app.logger.info(f"📤 请求Headers: Content-Type={headers.get('Content-Type')}, X-DashScope-Async={headers.get('X-DashScope-Async')}")
+            
             response = requests.post(
                 api_url,
                 json=payload,
                 headers=headers,
                 timeout=30
             )
+            
+            current_app.logger.info(f"📥 Qwen-MT-Image API响应状态码: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
