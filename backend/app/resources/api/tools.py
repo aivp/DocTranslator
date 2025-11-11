@@ -180,9 +180,14 @@ class ImageTranslateResource(Resource):
             if image_record.status == 'completed':
                 return APIResponse.error('翻译任务已完成', 400)
             
+            # 优先使用图片记录中的 tenant_id（上传时已设置），如果为空则使用请求中的 tenant_id
+            # 这样可以确保使用正确的租户配置
+            effective_tenant_id = image_record.tenant_id or tenant_id
+            current_app.logger.info(f"图片翻译获取API Key: image_id={image_id}, image_record.tenant_id={image_record.tenant_id}, request_tenant_id={tenant_id}, effective_tenant_id={effective_tenant_id}")
+            
             # 获取 DashScope API Key
             try:
-                api_key = get_dashscope_key(tenant_id)
+                api_key = get_dashscope_key(effective_tenant_id)
             except ValueError as e:
                 current_app.logger.error(f"获取API Key失败: {str(e)}")
                 return APIResponse.error('未配置翻译服务API密钥，请联系管理员', 400)
@@ -558,7 +563,10 @@ class ImageTranslateStatusResource(Resource):
             # 如果正在翻译中，查询Qwen API状态
             if image_record.status == 'translating' and image_record.qwen_task_id:
                 try:
-                    api_key = get_dashscope_key(tenant_id)
+                    # 优先使用图片记录中的 tenant_id
+                    effective_tenant_id = image_record.tenant_id or tenant_id
+                    current_app.logger.info(f"查询图片翻译状态获取API Key: image_id={image_id}, image_record.tenant_id={image_record.tenant_id}, request_tenant_id={tenant_id}, effective_tenant_id={effective_tenant_id}")
+                    api_key = get_dashscope_key(effective_tenant_id)
                     qwen_status = self._query_qwen_task_status(api_key, image_record.qwen_task_id)
                     
                     if qwen_status.get('success'):

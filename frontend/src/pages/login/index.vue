@@ -120,8 +120,21 @@ const activeTab = ref('login')
 const loginFormRef = ref(null)
 const loginLoading = ref(false)
 
-// 从环境变量读取默认租户代码
-const defaultTenantCode = import.meta.env.VITE_DEFAULT_TENANT_CODE || ''
+// 从环境变量或运行时配置读取默认租户代码
+// 优先使用运行时配置（打包后可通过修改配置文件变更），其次使用构建时环境变量
+let defaultTenantCode = ''
+try {
+  // 尝试从运行时配置文件读取（打包后可通过修改 webConfig.js 变更）
+  if (window.__APP_CONFIG__ && window.__APP_CONFIG__.DEFAULT_TENANT_CODE) {
+    defaultTenantCode = window.__APP_CONFIG__.DEFAULT_TENANT_CODE
+  }
+} catch (e) {
+  console.warn('无法读取运行时配置:', e)
+}
+// 如果运行时配置不存在，使用构建时环境变量
+if (!defaultTenantCode) {
+  defaultTenantCode = import.meta.env.VITE_DEFAULT_TENANT_CODE || ''
+}
 const hasDefaultTenant = computed(() => !!defaultTenantCode)
 
 // 登录表单

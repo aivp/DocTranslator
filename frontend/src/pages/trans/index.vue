@@ -673,8 +673,8 @@ async function startBatchTranslation() {
       })
     }
     
-    // 刷新翻译列表
-    getTranslatesData(1)
+    // 刷新翻译列表，确保新任务显示在最前面
+    await getTranslatesData(1)
     
     // 清空上传文件列表
     uploadRef.value.clearFiles()

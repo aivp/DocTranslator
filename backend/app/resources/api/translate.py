@@ -426,14 +426,10 @@ class TranslateListResource(Resource):
                     return APIResponse.error(f"Invalid status value: {status_filter}"), 400
                 query = query.filter_by(status=status_filter)
 
-            # 按完成时间倒序排列（最新的在顶部）
-            # 使用 coalesce 处理 NULL 值：没有完成时间的任务排在最后
-            from sqlalchemy import func
-            from datetime import datetime
-            # 将 NULL 值替换为很远的过去日期，这样未完成的任务会排在最后
-            min_date = datetime(1970, 1, 1)
+            # 按创建时间倒序排列（最新的在顶部）
+            # 新创建的任务会排在最前面，无论是否完成
             query = query.order_by(
-                func.coalesce(Translate.end_at, min_date).desc(),
+                Translate.created_at.desc(),
                 Translate.id.desc()
             )
 

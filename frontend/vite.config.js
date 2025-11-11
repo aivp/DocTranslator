@@ -5,7 +5,11 @@ import path from 'path'
 const resolve = (dir) => path.resolve(process.cwd(), dir)
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+    // 加载环境变量
+    const env = loadEnv(mode, process.cwd(), '')
+    
+    return {
     base: '/', // 使用绝对路径，确保静态资源从根路径加载
     plugins: [vue(),createSvgIconsPlugin({
       // 指定需要缓存的图标文件夹
@@ -32,5 +36,6 @@ export default defineConfig({
     build: {
         assetsDir: "assets",
         outDir: "dist"
+    }
     }
 })
