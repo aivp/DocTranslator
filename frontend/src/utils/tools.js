@@ -1,55 +1,40 @@
 /**
- * 格式化日期时间（默认GMT+8，识别浏览器时区，失败则用GMT+8）
+ * 格式化日期时间（直接使用后端返回的时间，不进行时区转换）
  * 格式：xxxx年xx月xx日 时分秒
+ * 
+ * 后端返回的时间格式：'YYYY-MM-DD HH:mm:ss'
+ * 前端直接格式化显示，不进行时区转换
  */
 export function formatTime(dateTimeStr) {
-  if (!dateTimeStr) return '-'
+  if (!dateTimeStr || dateTimeStr === '--') return '--'
   try {
-    // 解析时间字符串
-    const date = new Date(dateTimeStr)
+    // 直接使用后端返回的时间字符串，不进行时区转换
+    let dateStr = String(dateTimeStr).trim()
     
-    if (isNaN(date.getTime())) {
-      return String(dateTimeStr)
+    // 如果格式是 'YYYY-MM-DD HH:mm:ss'，直接解析并格式化
+    // 不添加时区信息，直接按原样显示
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/)
+    if (match) {
+      const [, year, month, day, hours, minutes, seconds] = match
+      return `${year}年${month}月${day}日 ${hours}:${minutes}:${seconds}`
     }
     
-    // 获取浏览器时区偏移（分钟），默认GMT+8（480分钟 = 8小时）
-    let timezoneOffsetMinutes = 480
-    
-    try {
-      // 尝试获取浏览器时区偏移
-      // getTimezoneOffset返回UTC时间与本地时间的差值（分钟）
-      // 例如：GMT+8时区返回-480，GMT-5时区返回300
-      // 我们需要的是：GMT+8需要+480分钟，所以取反
-      const browserOffset = -new Date().getTimezoneOffset()
-      if (!isNaN(browserOffset)) {
-        timezoneOffsetMinutes = browserOffset
-      }
-    } catch (e) {
-      // 获取失败，使用默认GMT+8
-      console.warn('无法获取浏览器时区，使用默认GMT+8')
+    // 如果不是标准格式，尝试用 Date 解析（兼容其他格式）
+    const date = new Date(dateStr)
+    if (!isNaN(date.getTime())) {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      const seconds = String(date.getSeconds()).padStart(2, '0')
+      return `${year}年${month}月${day}日 ${hours}:${minutes}:${seconds}`
     }
     
-    // 将UTC时间转换为目标时区
-    // 1. 获取UTC时间戳（毫秒）
-    const utcTimestamp = date.getTime()
-    // 2. 计算UTC时间的本地表示（去除Date对象自动应用的本地时区）
-    // getTimezoneOffset返回的是本地时区与UTC的差值，单位是分钟
-    const localTimezoneOffset = date.getTimezoneOffset() * 60000 // 转为毫秒
-    // 3. 获取纯UTC时间戳
-    const pureUtcTimestamp = utcTimestamp - localTimezoneOffset
-    // 4. 加上目标时区的偏移，得到目标时区的时间
-    const targetTimestamp = pureUtcTimestamp + (timezoneOffsetMinutes * 60000)
-    const targetTime = new Date(targetTimestamp)
-    
-    // 使用UTC方法读取，因为我们已经手动转换了时区
-    const year = targetTime.getUTCFullYear()
-    const month = String(targetTime.getUTCMonth() + 1).padStart(2, '0')
-    const day = String(targetTime.getUTCDate()).padStart(2, '0')
-    const hours = String(targetTime.getUTCHours()).padStart(2, '0')
-    const minutes = String(targetTime.getUTCMinutes()).padStart(2, '0')
-    const seconds = String(targetTime.getUTCSeconds()).padStart(2, '0')
-    return `${year}年${month}月${day}日 ${hours}:${minutes}:${seconds}`
+    // 如果都解析失败，直接返回原字符串
+    return String(dateTimeStr)
   } catch (e) {
+    console.error('时间格式化失败:', e, dateTimeStr)
     return String(dateTimeStr)
   }
 }

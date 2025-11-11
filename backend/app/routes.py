@@ -216,8 +216,8 @@ def register_routes(api):
     api.add_resource(DashboardRecentTasksResource, '/api/admin/dashboard/recent-tasks')
     api.add_resource(DashboardSystemStatusResource, '/api/admin/dashboard/system-status')
     
-    print("✅ 路由配置完成")  # 添加调试输出
-    print("✅ 文件存储管理路由已注册: /api/admin/system/storages")  # 添加调试输出
-    print("✅ 看板路由已注册")  # 添加调试输出
+    # print("✅ 路由配置完成")  # 添加调试输出
+    # print("✅ 文件存储管理路由已注册: /api/admin/system/storages")  # 添加调试输出
+    # print("✅ 看板路由已注册")  # 添加调试输出
     # api.add_resource(TodoListResource, '/todos')
     # api.add_resource(TodoResource, '/todos/<int:todo_id>')
