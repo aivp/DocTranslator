@@ -175,7 +175,8 @@ class ImageTranslateQueueManager:
                         return
                     
                     # 快速获取需要的信息
-                    tenant_id = image_record.tenant_id or 1
+                    # 保存真实的 tenant_id（可能为 None，后续会正确处理）
+                    tenant_id = image_record.tenant_id
                     source_lang = image_record.source_language
                     target_lang = image_record.target_language
                     image_url = image_record.filepath
@@ -205,12 +206,18 @@ class ImageTranslateQueueManager:
                         pass
                     return
             
-            # 获取API Key（不占用数据库连接）
+            # 获取API Key（需要在应用上下文中）
+            api_key = None
             try:
-                from app.utils.api_key_helper import get_dashscope_key
-                api_key = get_dashscope_key(tenant_id)
+                with app.app_context():
+                    from app.utils.api_key_helper import get_dashscope_key
+                    # 使用图片记录中的 tenant_id（可能为 None，get_dashscope_key 会处理）
+                    # tenant_id 已经在第一步中从图片记录获取
+                    effective_tenant_id = tenant_id
+                    logger.info(f"队列管理器获取API Key: task_id={task_id}, tenant_id={effective_tenant_id}")
+                    api_key = get_dashscope_key(effective_tenant_id)
             except ValueError as e:
-                logger.error(f"获取API Key失败: {str(e)}")
+                logger.error(f"获取API Key失败: task_id={task_id}, tenant_id={tenant_id}, error={str(e)}")
                 try:
                     with app.app_context():
                         from app.models.image_translate import ImageTranslate
@@ -219,6 +226,37 @@ class ImageTranslateQueueManager:
                         if image_record:
                             image_record.status = 'failed'
                             image_record.error_message = '未配置翻译服务API密钥'
+                            db.session.commit()
+                        db.session.close()
+                except:
+                    pass
+                return
+            except Exception as e:
+                logger.error(f"获取API Key异常: task_id={task_id}, tenant_id={tenant_id}, error={str(e)}")
+                try:
+                    with app.app_context():
+                        from app.models.image_translate import ImageTranslate
+                        from app.extensions import db
+                        image_record = ImageTranslate.query.get(task_id)
+                        if image_record:
+                            image_record.status = 'failed'
+                            image_record.error_message = f'获取API密钥失败: {str(e)}'
+                            db.session.commit()
+                        db.session.close()
+                except:
+                    pass
+                return
+            
+            if not api_key:
+                logger.error(f"API Key为空: task_id={task_id}, tenant_id={tenant_id}")
+                try:
+                    with app.app_context():
+                        from app.models.image_translate import ImageTranslate
+                        from app.extensions import db
+                        image_record = ImageTranslate.query.get(task_id)
+                        if image_record:
+                            image_record.status = 'failed'
+                            image_record.error_message = 'API密钥为空'
                             db.session.commit()
                         db.session.close()
                 except:
