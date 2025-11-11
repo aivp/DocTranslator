@@ -393,12 +393,22 @@ class ImageTranslateBatchResource(Resource):
                 return APIResponse.error('请求Content-Type必须是application/json', 415)
 
             data = request.get_json(silent=True)
+            
+            # 打印请求参数（用于调试）
+            current_app.logger.info(f"📥 批量图片翻译请求参数: {data}")
+            current_app.logger.info(f"📥 请求URL: {request.url}")
+            current_app.logger.info(f"📥 请求方法: {request.method}")
+            current_app.logger.info(f"📥 Content-Type: {request.content_type}")
+            
             if not data:
                 return APIResponse.error('请求参数不能为空或JSON格式错误', 400)
 
             image_ids = data.get('image_ids', [])
             source_language = data.get('source_language')
             target_language = data.get('target_language', 'zh')
+            
+            # 打印解析后的参数
+            current_app.logger.info(f"📋 批量翻译解析后的参数: image_ids={image_ids}, source_language={source_language}, target_language={target_language}")
 
             if not image_ids or not isinstance(image_ids, list):
                 return APIResponse.error('缺少必要参数: image_ids（数组）', 400)
@@ -420,6 +430,8 @@ class ImageTranslateBatchResource(Resource):
 
             user_id = get_jwt_identity()
             tenant_id = get_current_tenant_id_from_request()
+            
+            current_app.logger.info(f"📋 批量翻译用户信息: user_id={user_id}, tenant_id={tenant_id}")
 
             # 查询所有图片记录
             image_records = ImageTranslate.query.filter(
