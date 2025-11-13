@@ -593,12 +593,18 @@ class TranslateListResource(Resource):
             return "Word"
         elif ext in {'xlsx', 'xls'}:
             return "Excel"
-        elif ext == 'pptx':
+        elif ext in {'pptx', 'ppt'}:
             return "PPT"
         elif ext == 'pdf':
             return "PDF"
         elif ext in {'txt', 'md'}:
             return "文本"
+        elif ext == 'csv':
+            return "CSV"
+        elif ext == 'json':
+            return "JSON"
+        elif ext == 'js':
+            return "JS"
         else:
             return "其他"
 

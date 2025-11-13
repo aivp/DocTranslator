@@ -22,6 +22,7 @@ class Customer(db.Model):
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)  # 更新时间
     storage = db.Column(db.BigInteger, default=0)  # 已使用的存储空间（字节）
     total_storage = db.Column(db.BigInteger, default=1073741824) # 默认1GB 总存储空间（字节）
+    current_token_id = db.Column(db.String(255), nullable=True)  # 当前有效的 token ID (jti)，用于单点登录
 
     def set_password(self, password):
         self.password = generate_password_hash(password)

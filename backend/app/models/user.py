@@ -16,6 +16,7 @@ class User(db.Model):
     deleted_flag = db.Column(db.Enum('N', 'Y'), default='N')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    current_token_id = db.Column(db.String(255), nullable=True)  # 当前有效的 token ID (jti)，用于单点登录
 
     def set_password(self, password):
         """设置密码（哈希加密）"""

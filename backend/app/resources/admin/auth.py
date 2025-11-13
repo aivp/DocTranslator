@@ -1,7 +1,7 @@
 # resources/admin/auth.py
 from flask import request, current_app
 from flask_restful import Resource
-from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
+from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, decode_token
 
 from app import db
 from app.models.user import User
@@ -66,6 +66,14 @@ class AdminLoginResource(Resource):
             
             # 生成JWT令牌
             access_token = create_access_token(identity=str(admin.id))
+            
+            # 解码 token 获取 jti
+            decoded = decode_token(access_token)
+            token_jti = decoded.get('jti')
+            
+            # 更新管理员表中的当前 token ID（实现单点登录：新登录会使旧 token 失效）
+            admin.current_token_id = token_jti
+            db.session.commit()
             
             return APIResponse.success({
                 'token': access_token,

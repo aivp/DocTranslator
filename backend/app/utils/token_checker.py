@@ -44,11 +44,35 @@ def check_token_validity():
         if not user_id:
             return False, "Invalid token payload", 401
         
-        # 可以在这里添加更多检查，比如用户状态等
-        # from app.models.customer import Customer
-        # user = Customer.query.get(user_id)
-        # if not user or user.status == 'disabled':
-        #     return False, "User not found or disabled", 401
+        # 获取 token 的 jti (JWT ID)
+        token_jti = decoded.get('jti')
+        
+        # 检查用户状态和单点登录（支持 customer 和 admin 两种用户类型）
+        from app.models.customer import Customer
+        from app.models.user import User
+        
+        # 先尝试作为 customer 查询
+        user = Customer.query.get(user_id)
+        user_type = 'customer'
+        
+        # 如果不是 customer，尝试作为 admin/user 查询
+        if not user:
+            user = User.query.get(user_id)
+            user_type = 'admin'
+        
+        if not user:
+            return False, "User not found", 401
+        
+        # 检查用户状态
+        if hasattr(user, 'status') and user.status == 'disabled':
+            return False, "User account is disabled", 401
+        if hasattr(user, 'deleted_flag') and user.deleted_flag == 'Y':
+            return False, "User account is disabled", 401
+        
+        # 单点登录检查：验证当前 token 的 jti 是否与数据库中存储的一致
+        if hasattr(user, 'current_token_id') and user.current_token_id and token_jti != user.current_token_id:
+            logger.warning(f"Token已被新登录替换: user_id={user_id}, user_type={user_type}, token_jti={token_jti}, stored_jti={user.current_token_id}")
+            return False, "账号已在其他设备登录，请重新登录", 401
         
         logger.info(f"Token验证成功: {user_id}")
         return True, None, 200

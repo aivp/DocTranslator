@@ -1,7 +1,7 @@
 # resources/auth.py
 from flask import request
 from flask_restful import Resource
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, get_jwt
 from datetime import datetime, timedelta
 
 from app.extensions import db
@@ -107,8 +107,19 @@ class UserLoginResource(Resource):
         if not tenant_customer:
             return APIResponse.error('该账号不属于该租户，请检查租户代码', 403)
         
-        # 确保identity是字符串
+        # 生成新的 token，并获取其 jti (JWT ID)
+        # 使用 additional_claims 添加 jti，flask-jwt-extended 会自动生成
         access_token = create_access_token(identity=str(customer.id))
+        
+        # 解码 token 获取 jti
+        from flask_jwt_extended import decode_token
+        decoded = decode_token(access_token)
+        token_jti = decoded.get('jti')
+        
+        # 更新用户表中的当前 token ID（实现单点登录：新登录会使旧 token 失效）
+        customer.current_token_id = token_jti
+        db.session.commit()
+        
         return APIResponse.success({
             'token': access_token,
             'email': data['email'],
