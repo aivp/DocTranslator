@@ -103,10 +103,7 @@
           </div>
           <div class="table_row phone_row" v-for="(res, index) in result" :key="index">
             <div class="table_li">
-              <img v-if="res.file_type == 'pptx'" src="@assets/PPT.png" alt="" />
-              <img v-else-if="res.file_type == 'docx'" src="@assets/DOC.png" alt="" />
-              <img v-else-if="res.file_type == 'xlsx'" src="@assets/Excel.png" alt="" />
-              <img v-else src="@assets/PDF.png" alt="" />
+              <img :src="getFileIcon(res.file_type, res.file_name)" alt="" />
               <span class="file_name">{{ res.file_name }}</span>
             </div>
             <div class="table_li status">
@@ -128,10 +125,7 @@
 
           <div class="table_row phone_row" v-for="(item, index) in translatesData" :key="index">
             <div class="table_li">
-              <img v-if="item.file_type == 'pptx'" src="@assets/PPT.png" alt="" />
-              <img v-else-if="item.file_type == 'docx'" src="@assets/DOC.png" alt="" />
-              <img v-else-if="item.file_type == 'xlsx'" src="@assets/Excel.png" alt="" />
-              <img v-else src="@assets/PDF.png" alt="" />
+              <img :src="getFileIcon(item.file_type, item.origin_filename)" alt="" />
               <span class="file_name">{{ item.origin_filename }}</span>
             </div>
             <div :class="item.status == 'done' ? 'pc_show table_li status' : 'table_li status'">
@@ -237,6 +231,16 @@ import {
 } from '@/api/trans'
 import { storage } from '@/api/account'
 import uploadPng from '@assets/upload.png'
+// 使用 file_icon 目录下的成套图标
+import docIcon from '@assets/file_icon/office-doc.svg'
+import excelIcon from '@assets/file_icon/office-els.svg'
+import pptIcon from '@assets/file_icon/office-ppt.svg'
+import pdfIcon from '@assets/file_icon/office-pdf.svg'
+import txtIcon from '@assets/file_icon/office-txt.svg'
+import mdIcon from '@assets/file_icon/code.svg' // code.svg 用于 .md 文件
+import csvIcon from '@assets/file_icon/file.svg' // file.svg 用于 csv 文件
+import jsonIcon from '@assets/file_icon/code.svg' // JSON 使用 code 图标
+import jsIcon from '@assets/file_icon/js.svg' // JS 使用专门的 js.svg 图标
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTranslateStore } from '@/store/translate'
 import { useUserStore } from '@/store/user'
@@ -335,6 +339,41 @@ const downloadAllButtonState = ref({
   isLoading: false,
   disabled: false
 })
+
+// 获取文件图标：根据文件类型或文件名返回对应的图标路径
+function getFileIcon(fileType, filename) {
+  // 如果提供了文件名，优先从文件名提取扩展名
+  if (filename) {
+    const ext = filename.split('.').pop()?.toLowerCase()
+    if (ext === 'doc' || ext === 'docx') return docIcon
+    if (ext === 'xls' || ext === 'xlsx') return excelIcon
+    if (ext === 'ppt' || ext === 'pptx') return pptIcon
+    if (ext === 'pdf') return pdfIcon
+    if (ext === 'txt') return txtIcon // txt 使用 office-txt.svg
+    if (ext === 'md') return mdIcon // md 使用 code.svg
+    if (ext === 'csv') return csvIcon // CSV 使用 file.svg
+    if (ext === 'json') return jsonIcon // JSON 使用 code.svg
+    if (ext === 'js') return jsIcon // JS 使用 code.svg
+  }
+  
+  // 根据后端返回的file_type（中文描述）判断
+  if (fileType === 'Word' || fileType === 'word') return docIcon
+  if (fileType === 'Excel' || fileType === 'excel') return excelIcon
+  if (fileType === 'PPT' || fileType === 'ppt') return pptIcon
+  if (fileType === 'PDF' || fileType === 'pdf') return pdfIcon
+  if (fileType === '文本') return txtIcon // txt 使用 office-txt.svg
+  if (fileType === 'CSV') return csvIcon // CSV 使用 file.svg
+  if (fileType === 'JSON' || fileType === 'json') return jsonIcon
+  if (fileType === 'JS' || fileType === 'js' || fileType === 'JavaScript') return jsIcon
+  
+  // 兼容旧的扩展名判断（向后兼容）
+  if (fileType === 'docx' || fileType === 'doc') return docIcon
+  if (fileType === 'xlsx' || fileType === 'xls') return excelIcon
+  if (fileType === 'pptx' || fileType === 'ppt') return pptIcon
+  
+  // 默认返回PDF图标
+  return pdfIcon
+}
 
 // 语言映射：将英文名转换为中文名用于显示
 const languageNameMap = {
@@ -1917,6 +1956,10 @@ onUnmounted(() => {
           align-items: center;
           img {
             margin-right: 12px;
+            width: 16px;
+            height: 20px;
+            object-fit: contain;
+            flex-shrink: 0;
           }
           .file_name {
             display: -webkit-box;
