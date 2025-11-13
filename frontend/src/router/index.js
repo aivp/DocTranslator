@@ -79,6 +79,16 @@ const constantRoute = [
           noCache: true,
           requiresAuth: true
         }
+      },
+      {
+        path: '/tools/images-to-pdf',
+        component: () => import('@/pages/tools/images-to-pdf/index.vue'),
+        name: 'images-to-pdf',
+        meta: {
+          title: '图片合并PDF',
+          noCache: true,
+          requiresAuth: true
+        }
       }
     ]
   },

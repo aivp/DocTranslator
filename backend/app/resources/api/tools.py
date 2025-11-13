@@ -130,12 +130,6 @@ class ImageTranslateResource(Resource):
             
             data = request.get_json(silent=True)
             
-            # 打印请求参数（用于调试）
-            current_app.logger.info(f"📥 图片翻译请求参数: {data}")
-            current_app.logger.info(f"📥 请求URL: {request.url}")
-            current_app.logger.info(f"📥 请求方法: {request.method}")
-            current_app.logger.info(f"📥 Content-Type: {request.content_type}")
-            
             # 验证必要参数
             if not data:
                 current_app.logger.error("请求参数为空或JSON解析失败")
@@ -144,9 +138,6 @@ class ImageTranslateResource(Resource):
             image_id = data.get('image_id')
             source_language = data.get('source_language')
             target_language = data.get('target_language', 'zh')
-            
-            # 打印解析后的参数
-            current_app.logger.info(f"📋 解析后的参数: image_id={image_id}, source_language={source_language}, target_language={target_language}")
             
             # 验证参数
             if not image_id:
@@ -211,14 +202,8 @@ class ImageTranslateResource(Resource):
                 if not image_url_for_api:
                     return APIResponse.error('无法生成图片访问URL，请检查文件路径', 400)
             
-            # 打印调用API前的参数
-            current_app.logger.info(f"🚀 准备调用Qwen-MT-Image API: image_url={image_url_for_api}, source_language={source_language}, target_language={target_language}")
-            
             # 调用 Qwen-MT-Image API 创建任务（只提交，不等待结果）
             task_result = self._create_qwen_mt_image_task(api_key, image_url_for_api, source_language, target_language)
-            
-            # 打印API调用结果
-            current_app.logger.info(f"📤 Qwen-MT-Image API调用结果: success={task_result.get('success')}, task_id={task_result.get('task_id')}, error={task_result.get('error')}")
             
             if not task_result.get('success'):
                 return APIResponse.error(task_result.get('error', '创建翻译任务失败'), 500)
@@ -275,13 +260,7 @@ class ImageTranslateResource(Resource):
                 "input": input_params
             }
             
-            # 打印详细的请求参数
-            current_app.logger.info(f"📤 创建Qwen-MT-Image翻译任务")
-            current_app.logger.info(f"📤 API URL: {api_url}")
-            current_app.logger.info(f"📤 请求参数 - source_lang: {source_language}, target_lang: {target_language}")
-            current_app.logger.info(f"📤 请求参数 - image_url: {image_url}")
-            current_app.logger.info(f"📤 完整Payload: {payload}")
-            current_app.logger.info(f"📤 API Key长度: {len(api_key) if api_key else 0}")
+            current_app.logger.info(f"创建Qwen-MT-Image翻译任务: source_lang={source_language}, target_lang={target_language}, image_url={image_url}")
             
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -289,16 +268,12 @@ class ImageTranslateResource(Resource):
                 "X-DashScope-Async": "enable"  # 启用异步模式
             }
             
-            current_app.logger.info(f"📤 请求Headers: Content-Type={headers.get('Content-Type')}, X-DashScope-Async={headers.get('X-DashScope-Async')}")
-            
             response = requests.post(
                 api_url,
                 json=payload,
                 headers=headers,
                 timeout=30
             )
-            
-            current_app.logger.info(f"📥 Qwen-MT-Image API响应状态码: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
@@ -393,22 +368,12 @@ class ImageTranslateBatchResource(Resource):
                 return APIResponse.error('请求Content-Type必须是application/json', 415)
 
             data = request.get_json(silent=True)
-            
-            # 打印请求参数（用于调试）
-            current_app.logger.info(f"📥 批量图片翻译请求参数: {data}")
-            current_app.logger.info(f"📥 请求URL: {request.url}")
-            current_app.logger.info(f"📥 请求方法: {request.method}")
-            current_app.logger.info(f"📥 Content-Type: {request.content_type}")
-            
             if not data:
                 return APIResponse.error('请求参数不能为空或JSON格式错误', 400)
 
             image_ids = data.get('image_ids', [])
             source_language = data.get('source_language')
             target_language = data.get('target_language', 'zh')
-            
-            # 打印解析后的参数
-            current_app.logger.info(f"📋 批量翻译解析后的参数: image_ids={image_ids}, source_language={source_language}, target_language={target_language}")
 
             if not image_ids or not isinstance(image_ids, list):
                 return APIResponse.error('缺少必要参数: image_ids（数组）', 400)
@@ -430,8 +395,6 @@ class ImageTranslateBatchResource(Resource):
 
             user_id = get_jwt_identity()
             tenant_id = get_current_tenant_id_from_request()
-            
-            current_app.logger.info(f"📋 批量翻译用户信息: user_id={user_id}, tenant_id={tenant_id}")
 
             # 查询所有图片记录
             image_records = ImageTranslate.query.filter(
@@ -1203,4 +1166,133 @@ class PDFToImageResource(Resource):
             
         except Exception as e:
             current_app.logger.error(f"PDF转图片处理失败: {str(e)}")
+            return APIResponse.error(f'处理失败: {str(e)}', 500)
+
+
+class ImagesToPdfResource(Resource):
+    """图片合并为PDF资源"""
+    
+    @require_valid_token
+    @jwt_required()
+    def post(self):
+        """将多个图片合并为一个PDF文件"""
+        try:
+            if 'files' not in request.files:
+                return APIResponse.error('未选择文件', 400)
+            
+            files = request.files.getlist('files')
+            if not files or all(f.filename == '' for f in files):
+                return APIResponse.error('未选择有效的图片文件', 400)
+            
+            # 获取参数
+            data = request.form.get('data')
+            if data:
+                import json
+                params = json.loads(data)
+            else:
+                params = {}
+            
+            page_size_preset = params.get('page_size_preset', 'A4')
+            page_size = params.get('page_size')  # (width, height) 或 None
+            fit_mode = params.get('fit_mode', 'fit')  # fit, stretch, center, custom
+            margin = float(params.get('margin', 0))
+            custom_settings = params.get('custom_settings')  # 每张图片的自定义设置
+            image_order = params.get('image_order', [])  # 图片顺序索引列表
+            
+            # 验证适应模式
+            valid_fit_modes = ['fit', 'stretch', 'center', 'custom']
+            if fit_mode not in valid_fit_modes:
+                return APIResponse.error(f'不支持的适应模式，支持的模式: {", ".join(valid_fit_modes)}', 400)
+            
+            user_id = get_jwt_identity()
+            tenant_id = get_current_tenant_id_from_request()
+            
+            # 创建临时目录存储图片和PDF
+            temp_dir = get_tenant_upload_dir(user_id, tenant_id)
+            images_dir = os.path.join(temp_dir, 'images_to_pdf')
+            os.makedirs(images_dir, exist_ok=True)
+            
+            image_paths = []
+            uploaded_files = []
+            
+            try:
+                # 保存上传的图片文件
+                for idx, file in enumerate(files):
+                    if file.filename == '':
+                        continue
+                    
+                    # 检查文件格式
+                    filename_lower = file.filename.lower()
+                    if not any(filename_lower.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']):
+                        continue
+                    
+                    # 生成唯一文件名
+                    file_ext = os.path.splitext(file.filename)[1]
+                    unique_filename = f"{uuid.uuid4().hex}{file_ext}"
+                    file_path = os.path.join(images_dir, unique_filename)
+                    
+                    file.save(file_path)
+                    uploaded_files.append(file_path)
+                
+                if not uploaded_files:
+                    return APIResponse.error('没有有效的图片文件', 400)
+                
+                # 根据用户指定的顺序重新排列图片
+                if image_order and len(image_order) == len(uploaded_files):
+                    try:
+                        # image_order是索引列表，例如 [2, 0, 1] 表示重新排序
+                        ordered_files = [uploaded_files[i] for i in image_order]
+                        image_paths = ordered_files
+                    except (IndexError, TypeError):
+                        # 如果顺序无效，使用原始顺序
+                        image_paths = uploaded_files
+                else:
+                    image_paths = uploaded_files
+                
+                # 生成PDF文件名
+                pdf_filename = f"{uuid.uuid4().hex}.pdf"
+                pdf_path = os.path.join(images_dir, pdf_filename)
+                
+                # 调用合并函数
+                from app.utils.images_to_pdf import images_to_pdf
+                images_to_pdf(
+                    image_paths=image_paths,
+                    output_pdf_path=pdf_path,
+                    page_size=page_size,
+                    page_size_preset=page_size_preset,
+                    fit_mode=fit_mode,
+                    margin=margin,
+                    custom_settings=custom_settings
+                )
+                
+                # 转换PDF路径为URL（复用ImageTranslateResource的方法）
+                image_translate_resource = ImageTranslateResource()
+                pdf_url = image_translate_resource._convert_filepath_to_url(pdf_path)
+                
+                # 清理上传的图片文件（保留PDF供下载）
+                for img_path in uploaded_files:
+                    try:
+                        if os.path.exists(img_path):
+                            os.remove(img_path)
+                    except Exception as e:
+                        current_app.logger.warning(f"删除临时图片文件失败: {img_path}, {str(e)}")
+                
+                return APIResponse.success({
+                    'pdf_url': pdf_url,
+                    'pdf_path': pdf_path,
+                    'message': f'成功合并{len(image_paths)}张图片为PDF'
+                })
+                
+            except Exception as e:
+                # 清理临时文件
+                for file_path in uploaded_files + ([pdf_path] if 'pdf_path' in locals() else []):
+                    try:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                    except:
+                        pass
+                raise
+                
+        except Exception as e:
+            current_app.logger.error(f"图片合并PDF处理失败: {str(e)}")
             return APIResponse.error(f'处理失败: {str(e)}', 500)

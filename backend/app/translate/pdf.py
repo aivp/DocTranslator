@@ -544,39 +544,13 @@ def start_doc2x_pdf_translation(trans):
                 translator.set_translation_service(docx_trans)
                 print("✅ Okapi 翻译服务设置成功")
                 
-                # 语言映射：将中文语言名称转换为英文全拼
-                def map_language_to_qwen_format(lang_name):
-                    language_mapping = {
-                        '中文': 'Chinese',
-                        '英语': 'English',
-                        '日语': 'Japanese',
-                        '韩语': 'Korean',
-                        '法语': 'French',
-                        '德语': 'German',
-                        '西班牙语': 'Spanish',
-                        '俄语': 'Russian',
-                        '阿拉伯语': 'Arabic',
-                        '葡萄牙语': 'Portuguese',
-                        '意大利语': 'Italian',
-                        '泰语': 'Thai',
-                        '越南语': 'Vietnamese',
-                        '印尼语': 'Indonesian',
-                        '马来语': 'Malay',
-                        '菲律宾语': 'Filipino',
-                        '缅甸语': 'Burmese',
-                        '柬埔寨语': 'Khmer',
-                        '老挝语': 'Lao',
-                        '柬语': 'Khmer'
-                    }
-                    return language_mapping.get(lang_name.strip(), lang_name.strip())
-                
-                # 获取并映射语言
+                # 前端已直接传入英文名（English Name），直接使用，无需映射
                 source_lang = "auto"  # 写死为auto，让API自动检测源语言
-                target_lang = map_language_to_qwen_format(docx_trans.get('lang', '英语'))
+                target_lang = docx_trans.get('lang', 'English')  # 前端已传入英文名，直接使用
                 
-                print("🔍 语言映射调试:")
-                print("  原始目标语言: " + str(docx_trans.get('lang', '英语')))
-                print("  映射后目标语言: " + target_lang)
+                print("🔍 语言设置:")
+                print(f"  源语言: {source_lang}")
+                print(f"  目标语言: {target_lang}")
                 
                 # 执行翻译：Okapi转换XLIFF，Qwen翻译，然后合并
                 success = translator.translate_document(

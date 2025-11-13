@@ -44,7 +44,7 @@ from app.resources.api.translate import TranslateListResource, TranslateSettingR
     TranslateDownloadAllResource, TranslateProgressResource, QueueStatusResource
 from app.resources.api.video import VideoUploadResource, VideoTranslateResource, VideoStatusResource, \
     VideoListResource, VideoDeleteResource, VideoDownloadResource, VideoLanguagesResource, VideoVoicesResource, VideoWebhookResource, VideoTokenInfoResource
-from app.resources.api.tools import ImageUploadResource, ImageTranslateResource, ImageTranslateBatchResource, ImageTranslateStatusResource, ImageListResource, ImageDeleteResource, ImageBatchDeleteResource, ImageTranslateRetryResource, ImageTranslateBatchDownloadResource, PDFToImageResource
+from app.resources.api.tools import ImageUploadResource, ImageTranslateResource, ImageTranslateBatchResource, ImageTranslateStatusResource, ImageListResource, ImageDeleteResource, ImageBatchDeleteResource, ImageTranslateRetryResource, ImageTranslateBatchDownloadResource, PDFToImageResource, ImagesToPdfResource
 
 
 def register_routes(api):
@@ -160,6 +160,7 @@ def register_routes(api):
     api.add_resource(ImageTranslateRetryResource, '/api/tools/image-translate/retry/<int:image_id>')
     api.add_resource(ImageTranslateBatchDownloadResource, '/api/tools/images/batch-download')
     api.add_resource(PDFToImageResource, '/api/tools/pdf-to-image')
+    api.add_resource(ImagesToPdfResource, '/api/tools/images-to-pdf')
 
 
 # -------admin-----------

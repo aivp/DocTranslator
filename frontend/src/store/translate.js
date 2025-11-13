@@ -19,7 +19,7 @@ export const useTranslateStore = defineStore('translate-settings', () => {
     prompt_id: null,
     threads: 30,  // 硬编码：30线程
     comparison_id: [], // 改为数组类型，支持多选术语库，默认为空数组
-    lang: '英语', // 硬编码：默认目标语言为英语
+    lang: 'English', // 硬编码：默认目标语言为英语（使用英文名，直接传给API）
     doc2x_flag: 'N',  // 硬编码：不使用Doc2x
     doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0'
   })
@@ -42,7 +42,7 @@ export const useTranslateStore = defineStore('translate-settings', () => {
   })
   // 其他设置
   const otherSettings = ref({
-    langs: ['', '英语'],
+    langs: ['', 'English'],
     comparison_id: '',
     threads: 30,
     doc2x_flag: 'N', // 是否使用doc2x
@@ -50,7 +50,7 @@ export const useTranslateStore = defineStore('translate-settings', () => {
   })
   // 通用设置
   const common = ref({
-    langs: ['', '英语'],  // 硬编码：默认语言数组
+    langs: ['', 'English'],  // 硬编码：默认语言数组
     type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 硬编码：默认译文形式
     doc2x_flag: 'N',  // 硬编码：不使用Doc2x
     doc2x_secret_key: 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0',

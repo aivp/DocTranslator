@@ -55,6 +55,51 @@
             <el-icon :size="20"><ArrowRight /></el-icon>
           </div>
         </div>
+
+        <!-- 图片合并PDF工具 -->
+        <div class="tool-card">
+          <div class="tool-icon">
+            <el-icon :size="48" color="#E6A23C">
+              <Files />
+            </el-icon>
+          </div>
+          <div class="tool-content">
+            <h3>图片合并PDF</h3>
+            <p>将多张图片合并为一个PDF文件，支持调整顺序、大小和页面设置</p>
+            <div class="tool-tags">
+              <el-tag size="small" type="warning">格式转换</el-tag>
+              <el-tag size="small">批量处理</el-tag>
+            </div>
+            <div class="tool-actions">
+              <el-button type="primary" size="small" @click.stop="openImagesToPdf">开始合并</el-button>
+            </div>
+          </div>
+          <div class="tool-arrow">
+            <el-icon :size="20"><ArrowRight /></el-icon>
+          </div>
+        </div>
+
+        <!-- 更多工具敬请期待 -->
+        <div class="tool-card coming-soon">
+          <div class="tool-icon">
+            <el-icon :size="48" color="#909399">
+              <More />
+            </el-icon>
+          </div>
+          <div class="tool-content">
+            <h3>更多工具</h3>
+            <p>更多实用工具正在开发中，敬请期待</p>
+            <div class="tool-tags">
+              <el-tag size="small" type="info">敬请期待</el-tag>
+            </div>
+            <div class="tool-actions">
+              <el-button size="small" disabled>即将上线</el-button>
+            </div>
+          </div>
+          <div class="tool-arrow">
+            <el-icon :size="20"><ArrowRight /></el-icon>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -62,7 +107,7 @@
 
 <script setup>
 import { useRouter } from 'vue-router'
-import { Picture, ArrowRight, Document } from '@element-plus/icons-vue'
+import { Picture, ArrowRight, Document, More, Files } from '@element-plus/icons-vue'
 
 const router = useRouter()
 
@@ -76,6 +121,10 @@ function openImageTranslateList() {
 
 function openPdfToImage() {
   router.push('/tools/pdf-to-image')
+}
+
+function openImagesToPdf() {
+  router.push('/tools/images-to-pdf')
 }
 </script>
 

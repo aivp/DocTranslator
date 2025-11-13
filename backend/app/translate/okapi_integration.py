@@ -1354,6 +1354,224 @@ class OkapiWordTranslator:
             return False
 
 
+class OkapiPptxTranslator:
+    """使用 Okapi Framework 的 PPTX 文档翻译器"""
+    
+    def __init__(self, okapi_home: str = "/opt/okapi", use_placeholders: bool = True):
+        """
+        初始化翻译器
+        
+        Args:
+            okapi_home: Okapi 安装目录
+            use_placeholders: 是否使用占位符模式
+        """
+        self.okapi_integration = DockerOkapiIntegration(okapi_home)
+        self.translation_service = None  # 翻译服务将在后续设置
+        self.use_placeholders = use_placeholders  # 占位符模式
+        
+        logger.info(f"Okapi PPTX 翻译器初始化完成，使用占位符: {use_placeholders}")
+    
+    def set_translation_service(self, translation_service):
+        """设置翻译服务"""
+        self.translation_service = translation_service
+        logger.info("翻译服务已设置")
+    
+    def translate_document(self, input_file: str, output_file: str,
+                          source_lang: str = "zh", target_lang: str = "en") -> bool:
+        """
+        翻译 PPTX 文档
+        
+        Args:
+            input_file: 输入文件路径
+            output_file: 输出文件路径
+            source_lang: 源语言
+            target_lang: 目标语言
+            
+        Returns:
+            bool: 是否成功
+        """
+        if not self.translation_service:
+            raise OkapiIntegrationError("翻译服务未设置")
+        
+        try:
+            with self.okapi_integration.temp_workspace() as workspace:
+                # 文件路径
+                xliff_file = os.path.join(workspace, "extracted.xliff")
+                translated_xliff = os.path.join(workspace, "translated.xliff")
+                
+                # 步骤1：PPTX 文档 → XLIFF
+                logger.info("🔄 步骤1: 提取 PPTX 文档到 XLIFF...")
+                success = self.okapi_integration.extract_to_xliff(
+                    input_file, xliff_file, source_lang, target_lang
+                )
+                if not success:
+                    return False
+                
+                # 步骤2：翻译 XLIFF 内容
+                logger.info("🔄 步骤2: 翻译 XLIFF 内容...")
+                if self.use_placeholders:
+                    logger.info("使用占位符模式")
+                    success = self._translate_xliff_content_with_placeholders(
+                        xliff_file, translated_xliff, source_lang, target_lang
+                    )
+                else:
+                    logger.info("使用简单模式")
+                    success = self._translate_xliff_content(
+                        xliff_file, translated_xliff, source_lang, target_lang
+                    )
+                if not success:
+                    return False
+                
+                # 步骤3：XLIFF → PPTX 文档
+                logger.info("🔄 步骤3: 合并翻译后的 XLIFF 到 PPTX...")
+                success = self.okapi_integration.merge_from_xliff(
+                    input_file, translated_xliff, output_file
+                )
+                
+                if success:
+                    logger.info("🎯 PPTX 翻译完成")
+                    return True
+                else:
+                    logger.error("❌ PPTX 文档合并失败")
+                    return False
+                
+        except Exception as e:
+            logger.error(f"翻译过程出错: {e}")
+            return False
+    
+    def _translate_xliff_content(self, xliff_file: str, translated_xliff: str,
+                                source_lang: str, target_lang: str) -> bool:
+        """
+        翻译 XLIFF 文件中的内容
+        
+        Args:
+            xliff_file: 原始 XLIFF 文件
+            translated_xliff: 翻译后的 XLIFF 文件
+            source_lang: 源语言
+            target_lang: 目标语言
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 解析 XLIFF 内容
+            translation_units = self.okapi_integration.parse_xliff_content(xliff_file)
+            
+            if not translation_units:
+                logger.warning("没有找到需要翻译的内容")
+                # 复制原文件
+                shutil.copy2(xliff_file, translated_xliff)
+                return True
+            
+            # 批量翻译
+            translations = {}
+            batch_texts = []
+            batch_ids = []
+            
+            # 直接使用纯文本进行翻译
+            for unit in translation_units:
+                batch_texts.append(unit['source'])
+                batch_ids.append(unit['id'])
+            
+            logger.info(f"开始批量翻译 {len(batch_texts)} 个文本单元...")
+            
+            # 调用翻译服务
+            translated_texts = self.translation_service.batch_translate(
+                batch_texts, source_lang, target_lang
+            )
+            
+            if len(translated_texts) != len(batch_texts):
+                logger.error("翻译结果数量不匹配")
+                return False
+            
+            # 直接使用翻译结果，不恢复格式标签（让Okapi处理格式）
+            for i, unit_id in enumerate(batch_ids):
+                translations[unit_id] = translated_texts[i]
+            
+            # 复制原文件并更新翻译
+            shutil.copy2(xliff_file, translated_xliff)
+            success = self.okapi_integration.update_xliff_translations(
+                translated_xliff, translations
+            )
+            
+            if success:
+                logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"翻译 XLIFF 内容失败: {e}")
+            return False
+
+    def _translate_xliff_content_with_placeholders(self, xliff_file: str, translated_xliff: str,
+                                                  source_lang: str, target_lang: str) -> bool:
+        """
+        翻译 XLIFF 文件中的内容，使用占位符保持格式标签
+        
+        Args:
+            xliff_file: 原始 XLIFF 文件
+            translated_xliff: 翻译后的 XLIFF 文件
+            source_lang: 源语言
+            target_lang: 目标语言
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 使用占位符解析方法
+            translation_units = self.okapi_integration.parse_xliff_with_placeholders(xliff_file)
+            
+            if not translation_units:
+                logger.warning("没有找到需要翻译的内容")
+                shutil.copy2(xliff_file, translated_xliff)
+                return True
+            
+            # 批量翻译
+            translations = {}
+            placeholder_infos = {}
+            batch_texts = []
+            batch_ids = []
+            
+            # 提取带占位符的文本进行翻译
+            for unit in translation_units:
+                batch_texts.append(unit['source'])
+                batch_ids.append(unit['id'])
+                placeholder_infos[unit['id']] = unit['placeholder_info']
+            
+            logger.info(f"开始批量翻译 {len(batch_texts)} 个文本单元（带占位符）...")
+            
+            # 调用翻译服务
+            translated_texts = self.translation_service.batch_translate(
+                batch_texts, source_lang, target_lang
+            )
+            
+            if len(translated_texts) != len(batch_texts):
+                logger.error("翻译结果数量不匹配")
+                return False
+            
+            # 保存翻译结果和占位符信息
+            for i, unit_id in enumerate(batch_ids):
+                translations[unit_id] = {
+                    'text': translated_texts[i],
+                    'placeholder_info': placeholder_infos[unit_id]
+                }
+            
+            # 复制原文件并更新翻译
+            shutil.copy2(xliff_file, translated_xliff)
+            success = self.okapi_integration.update_xliff_translations_with_placeholders(
+                translated_xliff, translations
+            )
+            
+            if success:
+                logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元（使用占位符）")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"翻译 XLIFF 内容失败: {e}")
+            return False
+
+
 # 便捷函数
 def create_okapi_translator(okapi_home: str = "/opt/okapi", use_placeholders: bool = True) -> OkapiWordTranslator:
     """创建 Okapi 翻译器实例"""

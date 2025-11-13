@@ -43,6 +43,227 @@ ENABLE_FONT_SCALING = True  # 设置为False关闭字体缩放，设置为True�
 # 3. 修改后需要重新运行翻译任务才能生效
 
 def start(trans):
+    """PPT翻译入口函数，支持Okapi和传统方法"""
+    # 检查是否使用Okapi方法（默认使用Okapi，与Word翻译保持一致）
+    use_okapi = trans.get('use_okapi', True)
+    
+    if use_okapi:
+        logger.info("使用 Okapi Framework 进行 PPT 翻译")
+        return start_with_okapi(trans)
+    else:
+        logger.info("使用传统方法进行 PPT 翻译")
+        return start_traditional(trans)
+
+
+def start_with_okapi(trans):
+    """使用 Okapi Framework 进行翻译"""
+    try:
+        # 导入 Okapi 集成模块
+        from .okapi_integration import OkapiPptxTranslator, verify_okapi_installation
+        
+        # 验证 Okapi 安装
+        if not verify_okapi_installation():
+            logger.error("❌ Okapi 安装验证失败，回退到传统方法")
+            return start_traditional(trans)
+        
+        # 如果用户选择了qwen-mt-plus，设置server为qwen
+        if trans.get('model') == 'qwen-mt-plus':
+            trans['server'] = 'qwen'
+            logger.info("✅ 设置翻译服务为 Qwen")
+        
+        # 预加载术语库
+        comparison_id = trans.get('comparison_id')
+        if comparison_id:
+            logger.info(f"📚 开始预加载术语库: {comparison_id}")
+            from .main import get_comparison
+            preloaded_terms = get_comparison(comparison_id)
+            if preloaded_terms:
+                logger.info(f"📚 术语库预加载成功: {len(preloaded_terms)} 个术语")
+                trans['preloaded_terms'] = preloaded_terms
+            else:
+                logger.warning(f"📚 术语库预加载失败: {comparison_id}")
+        
+        # 创建 Okapi 翻译器
+        translator = OkapiPptxTranslator()
+        logger.info("✅ Okapi PPTX 翻译器创建成功")
+        
+        # 设置翻译服务
+        class OkapiTranslationService:
+            def __init__(self, trans):
+                self.trans = trans
+            
+            def batch_translate(self, texts, source_lang, target_lang):
+                """批量翻译文本 - 使用多线程并行处理，支持术语库筛选"""
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                import threading
+                
+                translated_texts = [None] * len(texts)  # 预分配结果数组
+                max_workers = min(30, len(texts))  # 最多30个线程
+                
+                logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程")
+                
+                # 进度更新相关变量
+                total_count = len(texts)
+                progress_lock = threading.Lock()
+                
+                def update_progress():
+                    """更新翻译进度"""
+                    with progress_lock:
+                        actual_completed = sum(1 for i, text in enumerate(texts) if translated_texts[i] is not None)
+                        
+                        if actual_completed >= total_count:
+                            actual_completed = total_count
+                            progress_percentage = 100.0
+                        else:
+                            progress_percentage = min((actual_completed / total_count) * 100, 100.0)
+                        
+                        logger.info(f"翻译进度: {actual_completed}/{total_count} ({progress_percentage:.1f}%)")
+                        
+                        # 更新数据库进度
+                        try:
+                            from .to_translate import db
+                            db.execute("update translate set process=%s where id=%s", 
+                                     str(format(progress_percentage, '.1f')), 
+                                     self.trans['id'])
+                        except Exception as e:
+                            logger.error(f"更新进度失败: {str(e)}")
+                
+                def translate_single_text(index, text):
+                    """翻译单个文本，支持术语库筛选"""
+                    try:
+                        # 检查是否有术语库配置
+                        comparison_id = self.trans.get('comparison_id')
+                        if comparison_id:
+                            preloaded_terms = self.trans.get('preloaded_terms')
+                            if preloaded_terms:
+                                from .term_filter import optimize_terms_for_api
+                                filtered_terms = optimize_terms_for_api(text, preloaded_terms, max_terms=50)
+                                if filtered_terms:
+                                    logger.debug(f"文本 {index} 使用 {len(filtered_terms)} 个术语")
+                                    # 使用术语库进行翻译
+                                    result = to_translate.translate(
+                                        text, 
+                                        self.trans.get('lang', 'English'),
+                                        self.trans.get('server', 'qwen'),
+                                        self.trans.get('model', 'qwen-mt-plus'),
+                                        self.trans.get('prompt_id'),
+                                        comparison_id=comparison_id,
+                                        filtered_terms=filtered_terms
+                                    )
+                                else:
+                                    # 没有匹配的术语，使用普通翻译
+                                    result = to_translate.translate(
+                                        text, 
+                                        self.trans.get('lang', 'English'),
+                                        self.trans.get('server', 'qwen'),
+                                        self.trans.get('model', 'qwen-mt-plus'),
+                                        self.trans.get('prompt_id')
+                                    )
+                            else:
+                                # 术语库未预加载，使用普通翻译
+                                result = to_translate.translate(
+                                    text, 
+                                    self.trans.get('lang', 'English'),
+                                    self.trans.get('server', 'qwen'),
+                                    self.trans.get('model', 'qwen-mt-plus'),
+                                    self.trans.get('prompt_id')
+                                )
+                        else:
+                            # 没有术语库配置，使用普通翻译
+                            result = to_translate.translate(
+                                text, 
+                                self.trans.get('lang', 'English'),
+                                self.trans.get('server', 'qwen'),
+                                self.trans.get('model', 'qwen-mt-plus'),
+                                self.trans.get('prompt_id')
+                            )
+                        
+                        return result
+                    except Exception as e:
+                        logger.error(f"翻译文本 {index} 失败: {e}")
+                        return text  # 失败时返回原文
+                
+                # 使用线程池并行翻译
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # 提交所有任务
+                    future_to_index = {
+                        executor.submit(translate_single_text, i, text): i 
+                        for i, text in enumerate(texts)
+                    }
+                    
+                    # 收集结果
+                    completed = 0
+                    for future in as_completed(future_to_index):
+                        index = future_to_index[future]
+                        try:
+                            translated_texts[index] = future.result()
+                            completed += 1
+                            
+                            # 每完成10%更新一次进度
+                            if completed % max(1, total_count // 10) == 0:
+                                update_progress()
+                        except Exception as e:
+                            logger.error(f"获取翻译结果 {index} 失败: {e}")
+                            translated_texts[index] = texts[index]  # 失败时使用原文
+                
+                # 最终进度更新
+                update_progress()
+                
+                return translated_texts
+        
+        # 设置翻译服务
+        translation_service = OkapiTranslationService(trans)
+        translator.set_translation_service(translation_service)
+        
+        # 准备文件路径
+        input_file = trans['file_path']
+        output_file = trans.get('target_file') or input_file.replace('.pptx', '_translated.pptx')
+        
+        # 确定源语言和目标语言
+        source_lang = "zh"  # PPTX 默认源语言为中文
+        target_lang = trans.get('lang', 'English')
+        
+        # 语言代码映射（如果需要）
+        lang_code_map = {
+            'English': 'en',
+            'Chinese': 'zh',
+            'Japanese': 'ja',
+            'Korean': 'ko',
+            # 可以添加更多映射
+        }
+        target_lang_code = lang_code_map.get(target_lang, target_lang.lower()[:2])
+        
+        # 执行翻译
+        logger.info(f"开始翻译 PPTX: {input_file} -> {output_file}")
+        logger.info(f"源语言: {source_lang}, 目标语言: {target_lang} ({target_lang_code})")
+        
+        success = translator.translate_document(
+            input_file, output_file, source_lang, target_lang_code
+        )
+        
+        if success:
+            # 更新数据库状态
+            try:
+                from .to_translate import db
+                db.execute("update translate set status='done', process='100.0', result_path=%s where id=%s",
+                         output_file, trans['id'])
+                logger.info(f"✅ PPTX 翻译完成: {output_file}")
+            except Exception as e:
+                logger.error(f"更新数据库状态失败: {e}")
+            return True
+        else:
+            # 翻译失败，回退到传统方法
+            logger.error("❌ Okapi 翻译失败，回退到传统方法")
+            return start_traditional(trans)
+            
+    except Exception as e:
+        logger.error(f"Okapi 翻译过程出错: {e}", exc_info=True)
+        # 出错时回退到传统方法
+        return start_traditional(trans)
+
+
+def start_traditional(trans):
+    """使用传统方法进行翻译（原有的 start 函数逻辑）"""
     # 允许的最大线程
     threads=trans['threads']
     if threads is None or int(threads)<0:
@@ -57,8 +278,9 @@ def start(trans):
     slides = wb.slides
     texts=[]
     
-    # 全局去重集合：记录所有已提取的文本内容
-    extracted_texts_global = set()
+    # 改进的去重策略：使用位置+文本作为唯一标识，允许相同文本在不同位置存在
+    # 但避免在同一位置重复提取相同文本
+    extracted_texts_by_location = {}  # {(slide_index, shape_index, text_type, text): True}
     
     # 提取文本时保存样式信息，并建立文本与形状的对应关系
     slide_count = 0
@@ -78,9 +300,10 @@ def start(trans):
                     for c in range(cols):
                         cell_text = table.cell(r, c).text
                         if cell_text!=None and len(cell_text)>0 and not common.is_all_punc(cell_text):
-                            # 检查是否重复
+                            # 使用位置+文本作为唯一标识，允许相同文本在不同位置存在
                             cell_text_clean = cell_text.strip()
-                            if cell_text_clean not in extracted_texts_global:
+                            location_key = (slide_count, shape_index, "table_cell", r, c, cell_text_clean)
+                            if location_key not in extracted_texts_by_location:
                                 # 保存表格单元格的样式信息，并建立对应关系
                                 cell = table.cell(r, c)
                                 style_info = extract_cell_style(cell)
@@ -94,13 +317,14 @@ def start(trans):
                                     "slide_index": slide_count,
                                     "shape_index": shape_index,
                                     "shape": shape,
-                                    "cell": cell
+                                    "cell": cell,
+                                    "original_text": cell_text  # 保存原始文本用于匹配
                                 })
                                 slide_text_count += 1
-                                extracted_texts_global.add(cell_text_clean)
-                                logger.debug(f"添加表格单元格文本: {cell_text_clean[:50]}...")
+                                extracted_texts_by_location[location_key] = True
+                                logger.debug(f"添加表格单元格文本: {cell_text_clean[:50]}... (位置: 幻灯片{slide_count}, 形状{shape_index}, 行{r}, 列{c})")
                             else:
-                                logger.debug(f"跳过重复的表格单元格文本: {cell_text_clean[:50]}...")
+                                logger.debug(f"跳过重复的表格单元格文本: {cell_text_clean[:50]}... (同一位置)")
             
             # 处理所有有文本框架的形状（包括文本框、标题、占位符等）
             elif shape.has_text_frame:
@@ -116,8 +340,9 @@ def start(trans):
                     text = paragraph.text
                     if text!=None and len(text)>0 and not common.is_all_punc(text):
                         text_clean = text.strip()
-                        # 检查是否重复
-                        if text_clean not in extracted_texts_global:
+                        # 使用位置+文本作为唯一标识
+                        location_key = (slide_count, shape_index, "paragraph", paragraph_index, text_clean)
+                        if location_key not in extracted_texts_by_location:
                             # 保存段落的样式信息，并建立对应关系
                             style_info = extract_paragraph_style(paragraph)
                             texts.append({
@@ -129,54 +354,23 @@ def start(trans):
                                 "slide_index": slide_count,
                                 "shape_index": shape_index,
                                 "shape": shape,
-                                "paragraph_index": paragraph_index
+                                "paragraph_index": paragraph_index,
+                                "original_text": text  # 保存原始文本用于匹配
                             })
                             slide_text_count += 1
                             # 记录已提取的文本
                             extracted_texts_in_frame.add(text_clean)
-                            extracted_texts_global.add(text_clean)
+                            extracted_texts_by_location[location_key] = True
                             paragraph_texts.append(text_clean)
-                            logger.debug(f"添加段落文本: {text_clean[:30]}...")
+                            logger.debug(f"添加段落文本: {text_clean[:30]}... (位置: 幻灯片{slide_count}, 形状{shape_index}, 段落{paragraph_index})")
                         else:
-                            logger.debug(f"跳过重复的段落文本: {text_clean[:30]}... (已在其他地方提取)")
+                            logger.debug(f"跳过重复的段落文本: {text_clean[:30]}... (同一位置)")
                 
                 # 第二优先级：检查文本框架是否有遗漏的文本
-                if text_frame.text and text_frame.text.strip():
-                    frame_text = text_frame.text.strip()
-                    
-                    # 智能判断：只有当框架文本与段落文本组合不完全匹配时才添加
-                    # 避免重复提取相同的内容
-                    if frame_text not in extracted_texts_global:
-                        # 检查框架文本是否只是段落文本的组合
-                        is_just_combination = False
-                        if paragraph_texts:
-                            # 移除所有空格和标点，比较纯文本内容
-                            frame_text_clean = re.sub(r'[\s\.,，。！？；：""''（）【】]+', '', frame_text)
-                            paragraph_combined = re.sub(r'[\s\.,，。！？；：""''（）【】]+', '', ''.join(paragraph_texts))
-                            
-                            # 如果框架文本与段落组合文本相同或相似，说明没有遗漏
-                            if frame_text_clean == paragraph_combined or len(frame_text_clean) == len(paragraph_combined):
-                                is_just_combination = True
-                                logger.debug(f"框架文本与段落组合相同，跳过: {frame_text[:50]}...")
-                        
-                        if not is_just_combination:
-                            logger.debug(f"发现遗漏的文本框架内容: {frame_text[:50]}...")
-                            texts.append({
-                                "text": frame_text,
-                                "complete": False,
-                                "type": "text_frame",
-                                "text_frame": text_frame,
-                                "slide_index": slide_count,
-                                "shape_index": shape_index,
-                                "shape": shape
-                            })
-                            slide_text_count += 1
-                            extracted_texts_global.add(frame_text)
-                            logger.debug(f"添加遗漏的文本框架内容: {frame_text[:50]}...")
-                        else:
-                            logger.debug(f"跳过重复的文本框架内容: {frame_text[:50]}... (与段落组合相同)")
-                    else:
-                        logger.debug(f"跳过重复的文本框架内容: {frame_text[:50]}... (已在其他地方提取)")
+                # 注意：如果已经提取了段落文本，通常不需要再提取框架文本，除非框架文本包含段落文本没有的内容
+                # 这里暂时跳过框架文本的提取，避免重复
+                # 如果确实需要，可以通过比较框架文本和段落文本组合来判断
+                pass
             
             # 处理其他可能有文本的形状（如形状内的文本）
             # 注意：这里只处理没有文本框架的形状，避免重复提取
@@ -184,65 +378,51 @@ def start(trans):
                 text = shape.text
                 if text!=None and len(text)>0 and not common.is_all_punc(text):
                     text_clean = text.strip()
-                    # 检查是否与已提取的文本重复
-                    if text_clean not in extracted_texts_global:
+                    # 使用位置+文本作为唯一标识
+                    location_key = (slide_count, shape_index, "shape_text", text_clean)
+                    if location_key not in extracted_texts_by_location:
                         texts.append({
                             "text": text, 
                             "complete": False,
                             "type": "shape_text",
                             "shape": shape,
                             "slide_index": slide_count,
-                            "shape_index": shape_index
+                            "shape_index": shape_index,
+                            "original_text": text  # 保存原始文本用于匹配
                         })
                         slide_text_count += 1
-                        extracted_texts_global.add(text_clean)
-                        logger.debug(f"添加形状文本: {text_clean[:50]}...")
+                        extracted_texts_by_location[location_key] = True
+                        logger.debug(f"添加形状文本: {text_clean[:50]}... (位置: 幻灯片{slide_count}, 形状{shape_index})")
                     else:
-                        logger.debug(f"跳过重复的形状文本: {text_clean[:50]}... (已在其他地方提取)")
+                        logger.debug(f"跳过重复的形状文本: {text_clean[:50]}... (同一位置)")
             
-            # 处理形状名称（通常不会与内容文本重复）
+            # 处理形状名称（通常不会与内容文本重复，但也要检查）
             elif hasattr(shape, 'name') and shape.name:
                 shape_name = shape.name
                 if shape_name and len(shape_name.strip()) > 0:
                     shape_name_clean = shape_name.strip()
-                    # 检查是否与已提取的文本重复
-                    if shape_name_clean not in extracted_texts_global:
+                    # 使用位置+文本作为唯一标识
+                    location_key = (slide_count, shape_index, "shape_name", shape_name_clean)
+                    if location_key not in extracted_texts_by_location:
                         texts.append({
                             "text": shape_name,
                             "complete": False,
                             "type": "shape_name",
                             "shape": shape,
                             "slide_index": slide_count,
-                            "shape_index": shape_index
+                            "shape_index": shape_index,
+                            "original_text": shape_name  # 保存原始文本用于匹配
                         })
                         slide_text_count += 1
-                        extracted_texts_global.add(shape_name_clean)
-                        logger.debug(f"添加形状名称文本: {shape_name_clean[:50]}...")
+                        extracted_texts_by_location[location_key] = True
+                        logger.debug(f"添加形状名称文本: {shape_name_clean[:50]}... (位置: 幻灯片{slide_count}, 形状{shape_index})")
                     else:
-                        logger.debug(f"跳过重复的形状名称文本: {shape_name_clean[:50]}... (已在其他地方提取)")
+                        logger.debug(f"跳过重复的形状名称文本: {shape_name_clean[:50]}... (同一位置)")
         
         logger.info(f"第 {slide_count} 页幻灯片提取了 {slide_text_count} 个文本元素")
     
-    # 最终去重检查
+    # 不再进行全局去重，因为相同文本在不同位置需要分别翻译
     logger.info(f"总共提取了 {len(texts)} 个文本元素")
-    
-    # 最终去重清理：移除完全重复的文本
-    unique_texts = []
-    seen_texts = set()
-    
-    for item in texts:
-        text_content = item.get('text', '').strip()
-        if text_content and text_content not in seen_texts:
-            unique_texts.append(item)
-            seen_texts.add(text_content)
-            logger.debug(f"保留文本: {text_content[:50]}...")
-        else:
-            logger.warning(f"移除重复文本: {text_content[:50]}... (类型: {item.get('type', 'unknown')})")
-    
-    # 更新texts列表
-    original_count = len(texts)
-    texts = unique_texts
-    logger.info(f"去重后文本数量: {len(texts)} (原来: {original_count}, 移除: {original_count - len(texts)})")
     
     # 调试：打印所有提取的文本类型和详细信息
     text_types = {}
@@ -399,7 +579,7 @@ def start(trans):
                         if cell_text!=None and len(cell_text)>0 and not common.is_all_punc(cell_text):
                             # 查找对应的翻译结果
                             cell = table.cell(r, c)
-                            translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "table_cell", cell=cell)
+                            translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "table_cell", cell=cell, row=r, column=c)
                             if translated_item:
                                 # 默认启用自适应样式
                                 apply_translation_to_cell_with_adaptive_styles(cell, translated_item['text'], translated_item.get('style_info', {}))
@@ -428,30 +608,12 @@ def start(trans):
                         else:
                             logger.warning(f"未找到段落的翻译结果: {text[:30]}...")
                 
-                # 处理遗漏的文本框架内容
-                if text_frame.text and text_frame.text.strip():
-                    # 查找对应的翻译结果
-                    translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "text_frame", text_frame=text_frame)
-                    if translated_item:
-                        logger.info(f"处理文本框架内容: 原文='{text_frame.text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
-                        # 直接设置文本框架的文本
-                        original_text = text_frame.text
-                        text_frame.text = translated_item['text']
-                        # 应用自适应样式到所有段落
-                        if text_frame.paragraphs:
-                            for paragraph in text_frame.paragraphs:
-                                if paragraph.runs:
-                                    for run in paragraph.runs:
-                                        if ENABLE_FONT_SCALING:
-                                            apply_adaptive_styles_ppt(run, original_text, translated_item['text'])
-                        text_count += translated_item.get('count', 1)
-                        slide_processed_count += 1
-                        logger.info(f"文本框架内容处理完成，当前段落数: {len(text_frame.paragraphs)}")
-                    else:
-                        logger.warning(f"未找到文本框架内容的翻译结果: {text_frame.text[:30]}...")
+                # 文本框架内容通常已经通过段落处理了，这里不再单独处理，避免重复
+                pass
             
             # 处理其他可能有文本的形状（如形状内的文本）
-            elif hasattr(shape, 'text') and shape.text:
+            # 注意：只处理没有文本框架的形状，避免重复
+            elif hasattr(shape, 'text') and shape.text and not shape.has_text_frame:
                 text = shape.text
                 if text!=None and len(text)>0 and not common.is_all_punc(text):
                     # 查找对应的翻译结果
@@ -468,23 +630,7 @@ def start(trans):
                     else:
                         logger.warning(f"未找到形状文本的翻译结果: {text[:30]}...")
             
-            # 处理遗漏的文本框架
-            elif hasattr(shape, 'text_frame') and shape.text_frame:
-                text_frame = shape.text_frame
-                if text_frame.text and text_frame.text.strip():
-                    for paragraph_index, paragraph in enumerate(text_frame.paragraphs):
-                        text = paragraph.text
-                        if text and len(text.strip()) > 0 and not common.is_all_punc(text):
-                            # 查找对应的翻译结果
-                            translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "paragraph", paragraph=paragraph, paragraph_index=paragraph_index)
-                            if translated_item:
-                                # 默认启用自适应样式
-                                apply_translation_to_paragraph_with_adaptive_styles(paragraph, translated_item['text'], translated_item.get('style_info', {}))
-                                text_count+=translated_item.get('count', 1)
-                                slide_processed_count += 1
-                                logger.info(f"遗漏文本框架段落翻译应用成功: 原文='{text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
-                            else:
-                                logger.warning(f"未找到遗漏文本框架段落的翻译结果: {text[:30]}...")
+            # 文本框架已经在上面处理过了，这里不再重复处理
             
             # 处理形状名称文本
             elif hasattr(shape, 'name') and shape.name:
@@ -1154,46 +1300,67 @@ def distribute_text_to_paragraphs(text_frame, translated_text, paragraph_styles)
 
 def find_translated_text_for_shape(texts, slide_index, shape_index, text_type, **kwargs):
     """从texts列表中查找与给定形状和文本类型匹配的翻译结果"""
-    # 首先尝试精确匹配
+    # 首先尝试精确匹配（对象引用匹配）
     for item in texts:
-        if item['type'] == text_type:
+        if item['type'] == text_type and item.get('complete', False):
             # 检查形状是否匹配
-            if 'shape' in kwargs and item['shape'] == kwargs['shape']:
+            if 'shape' in kwargs and item.get('shape') == kwargs.get('shape'):
                 return item
             # 检查文本框架是否匹配
-            if 'text_frame' in kwargs and item.get('text_frame') == kwargs['text_frame']:
+            if 'text_frame' in kwargs and item.get('text_frame') == kwargs.get('text_frame'):
                 return item
             # 检查段落是否匹配
-            if 'paragraph' in kwargs and item.get('paragraph') == kwargs['paragraph']:
+            if 'paragraph' in kwargs and item.get('paragraph') == kwargs.get('paragraph'):
                 return item
             # 检查单元格是否匹配
-            if 'cell' in kwargs and item.get('cell') == kwargs['cell']:
+            if 'cell' in kwargs and item.get('cell') == kwargs.get('cell'):
                 return item
     
-    # 如果精确匹配失败，尝试基于位置和内容的智能匹配
+    # 如果精确匹配失败，尝试基于位置和内容的精确匹配
     for item in texts:
-        if item['type'] == text_type:
+        if item['type'] == text_type and item.get('complete', False):
             # 检查幻灯片索引和形状索引是否匹配
             if (item.get('slide_index') == slide_index and 
                 item.get('shape_index') == shape_index):
                 
                 # 对于段落类型，还需要检查段落索引
                 if text_type == 'paragraph' and 'paragraph_index' in kwargs:
-                    if item.get('paragraph_index') == kwargs['paragraph_index']:
-                        return item
-                else:
-                    return item
-    
-    # 如果位置匹配也失败，尝试基于内容的模糊匹配
-    for item in texts:
-        if item['type'] == text_type:
-            # 检查是否在同一个幻灯片上
-            if item.get('slide_index') == slide_index:
-                # 对于某些类型，可以基于内容进行匹配
-                if text_type in ['paragraph', 'text_frame', 'shape_text']:
-                    # 这里可以添加更智能的内容匹配逻辑
-                    # 暂时返回第一个匹配的类型
-                    return item
+                    if item.get('paragraph_index') == kwargs.get('paragraph_index'):
+                        # 额外检查原始文本是否匹配
+                        paragraph = kwargs.get('paragraph')
+                        original_text = paragraph.text if paragraph and hasattr(paragraph, 'text') else None
+                        if original_text and item.get('original_text'):
+                            if original_text.strip() == item.get('original_text', '').strip():
+                                return item
+                # 对于表格单元格，检查行列索引
+                elif text_type == 'table_cell':
+                    if (item.get('row') == kwargs.get('row') and 
+                        item.get('column') == kwargs.get('column')):
+                        # 额外检查原始文本是否匹配
+                        cell = kwargs.get('cell')
+                        cell_text = cell.text if cell and hasattr(cell, 'text') else None
+                        if cell_text and item.get('original_text'):
+                            if cell_text.strip() == item.get('original_text', '').strip():
+                                return item
+                # 对于其他类型，检查原始文本是否匹配
+                elif text_type in ['shape_text', 'shape_name', 'text_frame']:
+                    # 获取原始文本
+                    original_text = None
+                    if 'shape' in kwargs:
+                        shape = kwargs.get('shape')
+                        if text_type == 'shape_text' and hasattr(shape, 'text'):
+                            original_text = shape.text
+                        elif text_type == 'shape_name' and hasattr(shape, 'name'):
+                            original_text = shape.name
+                    elif 'text_frame' in kwargs:
+                        text_frame = kwargs.get('text_frame')
+                        if hasattr(text_frame, 'text'):
+                            original_text = text_frame.text
+                    
+                    # 比较原始文本
+                    if original_text and item.get('original_text'):
+                        if original_text.strip() == item.get('original_text', '').strip():
+                            return item
     
     # 如果所有匹配都失败，记录警告并返回None
     logger.warning(f"未找到匹配的翻译结果: slide_index={slide_index}, shape_index={shape_index}, text_type={text_type}, kwargs={kwargs}")

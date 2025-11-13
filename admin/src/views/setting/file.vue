@@ -319,6 +319,108 @@
             <el-empty description="暂无视频文件" />
           </div>
         </el-tab-pane>
+
+        <!-- 图片转PDF标签页 -->
+        <el-tab-pane name="images_to_pdf">
+          <template #label>
+            <div class="tab-label">
+              <el-icon class="tab-icon images-to-pdf"><Document /></el-icon>
+              <span>图片转PDF</span>
+              <el-tag size="small" effect="light" class="size-tag">
+                {{ formatSize(fileData.images_to_pdf?.size || 0) }}
+              </el-tag>
+            </div>
+          </template>
+
+          <!-- 图片转PDF内容区 -->
+          <template v-if="hasData('images_to_pdf')">
+            <div class="category-actions">
+              <el-button
+                type="danger"
+                size="small"
+                @click="confirmDelete('category', 'images_to_pdf')"
+                class="delete-category-btn"
+              >
+                <el-icon><Delete /></el-icon>删除全部文件
+              </el-button>
+            </div>
+
+            <el-collapse v-model="expandedDates.images_to_pdf" accordion class="date-collapse">
+              <el-collapse-item
+                v-for="(dateData, date) in fileData.images_to_pdf.dates"
+                :key="date"
+                :name="date"
+                class="date-item"
+              >
+                <template #title>
+                  <div class="date-header">
+                    <el-icon size="20" class="date-icon"><Calendar /></el-icon>
+                    <span class="date-text">{{ date }}</span>
+                    <div class="date-meta">
+                      <span class="file-count">{{ dateData.files.length }}个文件</span>
+                      <span class="date-size">共{{ formatSize(dateData.size) }}</span>
+                    </div>
+                    <div class="date-actions">
+                      <el-button
+                        type="danger"
+                        size="small"
+                        plain
+                        @click.stop="confirmDelete('date', `images_to_pdf/${date}`)"
+                        class="delete-date-btn"
+                      >
+                        <el-icon><Delete /></el-icon>删除本日所有文件
+                      </el-button>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="file-table-container">
+                  <el-table :data="dateData.files" border stripe empty-text="该日期没有文件" class="file-table">
+                    <el-table-column label="文件名" width="220">
+                      <template #default="{ row }">
+                        <div class="file-name-cell">
+                          <el-icon class="file-icon">
+                            <Document />
+                          </el-icon>
+                          <span class="file-name">{{ row.name }}</span>
+                        </div>
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column label="大小" width="120">
+                      <template #default="{ row }">
+                        <el-tag size="small" effect="plain">
+                          {{ formatSize(row.size) }}
+                        </el-tag>
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column label="文件路径" min-width="300">
+                      <template #default="{ row }">
+                        <el-tooltip :content="row.path" placement="top">
+                          <span class="file-path">{{ row.path }}</span>
+                        </el-tooltip>
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column label="操作" width="120" align="center">
+                      <template #default="{ row }">
+                        <el-popconfirm title="确定要删除此文件吗？" @confirm="handleDeleteFile(row.path)">
+                          <template #reference>
+                            <el-button type="danger" size="small" round> 删除 </el-button>
+                          </template>
+                        </el-popconfirm>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </template>
+          <div v-else class="empty-container">
+            <el-empty description="暂无图片转PDF文件" />
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -347,13 +449,15 @@ const loading = ref(false)
 const fileData = ref({
   uploads: { size: 0, dates: {} },
   translate: { size: 0, dates: {} },
-  video: { size: 0, dates: {} }
+  video: { size: 0, dates: {} },
+  images_to_pdf: { size: 0, dates: {} }
 })
 const activeTab = ref("uploads")
 const expandedDates = ref({
   uploads: [],
   translate: [],
-  video: []
+  video: [],
+  images_to_pdf: []
 })
 
 // 计算是否有数据
@@ -372,11 +476,12 @@ const loadData = async () => {
     loading.value = true
     const res = await getFileList()
     if (res.code === 200) {
-      // 合并数据确保三个分类都存在
+      // 合并数据确保所有分类都存在
       fileData.value = {
         uploads: res.data.uploads || { size: 0, dates: {} },
         translate: res.data.translate || { size: 0, dates: {} },
-        video: res.data.video || { size: 0, dates: {} }
+        video: res.data.video || { size: 0, dates: {} },
+        images_to_pdf: res.data.images_to_pdf || { size: 0, dates: {} }
       }
 
       // 默认展开每个分类的第一个日期
@@ -419,14 +524,65 @@ const getFileIcon = (filename) => {
   )
 }
 
+// 将完整路径转换为后端期望的相对路径格式
+const convertPathToTarget = (filePath, category) => {
+  // 如果路径包含 /app/storage/ 或 /storage/，去掉这些前缀
+  let relativePath = filePath.replace(/^.*\/storage\//, '').replace(/^\/app\/storage\//, '').replace(/^storage\//, '')
+  
+  // 对于 images_to_pdf 文件，需要转换为 images_to_pdf/tenant_X/user_Y/date/file.pdf 格式
+  if (category === 'images_to_pdf' || relativePath.includes('/images_to_pdf/')) {
+    // 从 uploads/tenant_X/user_Y/date/images_to_pdf/file.pdf 转换为 images_to_pdf/tenant_X/user_Y/date/file.pdf
+    // 支持多种路径格式
+    const patterns = [
+      /uploads\/(tenant_\d+\/user_\d+\/\d{4}-\d{2}-\d{2})\/images_to_pdf\/(.+)$/,
+      /^uploads\/(tenant_\d+)\/(user_\d+)\/(\d{4}-\d{2}-\d{2})\/images_to_pdf\/(.+)$/
+    ]
+    
+    for (const pattern of patterns) {
+      const match = relativePath.match(pattern)
+      if (match) {
+        if (match.length === 3) {
+          // 第一个模式：match[1] = tenant_X/user_Y/date, match[2] = filename
+          return `images_to_pdf/${match[1]}/${match[2]}`
+        } else if (match.length === 5) {
+          // 第二个模式：match[1] = tenant_X, match[2] = user_Y, match[3] = date, match[4] = filename
+          return `images_to_pdf/${match[1]}/${match[2]}/${match[3]}/${match[4]}`
+        }
+      }
+    }
+    
+    // 如果正则匹配失败，尝试手动解析
+    if (relativePath.includes('uploads/') && relativePath.includes('/images_to_pdf/')) {
+      const parts = relativePath.split('/')
+      const uploadsIndex = parts.indexOf('uploads')
+      if (uploadsIndex >= 0 && parts.length > uploadsIndex + 4) {
+        const tenant = parts[uploadsIndex + 1]
+        const user = parts[uploadsIndex + 2]
+        const date = parts[uploadsIndex + 3]
+        const imagesToPdfIndex = parts.indexOf('images_to_pdf', uploadsIndex)
+        if (imagesToPdfIndex > uploadsIndex + 3) {
+          const filename = parts.slice(imagesToPdfIndex + 1).join('/')
+          return `images_to_pdf/${tenant}/${user}/${date}/${filename}`
+        }
+      }
+    }
+  }
+  
+  // 对于其他文件，直接返回相对路径（去掉 storage/ 前缀后的路径）
+  return relativePath
+}
+
 // 删除文件
 const handleDeleteFile = async (filePath) => {
   try {
-    await deleteFile({ type: "file", target: filePath })
+    // 根据当前激活的标签页确定分类
+    const category = activeTab.value
+    const target = convertPathToTarget(filePath, category)
+    await deleteFile({ type: "file", target })
     ElMessage.success("文件删除成功")
     await loadData()
   } catch (error) {
-    ElMessage.error("删除失败: " + error.message)
+    ElMessage.error("删除失败: " + (error.message || error))
   }
 }
 
@@ -446,12 +602,13 @@ const confirmDelete = (type, target) => {
       if (action === "confirm") {
         instance.confirmButtonLoading = true
         try {
+          // target 已经是正确的格式（如 images_to_pdf/tenant_X/user_Y/date 或 uploads/tenant_X/user_Y/date）
           await deleteFile({ type, target })
           ElMessage.success("删除成功")
           await loadData()
           done()
         } catch (error) {
-          ElMessage.error("删除失败: " + error.message)
+          ElMessage.error("删除失败: " + (error.message || error))
         } finally {
           instance.confirmButtonLoading = false
         }
@@ -466,9 +623,10 @@ const confirmDelete = (type, target) => {
 <style scoped>
 .file-manager {
   padding: 16px;
-  height: 100%;
+  height: calc(100vh - 100px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .header {
@@ -502,12 +660,27 @@ const confirmDelete = (type, target) => {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .main-tabs {
   flex: 1;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.main-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.main-tabs :deep(.el-tab-pane) {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .tab-label {
@@ -534,6 +707,10 @@ const confirmDelete = (type, target) => {
   color: var(--el-color-danger);
 }
 
+.tab-icon.images-to-pdf {
+  color: var(--el-color-info);
+}
+
 .size-tag {
   margin-left: 8px;
 }
@@ -551,6 +728,8 @@ const confirmDelete = (type, target) => {
 
 .date-collapse {
   flex: 1;
+  overflow-y: auto;
+  max-height: 100%;
 }
 
 .date-item {

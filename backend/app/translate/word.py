@@ -319,124 +319,13 @@ def start_with_okapi(trans, start_time):
         translator.set_translation_service(OkapiTranslationService(trans))
         logger.info("✅ 翻译服务设置成功")
         
-        # 语言映射：将中文语言名称转换为英文全拼
-        def map_language_to_qwen_format(lang_name):
-            """将中文语言名称映射为Qwen API需要的英文全拼格式"""
-            # 处理空值和None的情况
-            if not lang_name or lang_name.strip() == '':
-                return 'auto'  # 源语言为空时返回auto
-                
-            language_mapping = {
-                # 中文名称到英文全拼
-                '中文': 'Chinese',
-                '简体中文': 'Chinese',
-                '繁体中文': 'Traditional Chinese',
-                '英语': 'English',
-                '英文': 'English',
-                '俄语': 'Russian',
-                '日语': 'Japanese',
-                '韩语': 'Korean',
-                '西班牙语': 'Spanish',
-                '法语': 'French',
-                '葡萄牙语': 'Portuguese',
-                '德语': 'German',
-                '意大利语': 'Italian',
-                '泰语': 'Thai',
-                '越南语': 'Vietnamese',
-                '印度尼西亚语': 'Indonesian',
-                '马来语': 'Malay',
-                '阿拉伯语': 'Arabic',
-                '印地语': 'Hindi',
-                '希伯来语': 'Hebrew',
-                '缅甸语': 'Burmese',
-                '泰米尔语': 'Tamil',
-                '乌尔都语': 'Urdu',
-                '孟加拉语': 'Bengali',
-                '波兰语': 'Polish',
-                '荷兰语': 'Dutch',
-                '罗马尼亚语': 'Romanian',
-                '土耳其语': 'Turkish',
-                '高棉语': 'Khmer',
-                '老挝语': 'Lao',
-                '粤语': 'Cantonese',
-                '柬埔寨语': 'Khmer',
-                '柬埔寨语（高棉语）': 'Khmer',
-                '印尼语/马来语': 'Indonesian',
-                '菲律宾语（他加禄语）': 'Tagalog',
-                '菲律宾语': 'Tagalog',
-                '他加禄语': 'Tagalog',
-                # 英文全拼到自身 (确保英文全拼映射到自身)
-                'Chinese': 'Chinese',
-                'English': 'English',
-                'Russian': 'Russian',
-                'Japanese': 'Japanese',
-                'Korean': 'Korean',
-                'Spanish': 'Spanish',
-                'French': 'French',
-                'Portuguese': 'Portuguese',
-                'German': 'German',
-                'Italian': 'Italian',
-                'Thai': 'Thai',
-                'Vietnamese': 'Vietnamese',
-                'Indonesian': 'Indonesian',
-                'Malay': 'Malay',
-                'Arabic': 'Arabic',
-                'Hindi': 'Hindi',
-                'Hebrew': 'Hebrew',
-                'Burmese': 'Burmese',
-                'Tamil': 'Tamil',
-                'Urdu': 'Urdu',
-                'Bengali': 'Bengali',
-                'Polish': 'Polish',
-                'Dutch': 'Dutch',
-                'Romanian': 'Romanian',
-                'Turkish': 'Turkish',
-                'Khmer': 'Khmer',
-                'Lao': 'Lao',
-                'Cantonese': 'Cantonese',
-                'Tagalog': 'Tagalog',
-                # 语种编码到英文全拼
-                'zh': 'Chinese',
-                'en': 'English',
-                'ja': 'Japanese',
-                'ko': 'Korean',
-                'fr': 'French',
-                'de': 'German',
-                'es': 'Spanish',
-                'ru': 'Russian',
-                'it': 'Italian',
-                'ar': 'Arabic',
-                'th': 'Thai',
-                'vi': 'Vietnamese',
-                'id': 'Indonesian',
-                'ms': 'Malay',
-                'tl': 'Tagalog',
-                'my': 'Burmese',
-                'km': 'Khmer',
-                'lo': 'Lao',
-                'pt': 'Portuguese',
-                'hi': 'Hindi',
-                'he': 'Hebrew',
-                'ta': 'Tamil',
-                'ur': 'Urdu',
-                'bn': 'Bengali',
-                'pl': 'Polish',
-                'nl': 'Dutch',
-                'ro': 'Romanian',
-                'tr': 'Turkish',
-                'yue': 'Cantonese',
-            }
-            return language_mapping.get(lang_name.strip(), lang_name.strip())
-        
-        # 获取并映射语言
+        # 前端已直接传入英文名（English Name），直接使用，无需映射
         source_lang = "auto"  # 写死为auto，让API自动检测源语言
-        target_lang = map_language_to_qwen_format(trans.get('target_lang', '英语'))
+        target_lang = trans.get('lang', 'English')  # 前端已传入英文名，直接使用
         
-        logger.info(f"🔍 语言映射调试:")
-        logger.info(f"  原始源语言: {trans.get('source_lang', 'zh')}")
-        logger.info(f"  原始目标语言: {trans.get('target_lang', 'en')}")
-        logger.info(f"  映射后源语言: {source_lang}")
-        logger.info(f"  映射后目标语言: {target_lang}")
+        logger.info(f"🔍 语言设置:")
+        logger.info(f"  源语言: {source_lang}")
+        logger.info(f"  目标语言: {target_lang}")
         
         # 执行翻译
         success = translator.translate_document(

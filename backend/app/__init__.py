@@ -23,6 +23,10 @@ def create_app(config_class=None):
     # 设置内存监控器
     from app.utils.memory_manager import setup_memory_monitor
     setup_memory_monitor(app)
+    
+    # 启动图片合并PDF文件自动清理调度器
+    from app.utils.images_to_pdf_cleanup_scheduler import init_cleanup_scheduler
+    init_cleanup_scheduler(app, cleanup_interval_hours=6, expire_hours=24)
 
     # 首先注册JWT相关异常处理器（优先级最高）
     from flask_jwt_extended.exceptions import JWTExtendedException

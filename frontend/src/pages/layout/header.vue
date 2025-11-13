@@ -20,6 +20,10 @@
               <div class="icon_svg"><svg-icon icon-class="home" /></div>
               <span class="pc_show">首页</span>
             </div>
+            <div class="btn_set" @click="funOpenSet">
+              <div class="icon_svg"><svg-icon icon-class="setting" /></div>
+              <span class="pc_show">翻译设置</span>
+            </div>
             <div class="btn_set" @click="funOpenCorpus">
               <div class="icon_svg"><svg-icon icon-class="corpus" /></div>
               <span class="pc_show">语料库</span>
@@ -31,14 +35,6 @@
             <div class="btn_set" @click="funOpenTools">
               <div class="icon_svg"><svg-icon icon-class="tools" /></div>
               <span class="pc_show">工具</span>
-            </div>
-            <div class="btn_set" @click="funOpenSet">
-              <div class="icon_svg"><svg-icon icon-class="setting" /></div>
-              <span class="pc_show">翻译设置</span>
-            </div>
-            <div v-if="false" class="btn_set" @click="windowOpen('https://github.com/mingchen666/DocTranslator')">
-              <div class="icon_svg"><svg-icon icon-class="github" /></div>
-              <span class="pc_show">Github</span>
             </div>
             <div class="btn_set" @click="$router.push('/profile')">
               <!-- <div class="icon_svg"><svg-icon icon-class="user" /></div> -->

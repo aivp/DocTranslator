@@ -132,3 +132,17 @@ export function pdfToImage(formData) {
   })
 }
 
+/**
+ * 图片合并为PDF
+ * @param {FormData} formData - 包含files和data的表单数据
+ * @returns {Promise}
+ */
+export function imagesToPdf(formData) {
+  return request({
+    url: '/api/tools/images-to-pdf',
+    method: 'POST',
+    data: formData
+    // FormData会自动设置Content-Type，不需要手动设置
+  })
+}
+

@@ -310,10 +310,49 @@ function getStatusText(status) {
   return map[status] || status
 }
 
-// 格式化时间
+// 将后端传入的GMT/UTC时间字符串转换为Date对象（自动转换为用户浏览器时区）
+function parseUTCTime(timeStr) {
+  if (!timeStr) return null
+  
+  if (typeof timeStr === 'string') {
+    const trimmed = timeStr.trim()
+    
+    // 检测ISO 8601格式：YYYY-MM-DDTHH:mm:ss 或 YYYY-MM-DD HH:mm:ss
+    // 如果时间字符串没有时区信息（没有Z、+、-时区偏移），假设它是UTC时间
+    const isoPattern = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/
+    
+    // 检测是否有时区信息：检查字符串末尾是否有 Z、+HH:mm、-HH:mm 等
+    // 简单检查：如果字符串以 Z 结尾，或者包含 + 或 - 后面跟数字（时区偏移）
+    const hasTimezone = trimmed.endsWith('Z') || 
+                        /[+-]\d{2}:?\d{2}$/.test(trimmed) ||
+                        /[+-]\d{2}$/.test(trimmed)
+    
+    if (isoPattern.test(trimmed) && !hasTimezone) {
+      // 没有时区信息，假设是UTC时间，添加'Z'表示UTC
+      // 将空格替换为T（ISO 8601标准格式）
+      const normalizedStr = trimmed.replace(' ', 'T') + 'Z'
+      return new Date(normalizedStr)
+    } else {
+      // 有时区信息或不是ISO格式，直接解析（Date会自动处理时区转换）
+      return new Date(trimmed)
+    }
+  } else {
+    return new Date(timeStr)
+  }
+}
+
+// 格式化时间（将后端传入的GMT/UTC时间转换为用户浏览器时区）
 function formatTime(timeStr) {
   if (!timeStr) return ''
-  const date = new Date(timeStr)
+  
+  const date = parseUTCTime(timeStr)
+  
+  // 检查日期是否有效
+  if (!date || isNaN(date.getTime())) {
+    return timeStr
+  }
+  
+  // 使用本地时区的时间进行计算和显示
   const now = new Date()
   const diff = now - date
   const minutes = Math.floor(diff / 60000)
@@ -327,10 +366,18 @@ function formatTime(timeStr) {
   return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-// 检查是否过期（24小时）
+// 检查是否过期（24小时，将后端传入的GMT/UTC时间转换为用户浏览器时区）
 function isExpired(createdAt) {
   if (!createdAt) return false
-  const created = new Date(createdAt)
+  
+  const created = parseUTCTime(createdAt)
+  
+  // 检查日期是否有效
+  if (!created || isNaN(created.getTime())) {
+    return false
+  }
+  
+  // 使用本地时区的时间进行计算
   const now = new Date()
   const diff = now - created
   return diff > 24 * 60 * 60 * 1000 // 24小时
@@ -374,30 +421,60 @@ async function loadList() {
     if (response.code === 200) {
       const list = response.data.data || []
       
-      // 对于正在翻译的任务，查询最新状态（前端轮询间隔30秒，不会触发速率限制）
-      const translatingTasks = list.filter(task => task.status === 'translating' && task.qwen_task_id)
+      // 只对未完成的任务（uploaded、translating）查询详细状态
+      // 已完成（completed）和失败（failed）的任务直接使用后端返回的数据，不进行额外查询
+      const processingTasks = list.filter(task => 
+        (task.status === 'uploaded' || task.status === 'translating') && 
+        !isExpired(task.created_at)
+      )
       
-      if (translatingTasks.length > 0) {
-        // 串行查询状态，避免触发速率限制
-        for (const task of translatingTasks) {
-          try {
-            const statusResponse = await getImageTranslateStatus(task.id)
-            if (statusResponse.code === 200) {
-              const index = list.findIndex(t => t.id === task.id)
-              if (index !== -1) {
-                Object.assign(list[index], statusResponse.data)
+      if (processingTasks.length > 0) {
+        // 带重试的状态查询函数
+        const queryTaskStatusWithRetry = async (task, maxRetries = 3) => {
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              const statusResponse = await getImageTranslateStatus(task.id)
+              if (statusResponse.code === 200) {
+                const index = list.findIndex(t => t.id === task.id)
+                if (index !== -1) {
+                  Object.assign(list[index], statusResponse.data)
+                }
+                return true // 成功
+              } else {
+                // 响应码不是200，记录错误但继续重试
+                console.warn(`查询任务 ${task.id} 状态失败 (尝试 ${attempt}/${maxRetries}):`, statusResponse.message)
+                if (attempt < maxRetries) {
+                  await new Promise(resolve => setTimeout(resolve, 1000)) // 重试前等待1秒
+                }
+              }
+            } catch (error) {
+              console.error(`查询任务 ${task.id} 状态失败 (尝试 ${attempt}/${maxRetries}):`, error)
+              if (attempt < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 1000)) // 重试前等待1秒
               }
             }
-            // 每个请求间隔100ms，避免触发速率限制
-            if (translatingTasks.indexOf(task) < translatingTasks.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, 100))
+          }
+          // 所有重试都失败
+          console.error(`查询任务 ${task.id} 状态失败，已重试 ${maxRetries} 次，跳过该任务`)
+          return false // 失败
+        }
+        
+        // 串行查询状态：每个请求间隔1秒，必须等上一个请求完成（成功或失败）后才进行下一个
+        for (let i = 0; i < processingTasks.length; i++) {
+          const task = processingTasks[i]
+          // 只查询有 qwen_task_id 的 translating 任务的状态
+          if (task.status === 'translating' && task.qwen_task_id) {
+            // 查询状态（最多重试3次，失败则跳过）
+            await queryTaskStatusWithRetry(task, 3)
+            // 每个请求完成后（无论成功还是失败），等待1秒再进行下一个请求
+            if (i < processingTasks.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 1000))
             }
-          } catch (error) {
-            console.error(`查询任务 ${task.id} 状态失败:`, error)
           }
         }
       }
       
+      // 直接使用后端返回的列表（已完成和失败的任务使用后端数据，未完成的任务已更新）
       taskList.value = list
       total.value = response.data.total || 0
       
@@ -710,21 +787,25 @@ function startPolling() {
   // 如果已经在轮询，先停止
   stopPolling()
   
-  // 检查是否有正在翻译的任务
-  const hasTranslating = taskList.value.some(task => task.status === 'translating' && !isExpired(task.created_at))
+  // 检查是否有正在翻译或已上传待处理的任务
+  const hasProcessingTasks = taskList.value.some(task => 
+    (task.status === 'translating' || task.status === 'uploaded') && !isExpired(task.created_at)
+  )
   
-  if (hasTranslating) {
+  if (hasProcessingTasks) {
     // 立即执行一次
     loadList()
     
     // 然后设置定时器，每30秒轮询一次
     pollingTimer = setInterval(() => {
-      // 检查是否还有正在翻译的任务
-      const stillHasTranslating = taskList.value.some(task => task.status === 'translating' && !isExpired(task.created_at))
-      if (stillHasTranslating) {
+      // 检查是否还有正在处理的任务
+      const stillHasProcessing = taskList.value.some(task => 
+        (task.status === 'translating' || task.status === 'uploaded') && !isExpired(task.created_at)
+      )
+      if (stillHasProcessing) {
         loadList()
       } else {
-        // 如果没有正在翻译的任务了，停止轮询
+        // 如果没有正在处理的任务了，停止轮询
         stopPolling()
       }
     }, pollingInterval)
@@ -739,9 +820,11 @@ function stopPolling() {
   }
 }
 
-// 检查是否需要轮询
+// 检查是否需要轮询（包括uploaded状态，因为队列管理器会异步处理）
 const hasTranslatingTasks = computed(() => {
-  return taskList.value.some(task => task.status === 'translating' && !isExpired(task.created_at))
+  return taskList.value.some(task => 
+    (task.status === 'translating' || task.status === 'uploaded') && !isExpired(task.created_at)
+  )
 })
 
 // 监听翻译任务状态变化

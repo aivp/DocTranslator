@@ -69,10 +69,12 @@
         <el-form-item label="目标语言" required width="100%">
           <el-select 
             v-model="settingsForm.aiServer.lang" 
-            placeholder="请选择目标语言" 
+            placeholder="请选择目标语言（可输入筛选）" 
             clearable
+            filterable
+            :filter-method="filterLanguage"
             :disabled="!!settingsForm.aiServer.prompt_id">
-            <el-option v-for="lang in languageOptions" :key="lang.value" :label="lang.label" :value="lang.value" />
+            <el-option v-for="lang in filteredLanguageOptions" :key="lang.value" :label="lang.label" :value="lang.value" />
           </el-select>
         </el-form-item>
 
@@ -137,46 +139,133 @@ const settingsForm = ref({
   google: { ...translateStore.google },
   common: { ...translateStore.common },
 })
-// 定义语言映射
-const languageMap1 = {
-  chi_sim: '中文',
-  // chi_tra: '中文（繁体）',
-  eng: '英语',
-  jpn: '日语',
-  kor: '韩语',
-  fra: '法语',
-  spa: '西班牙语',
-  rus: '俄语',
-  ara: '阿拉伯语',
-  deu: '德语',
-}
-const languageMap = {
-  por: '葡萄牙语',
-  chi_sim: '中文',
-  eng: '英语',
-  ara: '阿拉伯语',
-  fra: '法语',
-  deu: '德语',
-  spa: '西班牙语',
-  rus: '俄语',
-  ita: '意大利语',
-  tha: '泰语',
-  vie: '越南语',
-  ind: '印尼语/马来语',
-  tgl: '菲律宾语（他加禄语）',
-  mya: '缅甸语',
-  khm: '柬埔寨语（高棉语）',
-  lao: '老挝语',
-  kh: '柬语',
-}
+// qwen-mt-plus 官方支持的语言列表（使用英文名作为value，中文名作为label）
+// 参考：https://help.aliyun.com/zh/model-studio/developer-reference/api-details-9
+const qwenLanguageList = [
+  { value: 'English', label: '英语', code: 'en' },
+  { value: 'Chinese', label: '简体中文', code: 'zh' },
+  { value: 'Traditional Chinese', label: '繁体中文', code: 'zh_tw' },
+  { value: 'Russian', label: '俄语', code: 'ru' },
+  { value: 'Japanese', label: '日语', code: 'ja' },
+  { value: 'Korean', label: '韩语', code: 'ko' },
+  { value: 'Spanish', label: '西班牙语', code: 'es' },
+  { value: 'French', label: '法语', code: 'fr' },
+  { value: 'Portuguese', label: '葡萄牙语', code: 'pt' },
+  { value: 'German', label: '德语', code: 'de' },
+  { value: 'Italian', label: '意大利语', code: 'it' },
+  { value: 'Thai', label: '泰语', code: 'th' },
+  { value: 'Vietnamese', label: '越南语', code: 'vi' },
+  { value: 'Indonesian', label: '印度尼西亚语', code: 'id' },
+  { value: 'Malay', label: '马来语', code: 'ms' },
+  { value: 'Arabic', label: '阿拉伯语', code: 'ar' },
+  { value: 'Hindi', label: '印地语', code: 'hi' },
+  { value: 'Hebrew', label: '希伯来语', code: 'he' },
+  { value: 'Burmese', label: '缅甸语', code: 'my' },
+  { value: 'Tamil', label: '泰米尔语', code: 'ta' },
+  { value: 'Urdu', label: '乌尔都语', code: 'ur' },
+  { value: 'Bengali', label: '孟加拉语', code: 'bn' },
+  { value: 'Polish', label: '波兰语', code: 'pl' },
+  { value: 'Dutch', label: '荷兰语', code: 'nl' },
+  { value: 'Romanian', label: '罗马尼亚语', code: 'ro' },
+  { value: 'Turkish', label: '土耳其语', code: 'tr' },
+  { value: 'Khmer', label: '高棉语', code: 'km' },
+  { value: 'Lao', label: '老挝语', code: 'lo' },
+  { value: 'Cantonese', label: '粤语', code: 'yue' },
+  { value: 'Czech', label: '捷克语', code: 'cs' },
+  { value: 'Greek', label: '希腊语', code: 'el' },
+  { value: 'Swedish', label: '瑞典语', code: 'sv' },
+  { value: 'Hungarian', label: '匈牙利语', code: 'hu' },
+  { value: 'Danish', label: '丹麦语', code: 'da' },
+  { value: 'Finnish', label: '芬兰语', code: 'fi' },
+  { value: 'Ukrainian', label: '乌克兰语', code: 'uk' },
+  { value: 'Bulgarian', label: '保加利亚语', code: 'bg' },
+  { value: 'Serbian', label: '塞尔维亚语', code: 'sr' },
+  { value: 'Telugu', label: '泰卢固语', code: 'te' },
+  { value: 'Afrikaans', label: '南非荷兰语', code: 'af' },
+  { value: 'Armenian', label: '亚美尼亚语', code: 'hy' },
+  { value: 'Assamese', label: '阿萨姆语', code: 'as' },
+  { value: 'Asturian', label: '阿斯图里亚斯语', code: 'ast' },
+  { value: 'Basque', label: '巴斯克语', code: 'eu' },
+  { value: 'Belarusian', label: '白俄罗斯语', code: 'be' },
+  { value: 'Bosnian', label: '波斯尼亚语', code: 'bs' },
+  { value: 'Catalan', label: '加泰罗尼亚语', code: 'ca' },
+  { value: 'Cebuano', label: '宿务语', code: 'ceb' },
+  { value: 'Croatian', label: '克罗地亚语', code: 'hr' },
+  { value: 'Egyptian Arabic', label: '埃及阿拉伯语', code: 'arz' },
+  { value: 'Estonian', label: '爱沙尼亚语', code: 'et' },
+  { value: 'Galician', label: '加利西亚语', code: 'gl' },
+  { value: 'Georgian', label: '格鲁吉亚语', code: 'ka' },
+  { value: 'Gujarati', label: '古吉拉特语', code: 'gu' },
+  { value: 'Icelandic', label: '冰岛语', code: 'is' },
+  { value: 'Javanese', label: '爪哇语', code: 'jv' },
+  { value: 'Kannada', label: '卡纳达语', code: 'kn' },
+  { value: 'Kazakh', label: '哈萨克语', code: 'kk' },
+  { value: 'Latvian', label: '拉脱维亚语', code: 'lv' },
+  { value: 'Lithuanian', label: '立陶宛语', code: 'lt' },
+  { value: 'Luxembourgish', label: '卢森堡语', code: 'lb' },
+  { value: 'Macedonian', label: '马其顿语', code: 'mk' },
+  { value: 'Maithili', label: '迈蒂利语', code: 'mai' },
+  { value: 'Maltese', label: '马耳他语', code: 'mt' },
+  { value: 'Marathi', label: '马拉地语', code: 'mr' },
+  { value: 'Mesopotamian Arabic', label: '美索不达米亚阿拉伯语', code: 'acm' },
+  { value: 'Moroccan Arabic', label: '摩洛哥阿拉伯语', code: 'ary' },
+  { value: 'Najdi Arabic', label: '纳吉迪阿拉伯语', code: 'ars' },
+  { value: 'Nepali', label: '尼泊尔语', code: 'ne' },
+  { value: 'North Azerbaijani', label: '北阿塞拜疆语', code: 'az' },
+  { value: 'North Levantine Arabic', label: '北黎凡特阿拉伯语', code: 'apc' },
+  { value: 'Northern Uzbek', label: '北乌兹别克语', code: 'uz' },
+  { value: 'Norwegian Bokmål', label: '挪威语（博克马尔）', code: 'nb' },
+  { value: 'Norwegian Nynorsk', label: '挪威语（尼诺斯克）', code: 'nn' },
+  { value: 'Occitan', label: '奥克语', code: 'oc' },
+  { value: 'Odia', label: '奥里亚语', code: 'or' },
+  { value: 'Pangasinan', label: '邦阿西楠语', code: 'pag' },
+  { value: 'Sicilian', label: '西西里语', code: 'scn' },
+  { value: 'Sindhi', label: '信德语', code: 'sd' },
+  { value: 'Sinhala', label: '僧伽罗语', code: 'si' },
+  { value: 'Slovak', label: '斯洛伐克语', code: 'sk' },
+  { value: 'Slovenian', label: '斯洛文尼亚语', code: 'sl' },
+  { value: 'South Levantine Arabic', label: '南黎凡特阿拉伯语', code: 'ajp' },
+  { value: 'Swahili', label: '斯瓦希里语', code: 'sw' },
+  { value: 'Tagalog', label: '他加禄语', code: 'tl' },
+  { value: "Ta'izzi-Adeni Arabic", label: '塔伊兹-亚丁阿拉伯语', code: 'acq' },
+  { value: 'Tosk Albanian', label: '托斯克阿尔巴尼亚语', code: 'sq' },
+  { value: 'Tunisian Arabic', label: '突尼斯阿拉伯语', code: 'aeb' },
+  { value: 'Venetian', label: '威尼斯语', code: 'vec' },
+  { value: 'Waray', label: '瓦瑞语', code: 'war' },
+  { value: 'Welsh', label: '威尔士语', code: 'cy' },
+  { value: 'Western Persian', label: '西波斯语', code: 'fa' }
+]
 
-// 创建语言选项数组
+// 创建语言选项数组（使用英文名作为value，中文名作为label）
 const languageOptions = computed(() => {
-  return Object.values(languageMap).map((label) => ({
-    value: label, // key 和 value 都使用中文名称
-    label: label,
+  return qwenLanguageList.map((lang) => ({
+    value: lang.value, // 使用英文名（English Name）作为value，直接传给API
+    label: lang.label, // 使用中文名作为显示标签
+    code: lang.code // 保留代码，以备后用
   }))
 })
+
+// 语言筛选关键词
+const languageFilterKeyword = ref('')
+
+// 筛选后的语言选项
+const filteredLanguageOptions = computed(() => {
+  if (!languageFilterKeyword.value) {
+    return languageOptions.value
+  }
+  const keyword = languageFilterKeyword.value.toLowerCase()
+  return languageOptions.value.filter(lang => {
+    // 支持按中文名、英文名、代码筛选
+    return lang.label.toLowerCase().includes(keyword) || 
+           lang.value.toLowerCase().includes(keyword) ||
+           lang.code.toLowerCase().includes(keyword)
+  })
+})
+
+// 语言筛选方法
+const filterLanguage = (val) => {
+  languageFilterKeyword.value = val
+}
 // 译文形式选项
 const typeOptions = [
   {
@@ -419,7 +508,7 @@ const formReset = () => {
       // 硬编码的默认值
       model: 'qwen-mt-plus',  // 主模型：通义千问
       backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 备用模型：Claude
-      lang: translateStore.aiServer.lang || '英语',  // 只针对语言：使用store中的值，如果没有则默认为英语
+      lang: translateStore.aiServer.lang || 'English',  // 只针对语言：使用store中的值，如果没有则默认为English（英文名）
       type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 默认译文形式：仅文字+仅译文+继承原版面
       threads: 30,  // 默认线程数：30
       comparison_id: [],  // 术语库多选，默认为空数组
@@ -428,7 +517,7 @@ const formReset = () => {
     google: { ...translateStore.google },
     common: { 
       ...translateStore.common,
-      langs: translateStore.common.langs || ['', '英语'],  // 只针对langs：使用store中的值，如果没有则默认为['', '英语']
+      langs: translateStore.common.langs || ['', 'English'],  // 只针对langs：使用store中的值，如果没有则默认为['', 'English']
       pdf_translate_method: translateStore.common.pdf_translate_method || 'direct',  // PDF翻译方法，默认为直接翻译
     },
   }
@@ -461,7 +550,7 @@ const formConfim = (formEl) => {
           // 确保硬编码的默认值被保存
           model: settingsForm.value.aiServer.model || 'qwen-mt-plus',
           backup_model: settingsForm.value.aiServer.backup_model || 'us.anthropic.claude-sonnet-4-20250514-v1:0',
-          lang: settingsForm.value.aiServer.lang || '英语',
+          lang: settingsForm.value.aiServer.lang || 'English',
           type: settingsForm.value.aiServer.type || ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],
           threads: settingsForm.value.aiServer.threads || 30,
           // 确保prompt_id被正确保存
@@ -505,7 +594,7 @@ const open = async () => {
       // 硬编码的默认值，覆盖store中的值
       model: 'qwen-mt-plus',  // 主模型：通义千问
       backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 备用模型：Claude
-      lang: translateStore.aiServer.lang || '英语',  // 只针对语言：使用store中的值，如果没有则默认为英语
+      lang: translateStore.aiServer.lang || 'English',  // 只针对语言：使用store中的值，如果没有则默认为English（英文名）
       type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 默认译文形式：仅文字+仅译文+继承原版面
       threads: 30,  // 默认线程数：30
       comparison_id: (() => {
@@ -522,7 +611,7 @@ const open = async () => {
     google: { ...translateStore.google },
     common: { 
       ...translateStore.common,
-      langs: translateStore.common.langs || ['', '英语'],  // 只针对langs：使用store中的值，如果没有则默认为['', '英语']
+      langs: translateStore.common.langs || ['', 'English'],  // 只针对langs：使用store中的值，如果没有则默认为['', 'English']
       pdf_translate_method: translateStore.common.pdf_translate_method || 'direct',  // PDF翻译方法，默认为直接翻译
     },
   }

@@ -436,6 +436,7 @@ class SystemStorageResource(Resource):
                                 scan_categories.append(category)
                                 break
 
+            # 先处理标准分类（uploads, translate, video）
             for category in scan_categories:
                 category_path = os.path.join(storage_path, category)
                 if not os.path.isdir(category_path):
@@ -494,6 +495,56 @@ class SystemStorageResource(Resource):
                                 key = f"{tenant_dir}/{user_dir}/{date_dir}"
                                 category_data["size"] += date_data["size"]
                                 category_data["dates"][key] = date_data
+                elif category == 'uploads':
+                    # uploads目录：需要排除images_to_pdf子目录，单独处理
+                    # 标准结构：uploads/tenant_X/user_Y/date/（排除images_to_pdf子目录）
+                    for tenant_dir in os.listdir(category_path):
+                        tenant_path = os.path.join(category_path, tenant_dir)
+                        if not os.path.isdir(tenant_path):
+                            continue
+                        
+                        # 遍历用户目录
+                        for user_dir in os.listdir(tenant_path):
+                            user_path = os.path.join(tenant_path, user_dir)
+                            if not os.path.isdir(user_path):
+                                continue
+                            
+                            # 遍历日期目录
+                            for date_dir in os.listdir(user_path):
+                                date_path = os.path.join(user_path, date_dir)
+                                if not os.path.isdir(date_path):
+                                    continue
+                                
+                                # 租户过滤：检查路径中是否包含租户信息
+                                if not is_super and tenant_id:
+                                    if f"tenant_{tenant_id}" not in date_path:
+                                        continue
+                                
+                                date_data = {"size": 0, "files": []}
+                                
+                                # 扫描日期目录下的文件，但排除images_to_pdf子目录
+                                for root, dirs, files in os.walk(date_path):
+                                    # 排除images_to_pdf子目录
+                                    if 'images_to_pdf' in root.replace(date_path, '').split(os.sep):
+                                        continue
+                                    
+                                    for file in files:
+                                        file_path = os.path.join(root, file)
+                                        try:
+                                            size = os.path.getsize(file_path)
+                                            date_data["files"].append({
+                                                "path": file_path,
+                                                "size": size,
+                                                "name": file
+                                            })
+                                            date_data["size"] += size
+                                        except OSError:
+                                            continue
+                                
+                                # 使用完整路径作为key
+                                key = f"{tenant_dir}/{user_dir}/{date_dir}"
+                                category_data["size"] += date_data["size"]
+                                category_data["dates"][key] = date_data
                 else:
                     # 其他目录的标准结构：category/tenant_X/user_Y/date/
                     for tenant_dir in os.listdir(category_path):
@@ -542,6 +593,72 @@ class SystemStorageResource(Resource):
 
                 result[category] = category_data
 
+            # 单独处理images_to_pdf目录（位于uploads/tenant_X/user_Y/date/images_to_pdf/）
+            images_to_pdf_data = {"size": 0, "dates": {}}
+            uploads_path = os.path.join(storage_path, 'uploads')
+            if os.path.exists(uploads_path) and os.path.isdir(uploads_path):
+                for tenant_dir in os.listdir(uploads_path):
+                    tenant_path = os.path.join(uploads_path, tenant_dir)
+                    if not os.path.isdir(tenant_path):
+                        continue
+                    
+                    # 租户过滤
+                    if not is_super and tenant_id:
+                        if f"tenant_{tenant_id}" not in tenant_path:
+                            continue
+                    
+                    # 遍历用户目录
+                    for user_dir in os.listdir(tenant_path):
+                        user_path = os.path.join(tenant_path, user_dir)
+                        if not os.path.isdir(user_path):
+                            continue
+                        
+                        # 遍历日期目录
+                        for date_dir in os.listdir(user_path):
+                            date_path = os.path.join(user_path, date_dir)
+                            if not os.path.isdir(date_path):
+                                continue
+                            
+                            # 检查是否存在images_to_pdf子目录
+                            images_to_pdf_subdir = os.path.join(date_path, 'images_to_pdf')
+                            if not os.path.exists(images_to_pdf_subdir) or not os.path.isdir(images_to_pdf_subdir):
+                                continue
+                            
+                            # 租户过滤：检查路径中是否包含租户信息
+                            if not is_super and tenant_id:
+                                if f"tenant_{tenant_id}" not in images_to_pdf_subdir:
+                                    continue
+                            
+                            date_data = {"size": 0, "files": []}
+                            
+                            # 扫描images_to_pdf目录下的所有PDF文件
+                            for root, _, files in os.walk(images_to_pdf_subdir):
+                                for file in files:
+                                    # 只处理PDF文件
+                                    if not file.lower().endswith('.pdf'):
+                                        continue
+                                    
+                                    file_path = os.path.join(root, file)
+                                    try:
+                                        size = os.path.getsize(file_path)
+                                        date_data["files"].append({
+                                            "path": file_path,
+                                            "size": size,
+                                            "name": file
+                                        })
+                                        date_data["size"] += size
+                                    except OSError:
+                                        continue
+                            
+                            # 如果有文件，添加到结果中
+                            if date_data["files"]:
+                                # 使用完整路径作为key
+                                key = f"{tenant_dir}/{user_dir}/{date_dir}"
+                                images_to_pdf_data["size"] += date_data["size"]
+                                images_to_pdf_data["dates"][key] = date_data
+            
+            result['images_to_pdf'] = images_to_pdf_data
+
             return APIResponse.success(data=result)
 
         except Exception as e:
@@ -561,17 +678,72 @@ class SystemStorageResource(Resource):
             if not target or not delete_type:
                 return APIResponse.error("缺少必要参数")
 
-            base_dir = os.path.dirname(current_app.root_path)
-            target_path = os.path.join(base_dir, 'storage', *target.split('/'))
-
-            # 安全检查
-            storage_path = os.path.join(base_dir, 'storage')
-            if not os.path.abspath(target_path).startswith(os.path.abspath(storage_path)):
-                return APIResponse.error("非法路径")
+            # 存储目录直接使用 /app/storage（与get方法保持一致）
+            storage_path = '/app/storage'
             
-            # 租户隔离：非超级管理员只能删除自己租户的文件
+            # 租户隔离：非超级管理员只能删除自己租户的文件（提前获取，用于images_to_pdf特殊处理）
             tenant_id = get_admin_tenant_id()
             is_super = is_super_admin()
+            
+            # 处理images_to_pdf的特殊路径
+            if target == 'images_to_pdf' or target.startswith('images_to_pdf/'):
+                # images_to_pdf文件实际存储在uploads/tenant_X/user_Y/date/images_to_pdf/目录下
+                if target == 'images_to_pdf':
+                    # 删除整个分类：需要特殊处理，遍历所有uploads目录下的images_to_pdf子目录
+                    if delete_type == "category":
+                        # 遍历所有uploads目录，删除所有images_to_pdf子目录
+                        uploads_path = os.path.join(storage_path, 'uploads')
+                        if os.path.exists(uploads_path):
+                            for tenant_dir in os.listdir(uploads_path):
+                                tenant_path = os.path.join(uploads_path, tenant_dir)
+                                if not os.path.isdir(tenant_path):
+                                    continue
+                                for user_dir in os.listdir(tenant_path):
+                                    user_path = os.path.join(tenant_path, user_dir)
+                                    if not os.path.isdir(user_path):
+                                        continue
+                                    for date_dir in os.listdir(user_path):
+                                        date_path = os.path.join(user_path, date_dir)
+                                        if not os.path.isdir(date_path):
+                                            continue
+                                        images_to_pdf_dir = os.path.join(date_path, 'images_to_pdf')
+                                        if os.path.exists(images_to_pdf_dir) and os.path.isdir(images_to_pdf_dir):
+                                            # 租户过滤
+                                            if not is_super and tenant_id:
+                                                if f"tenant_{tenant_id}" not in images_to_pdf_dir:
+                                                    continue
+                                            shutil.rmtree(images_to_pdf_dir)
+                        return APIResponse.success(message="删除成功")
+                    else:
+                        return APIResponse.error("无效操作类型")
+                else:
+                    # target格式: images_to_pdf/tenant_X/user_Y/date 或 images_to_pdf/tenant_X/user_Y/date/file.pdf
+                    path_parts = target.split('/')
+                    if len(path_parts) >= 4:
+                        # 构建实际路径: uploads/tenant_X/user_Y/date/images_to_pdf/
+                        if delete_type == "file":
+                            # 文件路径: images_to_pdf/tenant_X/user_Y/date/file.pdf -> uploads/tenant_X/user_Y/date/images_to_pdf/file.pdf
+                            # path_parts = ['images_to_pdf', 'tenant_X', 'user_Y', 'date', 'file.pdf']
+                            # 需要转换为: ['uploads', 'tenant_X', 'user_Y', 'date', 'images_to_pdf', 'file.pdf']
+                            tenant_user_date = path_parts[1:-1]  # ['tenant_X', 'user_Y', 'date']
+                            filename = path_parts[-1]  # 'file.pdf'
+                            actual_path_parts = ['uploads'] + tenant_user_date + ['images_to_pdf', filename]
+                            target_path = os.path.join(storage_path, *actual_path_parts)
+                        elif delete_type == "date":
+                            # 目录路径: images_to_pdf/tenant_X/user_Y/date -> uploads/tenant_X/user_Y/date/images_to_pdf
+                            # path_parts = ['images_to_pdf', 'tenant_X', 'user_Y', 'date']
+                            actual_path_parts = ['uploads'] + path_parts[1:] + ['images_to_pdf']
+                            target_path = os.path.join(storage_path, *actual_path_parts)
+                        else:
+                            return APIResponse.error("无效操作类型")
+                    else:
+                        return APIResponse.error("无效的images_to_pdf路径")
+            else:
+                target_path = os.path.join(storage_path, *target.split('/'))
+
+            # 安全检查
+            if not os.path.abspath(target_path).startswith(os.path.abspath(storage_path)):
+                return APIResponse.error("非法路径")
             
             if not is_super and tenant_id:
                 # 检查目标路径是否属于该租户
@@ -580,8 +752,18 @@ class SystemStorageResource(Resource):
 
             # 执行删除
             if delete_type == "file":
+                # 添加调试日志
+                current_app.logger.info(f"删除文件 - target: {target}, target_path: {target_path}, exists: {os.path.exists(target_path)}")
                 if not os.path.exists(target_path):
-                    return APIResponse.not_found("文件不存在")
+                    # 尝试查找文件（调试用）
+                    current_app.logger.error(f"文件不存在: {target_path}")
+                    # 检查父目录是否存在
+                    parent_dir = os.path.dirname(target_path)
+                    if os.path.exists(parent_dir):
+                        current_app.logger.info(f"父目录存在，目录内容: {os.listdir(parent_dir)}")
+                    else:
+                        current_app.logger.error(f"父目录也不存在: {parent_dir}")
+                    return APIResponse.not_found(f"文件不存在: {target_path}")
 
                 # 删除文件
                 os.remove(target_path)
