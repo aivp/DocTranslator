@@ -340,9 +340,26 @@ class DockerOkapiIntegration:
                     logger.info(f"  - {f}")
                 
                 # 查找可能的输出文件
+                # 根据原始文件扩展名确定输出文件扩展名
+                original_ext = os.path.splitext(original_filename)[1].lower()
+                if original_ext == '.pptx':
+                    output_ext = '.pptx'
+                    expected_pattern = '.out.pptx'
+                elif original_ext in ['.docx', '.doc']:
+                    output_ext = '.docx'
+                    expected_pattern = '.out.docx'
+                else:
+                    # 默认使用原始文件扩展名
+                    output_ext = original_ext
+                    expected_pattern = f'.out{original_ext}'
+                
                 possible_outputs = []
                 for f in os.listdir(xliff_dir):
-                    if f.endswith('.docx') and f != original_filename:
+                    # 查找匹配的输出文件（.out.扩展名）
+                    if f.endswith(expected_pattern) and f != original_filename:
+                        possible_outputs.append(f)
+                    # 也查找同扩展名的文件（兼容其他可能的命名方式）
+                    elif f.endswith(output_ext) and f != original_filename and '.out.' in f:
                         possible_outputs.append(f)
                 
                 if possible_outputs:
@@ -357,7 +374,7 @@ class DockerOkapiIntegration:
                     return True
                 else:
                     logger.error(f"❌ 未找到输出文件")
-                    logger.error(f"期望的文件: {original_filename}.out.docx")
+                    logger.error(f"期望的文件: {original_filename}{expected_pattern}")
                     logger.error(f"目录中的所有文件:")
                     for f in os.listdir(xliff_dir):
                         logger.error(f"  - {f}")

@@ -108,8 +108,11 @@ class UserLoginResource(Resource):
             return APIResponse.error('该账号不属于该租户，请检查租户代码', 403)
         
         # 生成新的 token，并获取其 jti (JWT ID)
-        # 使用 additional_claims 添加 jti，flask-jwt-extended 会自动生成
-        access_token = create_access_token(identity=str(customer.id))
+        # 添加 user_type 标识以区分管理员和普通用户
+        access_token = create_access_token(
+            identity=str(customer.id),
+            additional_claims={'user_type': 'customer'}
+        )
         
         # 解码 token 获取 jti
         from flask_jwt_extended import decode_token

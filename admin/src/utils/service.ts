@@ -4,10 +4,13 @@ import { ElMessage } from 'element-plus'
 import { get, merge } from 'lodash-es'
 import { getToken } from './cache/cookies'
 
-/** 退出登录并强制刷新页面（会重定向到登录页） */
+/** 退出登录并跳转到登录页 */
 function logout() {
+  // 先清除 token 和用户信息
   useUserStoreHook().logout()
-  location.reload()
+  // 使用 window.location.href 强制跳转，确保页面刷新并触发路由守卫
+  // 这样可以避免路由守卫的缓存问题
+  window.location.href = '/login'
 }
 
 /** 创建请求实例 */
@@ -44,7 +47,9 @@ function createService() {
           return apiData
         case 401:
           // Token 过期时
-          return logout()
+          ElMessage.error('身份过期，请重新登录')
+          logout()
+          return Promise.reject(new Error('Unauthorized'))
         default:
           // 不是正确的 code，直接返回错误数据，由全局错误处理
           return Promise.reject({
@@ -72,6 +77,7 @@ function createService() {
           break
         case 401:
           // Token 过期时
+          ElMessage.error('身份过期，请重新登录')
           logout()
           break
         case 403:
@@ -89,6 +95,17 @@ function createService() {
           // 优先显示后端返回的具体错误信息
           const backendMessage500 = get(error, 'response.data.message')
           error.message = backendMessage500 || '服务器内部错误'
+          // 特殊处理：如果是 token 被撤销导致的 500 错误，跳转到登录页
+          const errorMessage = (backendMessage500 || '').toLowerCase()
+          const isTokenRevoked = errorMessage.includes('revoked') || 
+                                errorMessage.includes('token') && errorMessage.includes('revoked') ||
+                                errorMessage.includes('账号已在其他设备登录') ||
+                                errorMessage.includes('已在其他设备登录')
+          if (isTokenRevoked) {
+            ElMessage.error('账号已在其他设备登录，请重新登录')
+            logout()
+            return Promise.reject(error)
+          }
           break
         case 501:
           error.message = '服务未实现'

@@ -1,1 +1,0 @@
-import{r as e}from"./index-DHbBoFFL.js";function u(t){return e({url:"tenants",method:"get",params:t})}function a(t){return e({url:"tenant",method:"post",data:t})}function o(t,n){return e({url:`tenant/${t}`,method:"put",data:n})}function i(t){return e({url:`tenant/${t}`,method:"delete"})}export{a as c,i as d,u as g,o as u};

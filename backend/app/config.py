@@ -17,7 +17,7 @@ class Config:
     JWT_HEADER_NAME = 'Authorization'  # 使用标准的Authorization header
     JWT_HEADER_TYPE = 'Bearer'  # 使用标准的Bearer前缀
     JWT_ERROR_MESSAGE_KEY = 'message'  # 错误消息的键名
-    JWT_BLACKLIST_ENABLED = False  # 禁用黑名单功能
+    JWT_BLACKLIST_ENABLED = True  # 启用黑名单功能（用于单点登录检查）
     JWT_BLACKLIST_TOKEN_CHECKS = ['access']  # 黑名单检查类型
     # 通用基础配置
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key')

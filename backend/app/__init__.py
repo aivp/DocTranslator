@@ -29,7 +29,7 @@ def create_app(config_class=None):
     init_cleanup_scheduler(app, cleanup_interval_hours=6, expire_hours=24)
 
     # 首先注册JWT相关异常处理器（优先级最高）
-    from flask_jwt_extended.exceptions import JWTExtendedException
+    from flask_jwt_extended.exceptions import JWTExtendedException, RevokedTokenError
     
     @app.errorhandler(ExpiredSignatureError)
     def handle_expired_token(e):
@@ -42,6 +42,10 @@ def create_app(config_class=None):
     @app.errorhandler(DecodeError)
     def handle_decode_error(e):
         return {"message": "Token decode error", "code": 401}, 401
+    
+    @app.errorhandler(RevokedTokenError)
+    def handle_revoked_token(e):
+        return {"message": "账号已在其他设备登录，请重新登录", "code": 401}, 401
     
     @app.errorhandler(JWTExtendedException)
     def handle_jwt_extended_error(e):

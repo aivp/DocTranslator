@@ -64,16 +64,23 @@ class AdminLoginResource(Resource):
                 # 使用租户ID更新tenant_id
                 tenant_id = tenant.id
             
-            # 生成JWT令牌
-            access_token = create_access_token(identity=str(admin.id))
+            # 生成JWT令牌，添加 user_type 标识以区分管理员和普通用户
+            access_token = create_access_token(
+                identity=str(admin.id),
+                additional_claims={'user_type': 'admin'}
+            )
             
             # 解码 token 获取 jti
             decoded = decode_token(access_token)
             token_jti = decoded.get('jti')
             
             # 更新管理员表中的当前 token ID（实现单点登录：新登录会使旧 token 失效）
+            old_token_id = admin.current_token_id
             admin.current_token_id = token_jti
             db.session.commit()
+            
+            # 记录登录日志
+            current_app.logger.info(f"✅ 管理员登录成功: admin_id={admin.id}, email={admin.email}, old_token_id={old_token_id}, new_token_id={token_jti}")
             
             return APIResponse.success({
                 'token': access_token,
@@ -85,6 +92,46 @@ class AdminLoginResource(Resource):
 
         except Exception as e:
             current_app.logger.error(f"登录失败：{str(e)}")
+            return APIResponse.error('服务器内部错误', 500)
+
+
+class AdminAuthInfoResource(Resource):
+    @jwt_required()
+    def get(self):
+        """获取当前登录管理员信息[^2]"""
+        try:
+            # 获取当前管理员 ID
+            admin_id = get_jwt_identity()
+            if not admin_id:
+                return APIResponse.unauthorized('未登录')
+            
+            # 查询管理员用户
+            admin = User.query.get(admin_id)
+            if not admin:
+                return APIResponse.error('管理员不存在', 404)
+            
+            # 检查用户状态
+            if admin.deleted_flag == 'Y':
+                return APIResponse.unauthorized('账号已删除')
+            
+            # 判断是否为超级管理员
+            is_super = is_super_admin(admin.id)
+            tenant_id = get_admin_tenant_id(admin.id)
+            
+            # 构建 roles 数组（前端需要数组格式）
+            roles = ['admin'] if not is_super else ['super_admin']
+            
+            return APIResponse.success({
+                'id': admin.id,
+                'email': admin.email,
+                'name': admin.name,
+                'roles': roles,
+                'is_super_admin': is_super,
+                'tenant_id': tenant_id
+            })
+            
+        except Exception as e:
+            current_app.logger.error(f"获取管理员信息失败：{str(e)}")
             return APIResponse.error('服务器内部错误', 500)
 
 

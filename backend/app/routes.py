@@ -1,4 +1,4 @@
-from app.resources.admin.auth import AdminLoginResource, AdminChangePasswordResource
+from app.resources.admin.auth import AdminLoginResource, AdminChangePasswordResource, AdminAuthInfoResource
 from app.resources.admin.customer import AdminCustomerListResource, AdminCreateCustomerResource, \
     AdminCustomerDetailResource, AdminUpdateCustomerResource, AdminDeleteCustomerResource, \
     CustomerStatusResource
@@ -165,6 +165,7 @@ def register_routes(api):
 
 # -------admin-----------
     api.add_resource(AdminLoginResource, '/api/admin/login')
+    api.add_resource(AdminAuthInfoResource, '/api/admin/auth/info')
     api.add_resource(AdminChangePasswordResource, '/api/admin/changepwd')
 
     api.add_resource(AdminCustomerListResource, '/api/admin/customers')

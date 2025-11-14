@@ -122,6 +122,16 @@ def start(trans):
         end_time = datetime.datetime.now()
         spend_time=common.display_spend(start_time, end_time)
         to_translate.complete(trans,text_count,spend_time)
+        
+        # 翻译成功，删除原始文件以节省空间
+        original_file = trans['file_path']
+        if os.path.exists(original_file) and original_file != trans.get('target_file'):
+            try:
+                os.remove(original_file)
+                print(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
+            except Exception as e:
+                print(f"⚠️ 删除原始文件失败: {str(e)}")
+        
         return True
     finally:
         # 确保Workbook被关闭以释放内存

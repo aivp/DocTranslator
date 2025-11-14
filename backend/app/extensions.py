@@ -27,11 +27,32 @@ def init_extensions(app):
     print("✅ JWT回调函数已配置")  # 添加调试输出
     mail.init_app(app)
     migrate.init_app(app, db)
+    
     # 延迟初始化API（避免循环导入）
     from app.routes import register_routes
     # Flask-RESTful 的正确顺序：先注册路由，再初始化 API
     register_routes(api)
     api.init_app(app)
+    
+    # 为 Flask-RESTful 注册 JWT 异常处理器（必须在 api.init_app 之后）
+    from flask_jwt_extended.exceptions import RevokedTokenError, JWTExtendedException
+    
+    # Flask-RESTful 使用 handle_error 方法注册异常处理器
+    def handle_revoked_token(e):
+        return {"message": "账号已在其他设备登录，请重新登录", "code": 401}, 401
+    
+    def handle_jwt_extended_error(e):
+        return {"message": str(e), "code": 401}, 401
+    
+    # 使用 Flask 的 errorhandler，它可以处理 Flask-RESTful 路由中的异常
+    @app.errorhandler(RevokedTokenError)
+    def handle_revoked_token_app(e):
+        return {"message": "账号已在其他设备登录，请重新登录", "code": 401}, 401
+    
+    @app.errorhandler(JWTExtendedException)
+    def handle_jwt_extended_error_app(e):
+        return {"message": str(e), "code": 401}, 401
+    
     print("✅ 所有路由已绑定到应用")  # 添加调试输出
 
 

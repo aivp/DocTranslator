@@ -129,55 +129,15 @@ def start_with_okapi(trans):
                             logger.error(f"更新进度失败: {str(e)}")
                 
                 def translate_single_text(index, text):
-                    """翻译单个文本，支持术语库筛选"""
+                    """翻译单个文本 - 使用 translate_text 函数（Okapi只用于解析，翻译用qwen-mt-plus）"""
                     try:
-                        # 检查是否有术语库配置
-                        comparison_id = self.trans.get('comparison_id')
-                        if comparison_id:
-                            preloaded_terms = self.trans.get('preloaded_terms')
-                            if preloaded_terms:
-                                from .term_filter import optimize_terms_for_api
-                                filtered_terms = optimize_terms_for_api(text, preloaded_terms, max_terms=50)
-                                if filtered_terms:
-                                    logger.debug(f"文本 {index} 使用 {len(filtered_terms)} 个术语")
-                                    # 使用术语库进行翻译
-                                    result = to_translate.translate(
-                                        text, 
-                                        self.trans.get('lang', 'English'),
-                                        self.trans.get('server', 'qwen'),
-                                        self.trans.get('model', 'qwen-mt-plus'),
-                                        self.trans.get('prompt_id'),
-                                        comparison_id=comparison_id,
-                                        filtered_terms=filtered_terms
-                                    )
-                                else:
-                                    # 没有匹配的术语，使用普通翻译
-                                    result = to_translate.translate(
-                                        text, 
-                                        self.trans.get('lang', 'English'),
-                                        self.trans.get('server', 'qwen'),
-                                        self.trans.get('model', 'qwen-mt-plus'),
-                                        self.trans.get('prompt_id')
-                                    )
-                            else:
-                                # 术语库未预加载，使用普通翻译
-                                result = to_translate.translate(
-                                    text, 
-                                    self.trans.get('lang', 'English'),
-                                    self.trans.get('server', 'qwen'),
-                                    self.trans.get('model', 'qwen-mt-plus'),
-                                    self.trans.get('prompt_id')
-                                )
-                        else:
-                            # 没有术语库配置，使用普通翻译
-                            result = to_translate.translate(
-                                text, 
-                                self.trans.get('lang', 'English'),
-                                self.trans.get('server', 'qwen'),
-                                self.trans.get('model', 'qwen-mt-plus'),
-                                self.trans.get('prompt_id')
-                            )
-                        
+                        # 使用 translate_text 函数进行翻译
+                        result = to_translate.translate_text(
+                            self.trans,
+                            text,
+                            source_lang="auto",
+                            target_lang=self.trans.get('lang', 'English')
+                        )
                         return result
                     except Exception as e:
                         logger.error(f"翻译文本 {index} 失败: {e}")
@@ -250,6 +210,16 @@ def start_with_okapi(trans):
                 logger.info(f"✅ PPTX 翻译完成: {output_file}")
             except Exception as e:
                 logger.error(f"更新数据库状态失败: {e}")
+            
+            # 翻译成功，删除原始文件以节省空间
+            original_file = trans['file_path']
+            if os.path.exists(original_file) and original_file != output_file:
+                try:
+                    os.remove(original_file)
+                    logger.info(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 删除原始文件失败: {str(e)}")
+            
             return True
         else:
             # 翻译失败，回退到传统方法
@@ -700,6 +670,16 @@ def start_traditional(trans):
     end_time = datetime.now()
     spend_time=common.display_spend(start_time, end_time)
     to_translate.complete(trans,text_count,spend_time)
+    
+    # 翻译成功，删除原始文件以节省空间
+    original_file = trans['file_path']
+    if os.path.exists(original_file) and original_file != trans.get('target_file'):
+        try:
+            os.remove(original_file)
+            logger.info(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
+        except Exception as e:
+            logger.warning(f"⚠️ 删除原始文件失败: {str(e)}")
+    
     return True
 
 def extract_paragraph_style(paragraph):

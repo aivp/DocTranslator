@@ -347,6 +347,16 @@ def start_with_okapi(trans, start_time):
                 to_translate.complete(trans, text_count, spend_time)
             
             logger.info(f"✅ Okapi 翻译完成，用时: {spend_time}")
+            
+            # 翻译成功，删除原始文件以节省空间
+            original_file = trans['file_path']
+            if os.path.exists(original_file) and original_file != trans.get('target_file'):
+                try:
+                    os.remove(original_file)
+                    logger.info(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 删除原始文件失败: {str(e)}")
+            
             return True
         else:
             logger.error("❌ Okapi 翻译失败，回退到传统方法")
@@ -543,6 +553,16 @@ def start_traditional(trans, start_time, max_threads):
     
     if trans['run_complete']:
         to_translate.complete(trans, text_count, spend_time)
+    
+    # 翻译成功，删除原始文件以节省空间
+    original_file = trans['file_path']
+    if os.path.exists(original_file) and original_file != trans.get('target_file'):
+        try:
+            os.remove(original_file)
+            logger.info(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
+        except Exception as e:
+            logger.warning(f"⚠️ 删除原始文件失败: {str(e)}")
+    
     return True
 
 
