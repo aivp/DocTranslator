@@ -85,7 +85,8 @@ def start(trans):
                         "update translate set status='done',end_at=%s,process=100 where id=%s",
                         end_time, trans['id']
                     )
-                    print("✅ 翻译完成，状态已更新为已完成")
+                    # 翻译成功日志已关闭（调试时可打开）
+                    # print("✅ 翻译完成，状态已更新为已完成")
                     
             except Exception as e:
                 print(f"更新进度失败: {str(e)}")
@@ -174,7 +175,8 @@ def start(trans):
     if os.path.exists(original_file) and original_file != trans.get('target_file'):
         try:
             os.remove(original_file)
-            print(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
+            # 翻译成功日志已关闭（调试时可打开）
+            # print(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
         except Exception as e:
             print(f"⚠️ 删除原始文件失败: {str(e)}")
     

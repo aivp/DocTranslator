@@ -12,8 +12,9 @@ class Translate(db.Model):
     customer_id = db.Column(db.Integer, default=0)                  # 关联用户ID
     tenant_id = db.Column(db.Integer, default=1)                    # 租户ID
     rand_user_id = db.Column(db.String(64))                         # 随机用户ID（新增字段）[^3]
-    origin_filename = db.Column(db.String(520), nullable=False)     # 原始文件名（带路径）
-    origin_filepath = db.Column(db.String(520), nullable=False)     # 原始文件存储路径
+    origin_filename = db.Column(db.String(520), nullable=False)     # 原始文件名（用户上传的文件名）
+    stored_filename = db.Column(db.String(520), nullable=True)      # 实际存储的文件名（如果重命名了，就是重命名后的文件名）
+    origin_filepath = db.Column(db.String(520), nullable=False)     # 原始文件存储路径（绝对路径）
     target_filepath = db.Column(db.String(520), nullable=False)     # 目标文件路径
     status = db.Column(db.Enum('none', 'queued', 'changing', 'process', 'done', 'failed'), default='none') # 任务状态
     start_at = db.Column(db.DateTime)                               # 开始时间

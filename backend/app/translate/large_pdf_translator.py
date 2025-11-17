@@ -415,7 +415,8 @@ class LargePDFTranslator:
                     
                     # 添加详细的调试日志
                     if original_text != translated_text:
-                        logger.info(f"翻译成功 ({i+1}/{len(texts)}): '{original_text[:20]}...' -> '{translated_text[:20]}...'")
+                        # 翻译成功日志已关闭（调试时可打开）
+                        # logger.info(f"翻译成功 ({i+1}/{len(texts)}): '{original_text[:20]}...' -> '{translated_text[:20]}...'")
                     else:
                         logger.warning(f"翻译结果与原文相同 ({i+1}/{len(texts)}): '{original_text[:20]}...'")
                 
@@ -423,7 +424,8 @@ class LargePDFTranslator:
                 # 大PDF翻译有自己的进度更新机制
                 
                 total_time = time.time() - start_time
-                logger.info(f"批次翻译完成，共 {len(unique_texts)} 个文本，总用时: {total_time:.1f}s")
+                # 翻译成功日志已关闭（调试时可打开）
+                # logger.info(f"批次翻译完成，共 {len(unique_texts)} 个文本，总用时: {total_time:.1f}s")
             
             # 重新组织翻译结果
             for page_data in extracted_texts:
@@ -1096,7 +1098,8 @@ class LargePDFTranslator:
                 # 合并完成，更新为100%
                 self.update_progress(trans, 100.0)
                 total_time = time.time() - start_time
-                print(f"✅ 大文件多线程翻译完成! 输出文件: {final_output_file}")
+                # 翻译成功日志已关闭（调试时可打开）
+                # print(f"✅ 大文件多线程翻译完成! 输出文件: {final_output_file}")
                 print(f"📊 进度: 完成 (100.0%)")
                 print(f"⏱️ 总处理时间: {total_time:.2f} 秒")
                 

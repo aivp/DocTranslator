@@ -141,9 +141,14 @@ class TranslateStartResource(Resource):
             translate_type = data.get('type[2]', 'trans_all_only_inherit')
 
             # 查询或创建翻译记录
-            translate = Translate.query.filter_by(uuid=data['uuid']).first()
+            uuid_value = data.get('uuid', '')
+            if not uuid_value:
+                return APIResponse.error("缺少必要参数: uuid", 400)
+            
+            translate = Translate.query.filter_by(uuid=uuid_value).first()
             if not translate:
-                return APIResponse.error("未找到对应的翻译记录", 404)
+                current_app.logger.error(f"未找到对应的翻译记录: uuid={uuid_value}, user_id={user_id}")
+                return APIResponse.error(f"未找到对应的翻译记录 (uuid: {uuid_value})", 404)
 
             # 设置租户ID
             tenant_id = get_current_tenant_id(user_id)
@@ -387,8 +392,11 @@ class TranslateStartResource(Resource):
 
         except Exception as e:
             db.session.rollback()
-            current_app.logger.error(f"翻译任务启动失败: {str(e)}", exc_info=True)
-            return APIResponse.error("任务启动失败", 500)
+            error_msg = str(e)
+            error_type = type(e).__name__
+            current_app.logger.error(f"翻译任务启动失败: {error_type} - {error_msg}", exc_info=True)
+            # 返回更详细的错误信息，方便调试
+            return APIResponse.error(f"任务启动失败: {error_msg}", 500)
 
 
 # 获取翻译记录列表

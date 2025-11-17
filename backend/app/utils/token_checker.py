@@ -18,7 +18,8 @@ def check_token_validity():
     try:
         # 获取Authorization header
         auth_header = request.headers.get('Authorization')
-        logger.info(f"Authorization header: {auth_header}")
+        # Token验证日志已关闭
+        # logger.info(f"Authorization header: {auth_header}")
         
         if not auth_header or not auth_header.startswith('Bearer '):
             logger.warning("Authorization header缺失或格式错误")
@@ -71,10 +72,12 @@ def check_token_validity():
         
         # 单点登录检查：验证当前 token 的 jti 是否与数据库中存储的一致
         if hasattr(user, 'current_token_id') and user.current_token_id and token_jti != user.current_token_id:
-            logger.warning(f"Token已被新登录替换: user_id={user_id}, user_type={user_type}, token_jti={token_jti}, stored_jti={user.current_token_id}")
+            # 只在token被替换时记录警告日志（重要错误）
+            logger.warning(f"Token已被新登录替换: user_id={user_id}, user_type={user_type}")
             return False, "账号已在其他设备登录，请重新登录", 401
         
-        logger.info(f"Token验证成功: {user_id}")
+        # Token验证成功日志已关闭
+        # logger.info(f"Token验证成功: {user_id}")
         return True, None, 200
         
     except ExpiredSignatureError:
@@ -105,7 +108,8 @@ def require_valid_token(f):
             return {"code": status_code, "message": error_message}, status_code
         
         # token有效，继续执行
-        logger.info("Token验证通过，继续执行接口")
+        # Token验证通过日志已关闭
+        # logger.info("Token验证通过，继续执行接口")
         return f(*args, **kwargs)
     
     return decorated_function 

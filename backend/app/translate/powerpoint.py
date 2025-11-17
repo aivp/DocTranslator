@@ -58,6 +58,22 @@ def start(trans):
 def start_with_okapi(trans):
     """使用 Okapi Framework 进行翻译"""
     try:
+        # 检查文件是否存在
+        file_path = trans.get('file_path')
+        if not file_path:
+            error_msg = "文件路径为空"
+            logger.error(f"❌ {error_msg}")
+            from .to_translate import error
+            error(trans['id'], error_msg)
+            return False
+        
+        if not os.path.exists(file_path):
+            error_msg = f"原始文件不存在: {file_path}"
+            logger.error(f"❌ {error_msg}")
+            from .to_translate import error
+            error(trans['id'], error_msg)
+            return False
+        
         # 导入 Okapi 集成模块
         from .okapi_integration import OkapiPptxTranslator, verify_okapi_installation
         
@@ -207,7 +223,8 @@ def start_with_okapi(trans):
                 from .to_translate import db
                 db.execute("update translate set status='done', process='100.0', result_path=%s where id=%s",
                          output_file, trans['id'])
-                logger.info(f"✅ PPTX 翻译完成: {output_file}")
+                # 翻译成功日志已关闭（调试时可打开）
+                # logger.info(f"✅ PPTX 翻译完成: {output_file}")
             except Exception as e:
                 logger.error(f"更新数据库状态失败: {e}")
             
@@ -216,7 +233,8 @@ def start_with_okapi(trans):
             if os.path.exists(original_file) and original_file != output_file:
                 try:
                     os.remove(original_file)
-                    logger.info(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
+                    # 翻译成功日志已关闭（调试时可打开）
+                    # logger.info(f"✅ 翻译成功，已删除原始文件: {os.path.basename(original_file)}")
                 except Exception as e:
                     logger.warning(f"⚠️ 删除原始文件失败: {str(e)}")
             
@@ -234,6 +252,22 @@ def start_with_okapi(trans):
 
 def start_traditional(trans):
     """使用传统方法进行翻译（原有的 start 函数逻辑）"""
+    # 检查文件是否存在
+    file_path = trans.get('file_path')
+    if not file_path:
+        error_msg = "文件路径为空"
+        logger.error(f"❌ {error_msg}")
+        from .to_translate import error
+        error(trans['id'], error_msg)
+        return False
+    
+    if not os.path.exists(file_path):
+        error_msg = f"原始文件不存在: {file_path}"
+        logger.error(f"❌ {error_msg}")
+        from .to_translate import error
+        error(trans['id'], error_msg)
+        return False
+    
     # 允许的最大线程
     threads=trans['threads']
     if threads is None or int(threads)<0:
@@ -243,8 +277,17 @@ def start_traditional(trans):
     # 当前执行的索引位置
     run_index=0
     start_time = datetime.now()
-    wb = pptx.Presentation(trans['file_path']) 
-    logger.info(f"处理文件: {trans['file_path']}")
+    
+    try:
+        wb = pptx.Presentation(file_path)
+    except Exception as e:
+        error_msg = f"无法打开PPT文件: {str(e)}"
+        logger.error(f"❌ {error_msg}")
+        from .to_translate import error
+        error(trans['id'], error_msg)
+        return False
+    
+    logger.info(f"处理文件: {file_path}")
     slides = wb.slides
     texts=[]
     
@@ -470,7 +513,8 @@ def start_traditional(trans):
                         "update translate set status='done',end_at=%s,process=100 where id=%s",
                         end_time, trans['id']
                     )
-                    print("✅ 翻译完成，状态已更新为已完成")
+                    # 翻译成功日志已关闭（调试时可打开）
+                    # print("✅ 翻译完成，状态已更新为已完成")
                     
             except Exception as e:
                 print(f"更新进度失败: {str(e)}")

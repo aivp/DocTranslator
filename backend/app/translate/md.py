@@ -114,7 +114,8 @@ def start(trans):
                         "update translate set status='done',end_at=%s,process=100 where id=%s",
                         end_time, trans['id']
                     )
-                    print("✅ 翻译完成，状态已更新为已完成")
+                    # 翻译成功日志已关闭（调试时可打开）
+                    # print("✅ 翻译完成，状态已更新为已完成")
                     
             except Exception as e:
                 print(f"更新进度失败: {str(e)}")

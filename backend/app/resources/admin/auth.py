@@ -75,12 +75,11 @@ class AdminLoginResource(Resource):
             token_jti = decoded.get('jti')
             
             # 更新管理员表中的当前 token ID（实现单点登录：新登录会使旧 token 失效）
-            old_token_id = admin.current_token_id
             admin.current_token_id = token_jti
             db.session.commit()
             
-            # 记录登录日志
-            current_app.logger.info(f"✅ 管理员登录成功: admin_id={admin.id}, email={admin.email}, old_token_id={old_token_id}, new_token_id={token_jti}")
+            # 记录登录日志（单点登录相关信息已移除）
+            current_app.logger.info(f"✅ 管理员登录成功: admin_id={admin.id}, email={admin.email}")
             
             return APIResponse.success({
                 'token': access_token,

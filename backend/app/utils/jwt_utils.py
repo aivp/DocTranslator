@@ -59,10 +59,11 @@ def configure_jwt_callbacks(jwt):
             user_id = jwt_payload.get('sub')
             token_jti = jwt_payload.get('jti')
             
-            logger.info(f"🔍 单点登录检查: user_id={user_id}, token_jti={token_jti}")
+            # 单点登录检查日志已关闭
+            # logger.info(f"🔍 单点登录检查: user_id={user_id}, token_jti={token_jti}")
             
             if not user_id or not token_jti:
-                logger.info("⚠️ 缺少 user_id 或 token_jti，跳过单点登录检查")
+                # logger.info("⚠️ 缺少 user_id 或 token_jti，跳过单点登录检查")
                 return False  # 如果没有这些信息，让其他验证器处理
             
             # 确保在应用上下文中执行数据库查询
@@ -93,7 +94,7 @@ def configure_jwt_callbacks(jwt):
                     return True  # 用户不存在，视为 token 已撤销
             else:
                 # 兼容旧 token（没有 user_type 字段），先查 Customer 再查 User
-                logger.info(f"ℹ️ Token 中没有 user_type 字段，使用兼容模式: user_id={user_id}")
+                # logger.info(f"ℹ️ Token 中没有 user_type 字段，使用兼容模式: user_id={user_id}")
                 user = Customer.query.get(user_id)
                 user_type = 'customer'
                 
@@ -117,16 +118,18 @@ def configure_jwt_callbacks(jwt):
             # 单点登录检查：验证当前 token 的 jti 是否与数据库中存储的一致
             if hasattr(user, 'current_token_id'):
                 stored_jti = user.current_token_id
-                logger.info(f"🔍 单点登录检查: user_id={user_id}, user_type={user_type}, token_jti={token_jti}, stored_jti={stored_jti}")
+                # 单点登录检查日志已关闭
+                # logger.info(f"🔍 单点登录检查: user_id={user_id}, user_type={user_type}, token_jti={token_jti}, stored_jti={stored_jti}")
                 
                 if stored_jti:
                     if token_jti != stored_jti:
-                        logger.warning(f"❌ Token已被新登录替换: user_id={user_id}, user_type={user_type}, token_jti={token_jti}, stored_jti={stored_jti}")
+                        # 只在token被替换时记录警告日志（重要错误）
+                        logger.warning(f"❌ Token已被新登录替换: user_id={user_id}, user_type={user_type}")
                         return True  # token 不匹配，视为已撤销
-                    else:
-                        logger.info(f"✅ Token验证通过: user_id={user_id}, user_type={user_type}")
-                else:
-                    logger.info(f"ℹ️ 用户尚未设置 current_token_id: user_id={user_id}, user_type={user_type}")
+                    # else:
+                    #     logger.info(f"✅ Token验证通过: user_id={user_id}, user_type={user_type}")
+                # else:
+                #     logger.info(f"ℹ️ 用户尚未设置 current_token_id: user_id={user_id}, user_type={user_type}")
             
             return False  # token 有效
         except Exception as e:
@@ -137,7 +140,7 @@ def configure_jwt_callbacks(jwt):
     # 注意：wrong_token_type_loader 在当前版本的 flask_jwt_extended 中不存在
     # 已移除该回调函数以避免启动错误
     
-    logger.info("✅ JWT回调函数配置完成（包含单点登录检查）")
+    # logger.info("✅ JWT回调函数配置完成（包含单点登录检查）")
     return jwt
 
 

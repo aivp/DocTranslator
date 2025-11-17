@@ -52,9 +52,36 @@ class FileUploadResource(Resource):
         try:
             # 生成存储路径（按租户ID和用户ID隔离）
             save_dir = get_tenant_upload_dir(user_id)
-            filename = file.filename
+            original_filename = file.filename  # 保存用户上传的原始文件名
+            filename = original_filename  # 用于实际存储的文件名
 
-            # 直接使用原始文件名
+            # 检查同名文件是否存在，如果存在则生成唯一文件名避免覆盖
+            original_save_path = os.path.join(save_dir, filename)
+            
+            # 如果同名文件存在，生成唯一文件名避免覆盖
+            if os.path.exists(original_save_path):
+                # 查询是否有使用该文件路径的翻译任务正在运行
+                active_statuses = ['queued', 'changing', 'process']
+                active_task = Translate.query.filter(
+                    Translate.origin_filepath == os.path.abspath(original_save_path),
+                    Translate.status.in_(active_statuses),
+                    Translate.deleted_flag == 'N'
+                ).first()
+                
+                # 生成唯一文件名避免覆盖（只修改实际存储的文件名，保留原始文件名）
+                base_name, ext = os.path.splitext(filename)
+                timestamp = int(datetime.now().timestamp() * 1000)  # 毫秒时间戳
+                filename = f"{base_name}_{timestamp}{ext}"
+                
+                if active_task:
+                    current_app.logger.warning(
+                        f"检测到同名文件正在翻译，生成新文件名: {filename} (原文件: {original_filename})"
+                    )
+                else:
+                    current_app.logger.info(
+                        f"检测到同名文件已存在，生成新文件名避免覆盖: {filename} (原文件: {original_filename})"
+                    )
+            
             save_path = os.path.join(save_dir, filename)
 
             # 检查路径是否安全
@@ -76,8 +103,9 @@ class FileUploadResource(Resource):
                 translate_no=f"TRANS{datetime.now().strftime('%Y%m%d%H%M%S')}",
                 uuid=file_uuid,
                 customer_id=user_id,
-                origin_filename=filename,
-                origin_filepath=os.path.abspath(save_path),  # 使用绝对路径
+                origin_filename=original_filename,  # 保存用户上传的原始文件名
+                stored_filename=filename,  # 保存实际存储的文件名（如果重命名了，就是重命名后的）
+                origin_filepath=os.path.abspath(save_path),  # 使用绝对路径（实际存储的文件路径）
                 target_filepath='',  # 目标文件路径暂为空
                 status='none',  # 初始状态为 none
                 origin_filesize=file_size,
@@ -165,6 +193,28 @@ class FileDeleteResource(Resource):
                 # 记录存在，正常删除流程
                 file_path = translate_record.origin_filepath
                 file_size = translate_record.origin_filesize or 0
+                
+                # 检查文件是否正在被翻译
+                active_statuses = ['queued', 'changing', 'process']
+                if translate_record.status in active_statuses:
+                    return APIResponse.error(
+                        f'文件正在翻译中（状态：{translate_record.status}），无法删除。请等待翻译完成后再删除。', 
+                        400
+                    )
+                
+                # 检查是否有其他任务正在使用该文件
+                other_active_task = Translate.query.filter(
+                    Translate.origin_filepath == file_path,
+                    Translate.status.in_(active_statuses),
+                    Translate.deleted_flag == 'N',
+                    Translate.id != translate_record.id
+                ).first()
+                
+                if other_active_task:
+                    return APIResponse.error(
+                        f'该文件正在被其他翻译任务使用（任务ID：{other_active_task.id}），无法删除。', 
+                        400
+                    )
 
                 # 删除物理文件
                 if os.path.exists(file_path):
@@ -189,6 +239,20 @@ class FileDeleteResource(Resource):
                 file_path = data.get('filepath', '')
                 
                 if file_path and os.path.exists(file_path):
+                    # 检查该文件是否正在被其他翻译任务使用
+                    active_statuses = ['queued', 'changing', 'process']
+                    active_task = Translate.query.filter(
+                        Translate.origin_filepath == os.path.abspath(file_path),
+                        Translate.status.in_(active_statuses),
+                        Translate.deleted_flag == 'N'
+                    ).first()
+                    
+                    if active_task:
+                        return APIResponse.error(
+                            f'该文件正在被翻译任务使用（任务ID：{active_task.id}），无法删除。', 
+                            400
+                        )
+                    
                     try:
                         # 获取文件大小
                         file_size = os.path.getsize(file_path)

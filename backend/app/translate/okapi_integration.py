@@ -1026,7 +1026,9 @@ class OkapiWordTranslator:
             )
             
             if success:
-                logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元")
+                # 翻译成功日志已关闭（调试时可打开）
+                # logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元")
+                pass
             
             return success
             
@@ -1094,7 +1096,9 @@ class OkapiWordTranslator:
             )
             
             if success:
-                logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元（使用占位符）")
+                # 翻译成功日志已关闭（调试时可打开）
+                # logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元（使用占位符）")
+                pass
             
             return success
             
@@ -1446,7 +1450,8 @@ class OkapiPptxTranslator:
                 )
                 
                 if success:
-                    logger.info("🎯 PPTX 翻译完成")
+                    # 翻译成功日志已关闭（调试时可打开）
+                    # logger.info("🎯 PPTX 翻译完成")
                     return True
                 else:
                     logger.error("❌ PPTX 文档合并失败")
@@ -1512,7 +1517,9 @@ class OkapiPptxTranslator:
             )
             
             if success:
-                logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元")
+                # 翻译成功日志已关闭（调试时可打开）
+                # logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元")
+                pass
             
             return success
             
@@ -1580,7 +1587,9 @@ class OkapiPptxTranslator:
             )
             
             if success:
-                logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元（使用占位符）")
+                # 翻译成功日志已关闭（调试时可打开）
+                # logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元（使用占位符）")
+                pass
             
             return success
             

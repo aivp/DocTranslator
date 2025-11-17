@@ -561,12 +561,14 @@ def start_doc2x_pdf_translation(trans):
                 )
                 
                 if success:
-                    print("✅ Okapi XLIFF转换 + Qwen翻译完成")
+                    # 翻译成功日志已关闭（调试时可打开）
+                    # print("✅ Okapi XLIFF转换 + Qwen翻译完成")
                     
                     # 更新进度为100%（翻译完成）
                     try:
                         db.execute("update translate set process='100' where id=%s", trans['id'])
-                        print("✅ 已更新进度为100%（翻译完成）")
+                        # 翻译成功日志已关闭（调试时可打开）
+                        # print("✅ 已更新进度为100%（翻译完成）")
                     except Exception as e:
                         print("⚠️  更新进度失败: " + str(e))
                     
@@ -580,7 +582,8 @@ def start_doc2x_pdf_translation(trans):
                     if docx_trans['run_complete']:
                         to_translate.complete(docx_trans, text_count, spend_time)
                     
-                    print("✅ Okapi XLIFF转换 + Qwen翻译完成，用时: " + spend_time)
+                    # 翻译成功日志已关闭（调试时可打开）
+                    # print("✅ Okapi XLIFF转换 + Qwen翻译完成，用时: " + spend_time)
                     return True
                 else:
                     print("❌ Okapi XLIFF转换 + Qwen翻译失败，回退到传统方法")
@@ -612,13 +615,15 @@ def start_doc2x_pdf_translation(trans):
         # 更新进度为100%（传统方法翻译完成）
         try:
             db.execute("update translate set process='100' where id=%s", trans['id'])
-            print("✅ 已更新进度为100%（传统方法翻译完成）")
+            # 翻译成功日志已关闭（调试时可打开）
+            # print("✅ 已更新进度为100%（传统方法翻译完成）")
         except Exception as e:
             print("⚠️  更新进度失败: " + str(e))
         
         if trans['run_complete']:
             to_translate.complete(trans, text_count, spend_time)
-        print("PDF翻译任务完成: " + str(trans['id']))
+        # 翻译成功日志已关闭（调试时可打开）
+        # print("PDF翻译任务完成: " + str(trans['id']))
         return True
 
     except Exception as e:
@@ -1114,7 +1119,8 @@ def run_translation(trans, texts, max_threads=30):
         
         time.sleep(1)
 
-    print("所有翻译任务已完成")
+    # 翻译成功日志已关闭（调试时可打开）
+    # print("所有翻译任务已完成")
 
 
 def apply_translations(document, texts):
@@ -1374,7 +1380,8 @@ def start_small_pdf_translation(trans):
         )
         
         if result_file and os.path.exists(result_file):
-            print(f"✅ 小文件PDF翻译完成: {result_file}")
+            # 翻译成功日志已关闭（调试时可打开）
+            # print(f"✅ 小文件PDF翻译完成: {result_file}")
             
             # 更新任务状态为完成
             try:
@@ -1424,7 +1431,8 @@ def start_large_pdf_translation(trans, total_pages):
         )
         
         if result_file and os.path.exists(result_file):
-            print(f"✅ 大文件PDF翻译完成: {result_file}")
+            # 翻译成功日志已关闭（调试时可打开）
+            # print(f"✅ 大文件PDF翻译完成: {result_file}")
             
             # 更新任务状态为完成
             try:
@@ -1609,7 +1617,8 @@ class DirectPDFTranslator:
             if texts_for_translation:
                 # 使用现有的多线程翻译系统
                 run_translation(trans, texts_for_translation, max_threads=30)
-                print("   多线程翻译完成")
+                # 翻译成功日志已关闭（调试时可打开）
+                # print("   多线程翻译完成")
             else:
                 print("   没有需要翻译的文本")
             
@@ -1860,7 +1869,8 @@ class DirectPDFTranslator:
             # 不重命名文件，保持数据库路径与实际文件一致
             
             print("\n" + "=" * 60)
-            print("🎉 完整PDF翻译流程完成!")
+            # 翻译成功日志已关闭（调试时可打开）
+            # print("🎉 完整PDF翻译流程完成!")
             print("=" * 60)
             print(f"📄 输入文件: {self.input_pdf_path}")
             print(f"📝 提取文本: {extracted_texts_file}")

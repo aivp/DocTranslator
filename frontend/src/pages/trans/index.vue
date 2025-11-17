@@ -194,7 +194,7 @@
     <div class="fixed_bottom">
       <el-button
         type="primary"
-        :disabled="upload_load || translateButtonState.disabled"
+        :disabled="(upload_load || translateButtonState.disabled || form.files.length === 0 || (form.files.length > 0 && !areAllFilesUploaded)) && !translateButtonState.isLoading"
         :loading="translateButtonState.isLoading"
         size="large"
         color="#055CF9"
@@ -333,6 +333,9 @@ const translateButtonState = ref({
   isLoading: false,
   disabled: false
 })
+
+// 所有文件是否都已上传完成
+const areAllFilesUploaded = ref(false)
 
 // 全部下载按钮状态管理
 const downloadAllButtonState = ref({
@@ -514,6 +517,49 @@ function getCount() {
 
 function flhandleFileListChange(file, fileList) {
   fileListShow.value = fileList.length > 0 ? true : false
+  // 检查是否所有文件都已上传完成（成功或失败）
+  // 使用 nextTick 确保 el-upload 组件状态已更新
+  setTimeout(() => {
+    if (uploadRef.value && uploadRef.value.uploadFiles) {
+      checkAllFilesUploaded(uploadRef.value.uploadFiles)
+    } else {
+      // 如果没有 uploadRef，使用传入的 fileList
+      checkAllFilesUploaded(fileList)
+    }
+  }, 50)
+}
+
+// 检查是否所有文件都已上传完成
+function checkAllFilesUploaded(fileList) {
+  // 如果没有文件列表，直接返回
+  if (!fileList || fileList.length === 0) {
+    upload_load.value = false
+    areAllFilesUploaded.value = false
+    return
+  }
+  
+  // 检查是否还有文件正在上传中或准备上传
+  const hasUploading = fileList.some(file => {
+    // el-upload 的文件状态：'ready' 准备上传, 'uploading' 上传中, 'success' 成功, 'fail' 失败
+    const isUploading = file.status === 'ready' || file.status === 'uploading'
+    return isUploading
+  })
+  
+  // 检查是否所有文件都已上传完成（成功或失败）
+  const allCompleted = fileList.every(file => {
+    return file.status === 'success' || file.status === 'fail'
+  })
+  
+  // 如果有文件正在上传，保持按钮禁用状态
+  upload_load.value = hasUploading
+  // 只有当所有文件都完成（成功或失败）且没有文件正在上传时，才允许点击
+  areAllFilesUploaded.value = allCompleted && !hasUploading
+  
+  // 调试日志（需要时可打开）
+  // console.log(`文件列表检查: 总数=${fileList.length}, 正在上传=${hasUploading}, 全部完成=${allCompleted}, areAllFilesUploaded=${areAllFilesUploaded.value}`)
+  // fileList.forEach((file, index) => {
+  //   console.log(`  文件${index + 1}: ${file.name}, 状态: ${file.status}`)
+  // })
 }
 
 // 进度查询 status: "done"
@@ -662,6 +708,17 @@ async function startNextTranslation() {
     
     console.log('自动启动下一个翻译任务:', nextTask.origin_filename)
     
+    // 检查必要参数
+    if (!nextTask.uuid) {
+      console.error('任务缺少 uuid:', nextTask)
+      return
+    }
+    
+    if (!nextTask.origin_filename) {
+      console.error('任务缺少 origin_filename:', nextTask)
+      return
+    }
+    
     // 准备翻译参数
     const translateParams = {
       server: nextTask.server || 'openai',
@@ -685,8 +742,12 @@ async function startNextTranslation() {
       size: nextTask.size || 0
     }
     
+    console.log('准备启动翻译任务，参数:', translateParams)
+    
     // 启动翻译任务
     const translateRes = await transalteFile(translateParams)
+    console.log('自动启动翻译任务响应:', translateRes)
+    
     if (translateRes.code === 200) {
       console.log('自动启动翻译任务成功:', nextTask.origin_filename)
       ElMessage.success({
@@ -700,20 +761,40 @@ async function startNextTranslation() {
       // 启动进度查询
       process(nextTask.uuid)
     } else {
-      console.log('自动启动翻译任务失败:', translateRes.message)
-      ElMessage.warning({
-        message: `自动启动翻译任务失败: ${nextTask.origin_filename}`,
-        duration: 3000
+      // 自动启动失败时，不显示错误提示，因为任务可能会通过队列自动启动
+      // 只在控制台记录日志，方便调试
+      console.warn('自动启动翻译任务失败（任务可能会通过队列自动启动）:', {
+        filename: nextTask.origin_filename,
+        error: translateRes.message || translateRes.data?.message || '未知错误',
+        response: translateRes
       })
+      // 不显示错误提示，避免干扰用户
+      // ElMessage.error({
+      //   message: `自动启动翻译任务失败: ${nextTask.origin_filename} - ${errorMsg}`,
+      //   duration: 5000
+      // })
     }
     
   } catch (error) {
-    console.error('自动启动下一个翻译任务时发生错误:', error)
+    // 自动启动异常时，不显示错误提示，因为任务可能会通过队列自动启动
+    // 只在控制台记录日志，方便调试
+    console.warn('自动启动下一个翻译任务时发生异常（任务可能会通过队列自动启动）:', {
+      error: error?.response?.data?.message || error?.message || '未知错误',
+      fullError: error
+    })
+    // 不显示错误提示，避免干扰用户
+    // ElMessage.error({
+    //   message: `自动启动翻译任务异常: ${errorMsg}`,
+    //   duration: 5000
+    // })
   }
 }
 
 // 批量启动翻译任务
 async function startBatchTranslation() {
+  // 注意：防重复提交检查已在 handleTranslate 中完成，这里不需要重复检查
+  // 按钮状态也已在 handleTranslate 中设置
+  
   try {
     console.log('开始批量启动翻译任务，文件数量:', form.value.files.length)
     
@@ -764,17 +845,24 @@ async function startBatchTranslation() {
         
         // 启动翻译任务
         const res = await transalteFile(translateParams)
+        console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动响应:`, file.file_name, res)
+        
         if (res.code === 200) {
           successCount++
-          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动成功:`, file.file_name)
+          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动成功:`, file.file_name, '状态:', res.data.status)
           
           // 检查是否进入队列
           if (res.data.status === 'queued') {
             console.log(`文件 ${file.file_name} 已加入队列`)
+          } else if (res.data.status === 'started' || res.data.status === 'process') {
+            console.log(`文件 ${file.file_name} 已直接启动`)
           }
           
-          // 启动进度查询
-          process(file.uuid)
+          // 启动进度查询（使用返回的uuid或原有的uuid）
+          const taskUuid = res.data.uuid || file.uuid
+          if (taskUuid) {
+            process(taskUuid)
+          }
           
           // 如果不是最后一个文件，等待一下再启动下一个（避免API限流）
           if (i < filesToTranslate.length - 1) {
@@ -782,7 +870,7 @@ async function startBatchTranslation() {
           }
         } else {
           failCount++
-          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动失败:`, file.file_name, res.message)
+          console.error(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动失败:`, file.file_name, res)
         }
       } catch (error) {
         failCount++
@@ -807,35 +895,38 @@ async function startBatchTranslation() {
         message: message,
         duration: 5000
       })
+      
+      // 刷新翻译列表，确保新任务显示在最前面
+      await getTranslatesData(1)
+      
+      // 批量翻译任务启动成功后才清空上传文件列表
+      uploadRef.value.clearFiles()
+      form.value.files = []  // 清空表单文件数组
+      areAllFilesUploaded.value = false  // 重置状态（文件列表已清空）
     } else if (failCount > 0) {
       ElMessage.error({
         message: message,
         duration: 5000
       })
+      // 全部失败时不清空文件列表，让用户可以重试
     } else {
       ElMessage.warning({
         message: message,
         duration: 5000
       })
+      // 没有成功也没有失败（全部跳过）时，也不清空文件列表
     }
-    
-    // 刷新翻译列表，确保新任务显示在最前面
-    await getTranslatesData(1)
-    
-    // 清空上传文件列表
-    uploadRef.value.clearFiles()
-    form.value.files = []  // 清空表单文件数组
     
   } catch (error) {
     console.error('批量启动翻译任务时发生错误:', error)
     ElMessage.error({
-      message: '批量启动翻译任务失败',
-      duration: 3000
+      message: error.message || '批量启动翻译任务失败，请检查控制台日志',
+      duration: 5000
     })
     
-    // 即使失败也要清空文件列表
-    uploadRef.value.clearFiles()
-    form.value.files = []  // 清空表单文件数组
+    // 失败时不清空文件列表，让用户可以重试
+    // uploadRef.value.clearFiles()
+    // form.value.files = []  // 清空表单文件数组
   }
 }
 
@@ -904,6 +995,25 @@ const doc2xStatusQuery = async (data) => {
 }
 // 启动翻译-----立即翻译-------
 async function handleTranslate(transform) {
+  // 检查是否有文件需要翻译
+  if (!form.value.files || form.value.files.length === 0) {
+    ElMessage({
+      message: '请先上传文件',
+      type: 'warning'
+    })
+    return
+  }
+  
+  // 防重复提交：如果正在处理中，直接返回（在文件检查之后，避免误判）
+  if (translateButtonState.value.isLoading || translateButtonState.value.disabled) {
+    console.log('翻译任务正在处理中，忽略重复点击')
+    return
+  }
+  
+  // 立即设置按钮状态，防止重复点击
+  translateButtonState.value.isLoading = true
+  translateButtonState.value.disabled = true
+  
   // 首先再次赋值，防止没有更新
   form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
   
@@ -1034,9 +1144,7 @@ async function handleTranslate(transform) {
   form.value.api_key = userStore.isVip ? '' : form.value.api_key
   form.value.api_url = userStore.isVip ? '' : form.value.api_url
 
-  // 设置按钮为加载状态
-  translateButtonState.value.isLoading = true
-  translateButtonState.value.disabled = true
+  // 按钮状态已在函数开头设置，这里不需要重复设置
 
   try {
     // 先检查队列状态，如果系统繁忙则弹出确认对话框
@@ -1044,11 +1152,9 @@ async function handleTranslate(transform) {
     if (!queueStatus.value.can_start_new) {
       const confirmed = await showQueueConfirmDialog()
       if (!confirmed) {
-        // 用户取消，恢复按钮状态并清空文件列表
+        // 用户取消，恢复按钮状态
         translateButtonState.value.isLoading = false
         translateButtonState.value.disabled = false
-        uploadRef.value.clearFiles()
-        form.value.files = []  // 清空表单文件数组
         return
       }
     }
@@ -1062,7 +1168,33 @@ async function handleTranslate(transform) {
       console.log('翻译表单：', form.value)
       // 明确传递PDF翻译方式，避免后端回退默认值
       form.value.pdf_translate_method = translateStore.common?.pdf_translate_method || 'direct'
+      
+      // 确保传递 uuid（从 files[0] 中获取）
+      if (form.value.files && form.value.files.length > 0) {
+        const file = form.value.files[0]
+        if (file.uuid) {
+          form.value.uuid = file.uuid
+          console.log('使用文件中的 uuid:', file.uuid)
+        } else {
+          console.error('文件缺少 uuid:', file)
+          ElMessage({
+            message: '文件信息不完整，请重新上传',
+            type: 'error',
+          })
+          return
+        }
+      } else {
+        console.error('没有文件需要翻译')
+        ElMessage({
+          message: '请先上传文件',
+          type: 'warning',
+        })
+        return
+      }
+      
       const res = await transalteFile(form.value)
+      console.log('翻译任务启动响应:', res)
+      
       if (res.code == 200) {
         // 检查任务状态
         if (res.data.status === 'queued') {
@@ -1071,9 +1203,14 @@ async function handleTranslate(transform) {
             type: 'warning',
             duration: 5000
           })
-        } else {
+        } else if (res.data.status === 'started' || res.data.status === 'process') {
           ElMessage({
             message: '提交翻译任务成功！',
+            type: 'success',
+          })
+        } else {
+          ElMessage({
+            message: res.data.message || '提交翻译任务成功！',
             type: 'success',
           })
         }
@@ -1081,24 +1218,46 @@ async function handleTranslate(transform) {
         // 先刷新一次列表，让用户看到新创建的翻译任务
         await getTranslatesData(1)
         
-        // 然后启动任务查询
-        process(form.value.uuid)
+        // 然后启动任务查询（使用返回的uuid或原有的uuid）
+        const taskUuid = res.data.uuid || form.value.uuid
+        if (taskUuid) {
+          process(taskUuid)
+        }
+        
+        // 翻译任务启动成功后才清空文件列表
+        uploadRef.value.clearFiles()
+        form.value.files = []  // 清空表单文件数组
+        areAllFilesUploaded.value = false  // 重置状态（文件列表已清空）
       } else {
+        console.error('翻译任务启动失败:', res)
         ElMessage({
-          message: '提交翻译任务失败~',
+          message: res.message || '提交翻译任务失败，请检查控制台日志',
           type: 'error',
+          duration: 5000
         })
+        // 翻译失败时不清空文件列表，让用户可以重试
       }
     }
+  } catch (error) {
+    console.error('翻译任务提交失败:', error)
+    ElMessage({
+      message: error.message || '提交翻译任务失败，请稍后重试',
+      type: 'error',
+    })
   } finally {
     // 无论成功失败，都恢复按钮状态
     translateButtonState.value.isLoading = false
     translateButtonState.value.disabled = false
+    
+    // 注意：文件列表不清空，让用户可以看到上传的文件
+    // 只有在翻译任务成功启动后才清空（在 startBatchTranslation 或单个文件翻译成功后清空）
+    // uploadRef.value.clearFiles()
+    // form.value.files = []  // 清空表单文件数组
+    
+    // 注意：不要重置 areAllFilesUploaded，因为文件还在，只是翻译任务已提交
+    // 只有在文件列表被清空时才重置
+    // areAllFilesUploaded.value = false
   }
-
-  // 4.清空上传文件列表
-  uploadRef.value.clearFiles()
-  form.value.files = []  // 清空表单文件数组
 }
 // 重启翻译任务
 async function retryTranslate(item) {
@@ -1161,7 +1320,13 @@ function beforeUpload(file) {
     })
     return false
   }
-  upload_load.value = true
+  // 文件开始上传时，检查并更新按钮状态
+  setTimeout(() => {
+    if (uploadRef.value) {
+      checkAllFilesUploaded(uploadRef.value.uploadFiles)
+    }
+  }, 100)
+  return true
 }
 // 上传成功
 function uploadSuccess(res, file) {
@@ -1189,9 +1354,14 @@ function uploadSuccess(res, file) {
       type: 'error',
     })
   }
+  
+  // 延迟检查，确保 el-upload 的文件状态已更新
+  // 使用更长的延迟，确保 el-upload 组件内部状态已完全更新
   setTimeout(() => {
-    upload_load.value = false
-  }, 1000)
+    if (uploadRef.value && uploadRef.value.uploadFiles) {
+      checkAllFilesUploaded(uploadRef.value.uploadFiles)
+    }
+  }, 200)
 }
 
 function uploadError(data) {
@@ -1199,10 +1369,19 @@ function uploadError(data) {
     message: `上传失败，${JSON.parse(data.message).message}`,
     type: 'error',
   })
+  
+  // 延迟检查，确保 el-upload 的文件状态已更新
+  setTimeout(() => {
+    if (uploadRef.value) {
+      checkAllFilesUploaded(uploadRef.value.uploadFiles)
+    }
+  }, 100)
 }
 
 function handleExceed(files, uploadFiles) {
-  ElMessage.warning(`最多只能上传 5 个文件，当前已有 ${uploadFiles.length} 个文件，请删除一些文件后再上传！`)
+  // ElMessage.warning(`最多只能上传 5 个文件，当前已有 ${uploadFiles.length} 个文件，请删除一些文件后再上传！`)
+  ElMessage.warning(`最多只能上传 5 个文件！`)
+
 }
 
 function delUploadFile(file, files) {
@@ -1263,6 +1442,21 @@ function delUploadFile(file, files) {
   if (files.length <= 1) {
     fileListShow.value = false
   }
+  
+  // 检查是否所有文件都已上传完成
+  // 使用 nextTick 确保 el-upload 组件状态已更新
+  setTimeout(() => {
+    if (uploadRef.value && uploadRef.value.uploadFiles) {
+      checkAllFilesUploaded(uploadRef.value.uploadFiles)
+    } else if (files && files.length > 0) {
+      // 如果没有 uploadRef，使用传入的 files 参数
+      checkAllFilesUploaded(files)
+    } else {
+      // 如果文件列表为空，重置状态
+      upload_load.value = false
+      areAllFilesUploaded.value = false
+    }
+  }, 150)
 }
 
 //获取翻译列表数据

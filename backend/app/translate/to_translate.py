@@ -170,23 +170,24 @@ def get(trans, event, texts, index):
             # 检查Qwen服务可用性
             if model == 'qwen-mt-plus':
                 qwen_available, qwen_message = check_qwen_availability()
-                logging.info(f"Qwen服务检查: {qwen_message}")
+                # 翻译日志已关闭（调试时可打开）
+                # logging.info(f"Qwen服务检查: {qwen_message}")
                 if not qwen_available:
                     logging.warning("警告: Qwen服务不可用，将使用备用方案")
-                else:
-                    logging.info("Qwen翻译服务已启用")
+                # else:
+                #     logging.info("Qwen翻译服务已启用")
         except:
             pass
     # ==========================================
     
     prompt = trans['prompt']
     
-    # 添加调试日志，查看prompt字段的值
-    logging.info(f"🔍 to_translate.py 调试信息:")
-    logging.info(f"  trans['prompt']类型: {type(prompt)}")
-    logging.info(f"  trans['prompt']值: {repr(prompt)}")
-    logging.info(f"  trans['prompt']是否为空: {not prompt}")
-    logging.info(f"  trans['prompt']长度: {len(prompt) if prompt else 0}")
+    # 翻译日志已关闭（调试时可打开）
+    # logging.info(f"🔍 to_translate.py 调试信息:")
+    # logging.info(f"  trans['prompt']类型: {type(prompt)}")
+    # logging.info(f"  trans['prompt']值: {repr(prompt)}")
+    # logging.info(f"  trans['prompt']是否为空: {not prompt}")
+    # logging.info(f"  trans['prompt']长度: {len(prompt) if prompt else 0}")
     
     extension = trans['extension'].lower()
     text = texts[index]
