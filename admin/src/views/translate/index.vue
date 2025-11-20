@@ -61,6 +61,47 @@ const handleMoreDelete = () => {
   })
 }
 
+//#region 单个下载
+const handleDownload = (row: GetTranslateData) => {
+  if (!row.target_filepath) {
+    ElMessage.warning("文件不存在")
+    return
+  }
+
+  const url = `${BASE_URL}/api/admin/translate/download/${row.id}`
+  const token = getToken()
+  fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: "Bearer " + token
+    }
+  })
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error("Network response was not ok")
+      }
+      return response.blob()
+    })
+    .then((blob) => {
+      // 从响应头获取文件名，如果没有则使用原始文件名
+      const filename = row.origin_filename || `download_${row.id}`
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      ElMessage.success("下载成功")
+    })
+    .catch((error) => {
+      console.log(error)
+      ElMessage.error("下载失败，请稍后重试")
+    })
+}
+//#endregion
+
 //#region 批量下载
 const handleMoreDownload = () => {
   if (selectedItems.value.length === 0) {
@@ -187,7 +228,7 @@ watch([() => paginationData.currentPage, () => paginationData.pageSize], getTabl
               <el-link
                 style="color: #409eff; margin-right: 12px"
                 v-if="scope.row.target_filepath"
-                :href="BASE_URL + '/api/admin/translate/download/' + scope.row.id"
+                @click="handleDownload(scope.row)"
                 >下载</el-link
               >
               <el-button type="danger" text size="small" @click="handleDelete(scope.row)">删除</el-button>

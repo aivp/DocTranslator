@@ -25,7 +25,7 @@
                 prefix-icon="el-icon-lock"
               />
             </el-form-item>
-            <el-form-item v-if="!hasDefaultTenant" prop="tenant_code">
+            <el-form-item prop="tenant_code">
               <el-input
                 v-model="loginForm.tenant_code"
                 placeholder="租户代码"
@@ -108,7 +108,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login } from '@/api/auth'
@@ -120,51 +120,19 @@ const activeTab = ref('login')
 const loginFormRef = ref(null)
 const loginLoading = ref(false)
 
-// 从环境变量或运行时配置读取默认租户代码
-// 优先使用运行时配置（打包后可通过修改配置文件变更），其次使用构建时环境变量
-let defaultTenantCode = ''
-try {
-  // 尝试从运行时配置文件读取（打包后可通过修改 webConfig.js 变更）
-  if (window.__APP_CONFIG__ && window.__APP_CONFIG__.DEFAULT_TENANT_CODE) {
-    defaultTenantCode = window.__APP_CONFIG__.DEFAULT_TENANT_CODE
-  }
-} catch (e) {
-  console.warn('无法读取运行时配置:', e)
-}
-// 如果运行时配置不存在，使用构建时环境变量
-if (!defaultTenantCode) {
-  defaultTenantCode = import.meta.env.VITE_DEFAULT_TENANT_CODE || ''
-}
-const hasDefaultTenant = computed(() => !!defaultTenantCode)
-
 // 登录表单
 const loginForm = reactive({
   email: '',
   password: '',
-  tenant_code: defaultTenantCode // 如果有默认值，自动填充
+  tenant_code: '' // 用户必须手动输入租户代码
 })
 
-// 动态生成验证规则：如果有默认租户代码，则不需要验证tenant_code
-const loginRules = computed(() => {
-  const rules = {
-    email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
-    password: [{ required: true, message: '请填写密码', trigger: 'blur' }]
-  }
-  
-  // 只有在没有默认租户代码时才需要验证
-  if (!hasDefaultTenant.value) {
-    rules.tenant_code = [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
-  }
-  
-  return rules
-})
-
-// 组件挂载时，如果有默认租户代码，确保表单值已设置
-onMounted(() => {
-  if (hasDefaultTenant.value) {
-    loginForm.tenant_code = defaultTenantCode
-  }
-})
+// 验证规则：租户代码始终必填
+const loginRules = {
+  email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
+  password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
+  tenant_code: [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
+}
 
 // 注册功能已隐藏
 // const registerForm = reactive({

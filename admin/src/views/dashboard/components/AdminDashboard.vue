@@ -44,21 +44,30 @@
     <!-- 数据区域 -->
     <el-row :gutter="20" class="data-row">
       <el-col :xs="24" :md="16">
-        <el-card>
+        <el-card class="recent-tasks-card">
           <template #header>
             <div class="card-header">
               <span>最近任务</span>
               <el-button type="primary" link @click="handleViewAll">查看全部</el-button>
             </div>
           </template>
-          <el-table :data="recentTasks" stripe :default-sort="{prop: 'created_at', order: 'descending'}">
+          <el-table 
+            :data="recentTasks" 
+            stripe 
+            :default-sort="{prop: 'created_at', order: 'descending'}"
+            style="width: 100%">
             <el-table-column type="index" label="序号" width="80" :index="(index) => index + 1" />
-            <el-table-column prop="origin_filename" label="文件名" width="280" show-overflow-tooltip />
+            <el-table-column prop="origin_filename" label="文件名" min-width="200" show-overflow-tooltip />
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="getStatusType(row.status)">
                   {{ getStatusText(row.status) }}
                 </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="total_tokens" label="总Token消耗" width="140" sortable>
+              <template #default="{ row }">
+                {{ formatTokens(row.total_tokens) }}
               </template>
             </el-table-column>
             <el-table-column prop="created_at" label="创建时间" width="180" sortable>
@@ -430,6 +439,15 @@ const formatStorage = (bytes: number): string => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
 }
 
+// 格式化Token数量
+const formatTokens = (tokens: number): string => {
+  if (!tokens || tokens === 0) return '0'
+  if (tokens < 1000) return tokens.toString()
+  if (tokens < 1000000) return `${(tokens / 1000).toFixed(1)}K`
+  if (tokens < 1000000000) return `${(tokens / 1000000).toFixed(2)}M`
+  return `${(tokens / 1000000000).toFixed(2)}B`
+}
+
 // 查看全部任务
 const handleViewAll = () => {
   router.push('/translate')
@@ -556,11 +574,39 @@ onBeforeUnmount(() => {
   }
   
   .data-row {
+    margin-bottom: 0;
+    
+    .el-card {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    
     .card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-weight: bold;
+    }
+    
+    .recent-tasks-card {
+      :deep(.el-card__body) {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 20px;
+        overflow: hidden;
+      }
+      
+      :deep(.el-table) {
+        flex: 1;
+        width: 100%;
+        
+        .el-table__body-wrapper {
+          max-height: calc(100vh - 500px);
+          overflow-y: auto;
+        }
+      }
     }
     
     .status-list {

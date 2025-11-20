@@ -54,6 +54,7 @@ export interface GetRecentTasksResponseData {
       status: string
       created_at: string
       customer_id: number
+      total_tokens: number
     }>
   }
   message: string

@@ -28,10 +28,10 @@
               <div class="icon_svg"><svg-icon icon-class="corpus" /></div>
               <span class="pc_show">语料库</span>
             </div>
-            <!-- <div class="btn_set" @click="funOpenVideo">
+            <div class="btn_set" @click="funOpenVideo">
               <div class="icon_svg"><svg-icon icon-class="video" /></div>
               <span class="pc_show">视频翻译</span>
-            </div> -->
+            </div>
             <div class="btn_set" @click="funOpenTools">
               <div class="icon_svg"><svg-icon icon-class="tools" /></div>
               <span class="pc_show">工具</span>

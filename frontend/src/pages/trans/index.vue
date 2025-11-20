@@ -166,7 +166,11 @@
               
               <!-- 失败重试图标 -->
               <template v-if="item.status == 'failed' || item.status == 'none'">
-                <span class="icon_handle" @click="retryTranslate(item)">
+                <span 
+                  class="icon_handle" 
+                  :class="{ 'disabled': autoStartingTasks.has(item.uuid) }"
+                  @click="!autoStartingTasks.has(item.uuid) && retryTranslate(item)"
+                  :title="autoStartingTasks.has(item.uuid) ? '任务正在自动启动中，请稍候...' : '重试'">
                   <RetryIcon />
                 </span>
               </template>
@@ -336,6 +340,9 @@ const translateButtonState = ref({
 
 // 所有文件是否都已上传完成
 const areAllFilesUploaded = ref(false)
+
+// 正在自动启动的任务UUID集合（用于禁用重试按钮）
+const autoStartingTasks = ref(new Set())
 
 // 全部下载按钮状态管理
 const downloadAllButtonState = ref({
@@ -564,6 +571,19 @@ function checkAllFilesUploaded(fileList) {
 
 // 进度查询 status: "done"
 function process(uuid) {
+  // 检查列表是否为空，如果为空则不调用
+  if (!translatesData.value || translatesData.value.length === 0) {
+    console.log('翻译列表为空，停止进度查询:', uuid)
+    return
+  }
+  
+  // 检查任务是否还在列表中
+  const taskExists = translatesData.value.some(item => item.uuid === uuid)
+  if (!taskExists) {
+    console.log('任务不在列表中，停止进度查询:', uuid)
+    return
+  }
+  
   // // 检查是否已经完成或失败
   // if (
   //   result.value[uuid] &&
@@ -633,10 +653,22 @@ function process(uuid) {
           console.log("进度达到100%，等待状态更新...")
           
           // 继续监控状态变化，缩短间隔以便更快检测
-          setTimeout(() => process(uuid), 5000)
+          // 在继续调用前，检查任务是否还在列表中
+          setTimeout(() => {
+            if (translatesData.value && translatesData.value.length > 0 && 
+                translatesData.value.some(item => item.uuid === uuid)) {
+              process(uuid)
+            }
+          }, 5000)
         } else {
           // 如果未完成，继续调用 process 函数
-          setTimeout(() => process(uuid), 10000)
+          // 在继续调用前，检查任务是否还在列表中
+          setTimeout(() => {
+            if (translatesData.value && translatesData.value.length > 0 && 
+                translatesData.value.some(item => item.uuid === uuid)) {
+              process(uuid)
+            }
+          }, 10000)
         }
       } else {
         // 处理错误情况（res.code != 200）
@@ -702,11 +734,10 @@ async function startNextTranslation() {
     // 查找状态为 'none' 的第一个文件
     const nextTask = translateList.find(item => item.status === 'none')
     if (!nextTask) {
-      console.log('没有待翻译的文件，所有任务已完成或进行中')
+      // 没有待翻译的文件，所有任务已完成或进行中
+      // 这是正常情况，不需要记录日志
       return
     }
-    
-    console.log('自动启动下一个翻译任务:', nextTask.origin_filename)
     
     // 检查必要参数
     if (!nextTask.uuid) {
@@ -719,11 +750,66 @@ async function startNextTranslation() {
       return
     }
     
+    // 在启动前等待更长时间，让后端队列管理器有机会先启动任务
+    // 队列管理器通常每几秒检查一次，所以等待时间要足够
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    // 再次获取最新状态，检查任务是否已被队列管理器启动
+    const refreshRes = await translates({ page: 1, limit: 100 })
+    if (refreshRes.code === 200) {
+      const refreshedList = refreshRes.data.data
+      const refreshedTask = refreshedList.find(item => item.uuid === nextTask.uuid)
+      
+      // 如果任务状态已经不是 'none'，说明已经被其他进程启动了，跳过
+      if (!refreshedTask) {
+        // 任务不存在了，跳过
+        return
+      }
+      
+      // 检查任务状态：如果已经是 'queued', 'process', 'changing', 'done'，说明已经被启动
+      if (refreshedTask.status !== 'none') {
+        // 任务已被启动（可能是队列管理器），这是正常情况，静默处理
+        console.log(`任务 ${nextTask.origin_filename} 已被启动，当前状态: ${refreshedTask.status}`)
+        return
+      }
+    }
+    
+    // 再次等待一小段时间，确保状态稳定
+    await new Promise(resolve => setTimeout(resolve, 500))
+    
+    // 最后一次检查状态
+    const finalCheckRes = await translates({ page: 1, limit: 100 })
+    if (finalCheckRes.code === 200) {
+      const finalList = finalCheckRes.data.data
+      const finalTask = finalList.find(item => item.uuid === nextTask.uuid)
+      
+      if (!finalTask || finalTask.status !== 'none') {
+        // 任务状态已改变，跳过
+        if (finalTask) {
+          console.log(`任务 ${nextTask.origin_filename} 状态已改变为: ${finalTask.status}，跳过自动启动`)
+        }
+        return
+      }
+    }
+    
+    console.log('自动启动下一个翻译任务:', nextTask.origin_filename)
+    
+    // 将任务添加到自动启动集合中，禁用重试按钮
+    autoStartingTasks.value.add(nextTask.uuid)
+    
+    // 验证 lang 参数
+    if (!nextTask.lang || !nextTask.lang.trim()) {
+      console.error('任务缺少 lang 参数:', nextTask)
+      // 如果参数缺失，从自动启动集合中移除
+      autoStartingTasks.value.delete(nextTask.uuid)
+      return
+    }
+    
     // 准备翻译参数
     const translateParams = {
       server: nextTask.server || 'openai',
       model: nextTask.model || 'qwen-mt-plus',
-      lang: nextTask.lang || '英语',
+      lang: nextTask.lang,  // 必须使用任务中的 lang，不使用默认值
       uuid: nextTask.uuid,
       prompt: nextTask.prompt || '请将以下内容翻译为{target_lang}',
       threads: nextTask.threads || 30,
@@ -742,51 +828,58 @@ async function startNextTranslation() {
       size: nextTask.size || 0
     }
     
-    console.log('准备启动翻译任务，参数:', translateParams)
-    
-    // 启动翻译任务
-    const translateRes = await transalteFile(translateParams)
-    console.log('自动启动翻译任务响应:', translateRes)
-    
-    if (translateRes.code === 200) {
-      console.log('自动启动翻译任务成功:', nextTask.origin_filename)
-      ElMessage.success({
-        message: `自动启动翻译任务: ${nextTask.origin_filename}`,
-        duration: 3000
-      })
+    try {
+      // 启动翻译任务
+      const translateRes = await transalteFile(translateParams)
       
-      // 使用专门的进度更新函数，而不是刷新整个列表
-      updateProgressOnly()
-      
-      // 启动进度查询
-      process(nextTask.uuid)
-    } else {
-      // 自动启动失败时，不显示错误提示，因为任务可能会通过队列自动启动
-      // 只在控制台记录日志，方便调试
-      console.warn('自动启动翻译任务失败（任务可能会通过队列自动启动）:', {
-        filename: nextTask.origin_filename,
-        error: translateRes.message || translateRes.data?.message || '未知错误',
-        response: translateRes
-      })
-      // 不显示错误提示，避免干扰用户
-      // ElMessage.error({
-      //   message: `自动启动翻译任务失败: ${nextTask.origin_filename} - ${errorMsg}`,
-      //   duration: 5000
-      // })
+      if (translateRes.code === 200) {
+        console.log('自动启动翻译任务成功:', nextTask.origin_filename)
+        // 使用专门的进度更新函数，而不是刷新整个列表
+        updateProgressOnly()
+        // 启动进度查询
+        process(nextTask.uuid)
+        // 任务启动成功，从自动启动集合中移除（允许用户手动重试）
+        autoStartingTasks.value.delete(nextTask.uuid)
+      } else {
+        // 检查是否是"任务已在处理中"的错误（这是正常情况，不需要警告）
+        const errorMsg = translateRes.message || translateRes.data?.message || ''
+        const isTaskAlreadyProcessing = errorMsg.includes('已在处理中') || 
+                                        errorMsg.includes('already') ||
+                                        translateRes.code === 400
+        
+        if (!isTaskAlreadyProcessing) {
+          // 只有非"已在处理中"的错误才记录警告
+          console.warn('自动启动翻译任务失败:', {
+            filename: nextTask.origin_filename,
+            error: errorMsg,
+            response: translateRes
+          })
+        }
+        // 如果是"已在处理中"，静默处理（任务可能已被队列管理器启动）
+        // 任务启动失败或已在处理中，从自动启动集合中移除
+        autoStartingTasks.value.delete(nextTask.uuid)
+      }
+    } catch (error) {
+      // 发生异常，从自动启动集合中移除
+      autoStartingTasks.value.delete(nextTask.uuid)
+      throw error
     }
     
   } catch (error) {
-    // 自动启动异常时，不显示错误提示，因为任务可能会通过队列自动启动
-    // 只在控制台记录日志，方便调试
-    console.warn('自动启动下一个翻译任务时发生异常（任务可能会通过队列自动启动）:', {
-      error: error?.response?.data?.message || error?.message || '未知错误',
-      fullError: error
-    })
-    // 不显示错误提示，避免干扰用户
-    // ElMessage.error({
-    //   message: `自动启动翻译任务异常: ${errorMsg}`,
-    //   duration: 5000
-    // })
+    // 检查是否是"任务已在处理中"的错误
+    const errorMsg = error?.response?.data?.message || error?.message || ''
+    const isTaskAlreadyProcessing = errorMsg.includes('已在处理中') || 
+                                    errorMsg.includes('already') ||
+                                    (error?.response?.status === 400)
+    
+    if (!isTaskAlreadyProcessing) {
+      // 只有非"已在处理中"的错误才记录警告
+      console.warn('自动启动下一个翻译任务时发生异常:', {
+        error: errorMsg,
+        fullError: error
+      })
+    }
+    // 如果是"已在处理中"，静默处理（任务可能已被队列管理器启动）
   }
 }
 
@@ -798,70 +891,211 @@ async function startBatchTranslation() {
   try {
     console.log('开始批量启动翻译任务，文件数量:', form.value.files.length)
     
-    // 获取第一个文件的配置作为模板
-    const firstFile = form.value.files[0]
-    const templateConfig = {
-      server: form.value.server,
-      model: form.value.model,
-      lang: form.value.lang,
-      prompt: form.value.prompt,
-      threads: form.value.threads,
-      api_url: form.value.api_url,
-      api_key: form.value.api_key,
-      app_id: form.value.app_id,
-      app_key: form.value.app_key,
-      backup_model: form.value.backup_model,
-      origin_lang: form.value.origin_lang,
-      type: form.value.type,
-      comparison_id: form.value.comparison_id,
-      prompt_id: form.value.prompt_id,
-      doc2x_flag: form.value.doc2x_flag,
-      doc2x_secret_key: form.value.doc2x_secret_key,
-      // 明确传递PDF翻译方式，避免后端回退默认值
-      pdf_translate_method: translateStore.common?.pdf_translate_method || 'direct'
+    // 检查文件列表是否为空
+    if (!form.value.files || form.value.files.length === 0) {
+      console.error('文件列表为空，无法启动批量翻译')
+      ElMessage.error('文件列表为空，请先上传文件')
+      return
     }
     
-    // 直接以上传返回的文件列表发起任务（通过uuid关联），不依赖列表匹配，避免“未找到对应任务”误判
+    // 验证语言参数必须存在且不为空
+    if (!form.value.lang || !form.value.lang.trim()) {
+      console.error('目标语言参数缺失或为空:', form.value)
+      ElMessage.error('请先选择目标语言')
+      return
+    }
+    
+    // 获取第一个文件的配置作为模板
+    const firstFile = form.value.files[0]
+    
+    // 确保必要参数有默认值（但lang必须有值，不能使用默认值）
+    // 注意：这里必须使用 form.value 中的值，确保与 handleTranslate 中的逻辑一致
+    const templateConfig = {
+      // 必需参数（后端 required_fields）
+      server: form.value.server || 'openai',
+      model: form.value.model || 'qwen-mt-plus',
+      lang: form.value.lang,  // 必须使用用户选择的值，不使用默认值
+      prompt: form.value.prompt || '请将以下内容翻译为{target_lang}',
+      threads: form.value.threads || 30,
+      
+      // API 配置
+      api_url: form.value.api_url || '',
+      api_key: form.value.api_key || '',
+      
+      // 其他配置
+      app_id: form.value.app_id || '',
+      app_key: form.value.app_key || '',
+      backup_model: form.value.backup_model || '',
+      origin_lang: form.value.origin_lang || '',
+      type: form.value.type || 'trans_all_only_inherit',
+      comparison_id: form.value.comparison_id || '',
+      prompt_id: form.value.prompt_id || '',
+      doc2x_flag: form.value.doc2x_flag || 'N',
+      doc2x_secret_key: form.value.doc2x_secret_key || 'sk-6jr7hx69652pzdd4o4poj3hp5mauana0',
+      
+      // PDF 翻译方式
+      pdf_translate_method: form.value.pdf_translate_method || translateStore.common?.pdf_translate_method || 'direct'
+    }
+    
+    // 验证所有必需参数都存在
+    const requiredParams = ['server', 'model', 'lang', 'prompt', 'threads']
+    const missingParams = requiredParams.filter(param => !templateConfig[param] || (typeof templateConfig[param] === 'string' && !templateConfig[param].trim()))
+    if (missingParams.length > 0) {
+      console.error('批量翻译缺少必需参数:', missingParams, 'templateConfig:', templateConfig)
+      ElMessage.error(`批量翻译缺少必需参数: ${missingParams.join(', ')}`)
+      return
+    }
+    
+    console.log('批量翻译模板配置:', templateConfig)
+    
+    // 直接以上传返回的文件列表发起任务（通过uuid关联），不依赖列表匹配，避免"未找到对应任务"误判
     const filesToTranslate = [...form.value.files]
     
     console.log(`实际需要翻译的文件数量: ${filesToTranslate.length}/${form.value.files.length}`)
+    
+    // 验证所有文件都有必要信息
+    const invalidFiles = filesToTranslate.filter(file => !file.uuid || !file.file_name)
+    if (invalidFiles.length > 0) {
+      console.error('发现无效文件（缺少 uuid 或 file_name）:', invalidFiles)
+      ElMessage.error(`有 ${invalidFiles.length} 个文件信息不完整，请重新上传`)
+      return
+    }
     
     let successCount = 0
     let failCount = 0
     let skipCount = form.value.files.length - filesToTranslate.length
     
+    // 先显示批量翻译开始提示
+    if (filesToTranslate.length > 0) {
+      ElMessage.info({
+        message: `正在启动 ${filesToTranslate.length} 个文件的翻译任务...`,
+        duration: 2000
+      })
+    }
+    
+    // 在批量启动开始前，一次性将所有任务添加到自动启动集合中，禁用所有重试按钮
+    filesToTranslate.forEach(file => {
+      if (file.uuid) {
+        autoStartingTasks.value.add(file.uuid)
+      }
+    })
+    
     // 逐个启动翻译任务
     for (let i = 0; i < filesToTranslate.length; i++) {
       const file = filesToTranslate[i]
       
+      // 检查文件必要信息
+      if (!file.uuid) {
+        console.error(`文件 ${i + 1}/${filesToTranslate.length} 缺少 uuid:`, file)
+        failCount++
+        // 注意：如果缺少 uuid，理论上不应该在集合中，但为了安全起见，尝试移除
+        // 由于没有 uuid，无法从集合中移除，这是正常的
+        continue
+      }
+      
+      if (!file.file_name) {
+        console.error(`文件 ${i + 1}/${filesToTranslate.length} 缺少 file_name:`, file)
+        failCount++
+        // 如果缺少 file_name，从自动启动集合中移除
+        autoStartingTasks.value.delete(file.uuid)
+        continue
+      }
+      
       try {
-        // 准备翻译参数
+        // 准备翻译参数（确保所有必需参数都存在）
         const translateParams = {
           ...templateConfig,
+          // 文件相关参数（每个文件不同）
           uuid: file.uuid,
           file_name: file.file_name,
           size: file.size || 0
         }
+        
+        // 最终验证：确保所有必需参数都存在且不为空
+        const requiredParams = ['server', 'model', 'lang', 'uuid', 'prompt', 'threads', 'file_name']
+        const missingParams = requiredParams.filter(param => {
+          const value = translateParams[param]
+          return !value || (typeof value === 'string' && !value.trim())
+        })
+        
+        if (missingParams.length > 0) {
+          console.error(`文件 ${i + 1}/${filesToTranslate.length} 缺少必需参数:`, missingParams, 'translateParams:', translateParams)
+          failCount++
+          // 如果缺少必需参数，从自动启动集合中移除
+          autoStartingTasks.value.delete(file.uuid)
+          continue
+        }
+        
+        console.log(`准备启动文件 ${i + 1}/${filesToTranslate.length} 的翻译任务:`, {
+          filename: file.file_name,
+          uuid: file.uuid,
+          lang: translateParams.lang,  // 特别记录 lang 参数
+          params: translateParams
+        })
+        
+        // 注意：任务已在循环开始前添加到自动启动集合中，这里不需要重复添加
         
         // 启动翻译任务
         const res = await transalteFile(translateParams)
         console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动响应:`, file.file_name, res)
         
         if (res.code === 200) {
+          // 检查返回的状态
+          const taskStatus = res.data?.status || 'unknown'
+          
+          // 如果状态是 'none'，说明任务没有被启动，可能是参数问题
+          if (taskStatus === 'none') {
+            console.error(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动后状态仍为 'none':`, file.file_name, res)
+            failCount++
+            // 任务启动失败，从自动启动集合中移除
+            autoStartingTasks.value.delete(file.uuid)
+            ElMessage.warning({
+              message: `任务 ${file.file_name} 启动失败，状态异常`,
+              duration: 3000
+            })
+            continue
+          }
+          
           successCount++
-          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动成功:`, file.file_name, '状态:', res.data.status)
+          console.log(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动成功:`, file.file_name, '状态:', taskStatus)
           
           // 检查是否进入队列
-          if (res.data.status === 'queued') {
+          if (taskStatus === 'queued') {
             console.log(`文件 ${file.file_name} 已加入队列`)
-          } else if (res.data.status === 'started' || res.data.status === 'process') {
+            // 如果任务被加入队列，立即刷新一次列表，让用户看到状态变化
+            await getTranslatesData(1)
+          } else if (taskStatus === 'started' || taskStatus === 'process') {
             console.log(`文件 ${file.file_name} 已直接启动`)
+            // 如果任务直接启动，也刷新一次列表，确保任务在列表中
+            await getTranslatesData(1)
+          } else {
+            // 其他状态，记录日志
+            console.warn(`文件 ${file.file_name} 返回了未知状态:`, taskStatus)
           }
           
           // 启动进度查询（使用返回的uuid或原有的uuid）
+          // 注意：在刷新列表后再调用 process，确保任务在列表中
           const taskUuid = res.data.uuid || file.uuid
           if (taskUuid) {
-            process(taskUuid)
+            // 任务启动成功，从自动启动集合中移除（允许用户手动重试）
+            autoStartingTasks.value.delete(file.uuid)
+            
+            // 确保列表已刷新后再调用 process
+            // 如果列表为空，等待一下再调用，给列表刷新时间
+            if (!translatesData.value || translatesData.value.length === 0) {
+              // 列表为空，等待一下再调用
+              setTimeout(() => {
+                if (translatesData.value && translatesData.value.length > 0) {
+                  process(taskUuid)
+                }
+              }, 500)
+            } else {
+              // 列表不为空，直接调用
+              process(taskUuid)
+            }
+          } else {
+            // 如果没有uuid，从自动启动集合中移除
+            autoStartingTasks.value.delete(file.uuid)
           }
           
           // 如果不是最后一个文件，等待一下再启动下一个（避免API限流）
@@ -870,49 +1104,126 @@ async function startBatchTranslation() {
           }
         } else {
           failCount++
-          console.error(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动失败:`, file.file_name, res)
+          // 任务启动失败，从自动启动集合中移除
+          autoStartingTasks.value.delete(file.uuid)
+          const errorMsg = res.message || res.data?.message || '未知错误'
+          console.error(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动失败:`, file.file_name, {
+            code: res.code,
+            message: errorMsg,
+            response: res
+          })
+          // 显示错误信息，让用户知道哪个文件启动失败
+          ElMessage.error({
+            message: `任务 ${file.file_name} 启动失败: ${errorMsg}`,
+            duration: 5000
+          })
         }
       } catch (error) {
         failCount++
-        console.error(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动异常:`, file.file_name, error)
+        // 任务启动异常，从自动启动集合中移除
+        autoStartingTasks.value.delete(file.uuid)
+        const errorMsg = error?.response?.data?.message || error?.message || '网络错误'
+        console.error(`文件 ${i + 1}/${filesToTranslate.length} 翻译任务启动异常:`, file.file_name, {
+          error: errorMsg,
+          fullError: error
+        })
+        // 显示错误信息，让用户知道哪个文件启动失败
+        ElMessage.error({
+          message: `任务 ${file.file_name} 启动异常: ${errorMsg}`,
+          duration: 5000
+        })
       }
     }
     
-    // 显示批量启动结果
-    let message = `批量翻译任务启动完成！`
+    // 刷新翻译列表，确保新任务显示在最前面（在显示结果前先刷新）
     if (successCount > 0) {
-      message += `成功: ${successCount} 个`
-    }
-    if (failCount > 0) {
-      message += `，失败: ${failCount} 个`
-    }
-    if (skipCount > 0) {
-      message += `，跳过: ${skipCount} 个（已完成或进行中）`
-    }
-    
-    if (successCount > 0) {
-      ElMessage.success({
-        message: message,
-        duration: 5000
-      })
-      
-      // 刷新翻译列表，确保新任务显示在最前面
+      // 立即刷新一次，显示所有任务的最新状态
       await getTranslatesData(1)
       
+      // 等待更长时间，让队列管理器有时间启动队列中的任务
+      // 队列管理器通常每几秒检查一次，所以等待时间要足够
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      
+      // 再次刷新列表，获取最新状态（包括队列管理器启动的任务）
+      await getTranslatesData(1)
+      
+      // 再等待一段时间，确保所有任务状态都已更新
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // 最后一次刷新，确保状态准确
+      await getTranslatesData(1)
+      
+      // 根据实际任务状态统计
+      const startedUuids = filesToTranslate
+        .filter(file => file.uuid)
+        .map(file => file.uuid)
+      
+      const actualTasks = translatesData.value.filter(item => 
+        startedUuids.includes(item.uuid)
+      )
+      
+      const doneCount = actualTasks.filter(item => item.status === 'done').length
+      const processCount = actualTasks.filter(item => 
+        item.status === 'process' || item.status === 'changing' || item.status === 'queued'
+      ).length
+      const failedCount = actualTasks.filter(item => item.status === 'failed').length
+      
+      // 根据实际状态显示提示
+      if (successCount > 0) {
+        let message = ''
+        if (doneCount > 0 && processCount === 0) {
+          // 全部已完成
+          message = `${doneCount} 个文件翻译已完成`
+          ElMessage.success({
+            message: message,
+            duration: 3000
+          })
+        } else if (doneCount > 0 && processCount > 0) {
+          // 部分已完成，部分进行中
+          message = `${doneCount} 个已完成，${processCount} 个进行中`
+          ElMessage.success({
+            message: message,
+            duration: 3000
+          })
+        } else if (processCount > 0) {
+          // 全部进行中
+          message = `已启动 ${processCount} 个翻译任务`
+          ElMessage.success({
+            message: message,
+            duration: 3000
+          })
+        } else {
+          // 其他情况
+          message = `已启动 ${successCount} 个翻译任务`
+          ElMessage.success({
+            message: message,
+            duration: 3000
+          })
+        }
+        
+        if (failCount > 0) {
+          ElMessage.warning({
+            message: `${failCount} 个任务启动失败`,
+            duration: 3000
+          })
+        }
+      }
+      
       // 批量翻译任务启动成功后才清空上传文件列表
+      // 只要有文件成功启动，就清空所有文件列表（包括失败的文件）
       uploadRef.value.clearFiles()
       form.value.files = []  // 清空表单文件数组
       areAllFilesUploaded.value = false  // 重置状态（文件列表已清空）
     } else if (failCount > 0) {
       ElMessage.error({
-        message: message,
+        message: `翻译任务启动失败: ${failCount} 个文件`,
         duration: 5000
       })
       // 全部失败时不清空文件列表，让用户可以重试
     } else {
       ElMessage.warning({
-        message: message,
-        duration: 5000
+        message: '没有可启动的翻译任务',
+        duration: 3000
       })
       // 没有成功也没有失败（全部跳过）时，也不清空文件列表
     }
@@ -1023,13 +1334,30 @@ async function handleTranslate(transform) {
   console.log('当前表单数据:', form.value)
   console.log('当前服务类型:', currentServiceType.value)
   
-  // 确保语言字段正确设置
-  if (currentServiceType.value === 'ai' && translateStore.aiServer.lang) {
-    form.value.lang = translateStore.aiServer.lang
-    // 如果langs数组为空，则使用lang设置
-    if (!form.value.langs || form.value.langs.length === 0) {
-      form.value.langs = [translateStore.aiServer.lang]
+  // 确保语言字段正确设置（必须设置，不能为空）
+  if (currentServiceType.value === 'ai') {
+    if (translateStore.aiServer.lang && translateStore.aiServer.lang.trim()) {
+      form.value.lang = translateStore.aiServer.lang
+      // 如果langs数组为空，则使用lang设置
+      if (!form.value.langs || form.value.langs.length === 0) {
+        form.value.langs = [translateStore.aiServer.lang]
+      }
+    } else {
+      // 如果语言未设置，阻止翻译
+      ElMessage.error('请先选择目标语言')
+      translateButtonState.value.isLoading = false
+      translateButtonState.value.disabled = false
+      return
     }
+  }
+  
+  // 最终验证：确保lang字段存在且不为空
+  if (!form.value.lang || !form.value.lang.trim()) {
+    console.error('目标语言参数缺失或为空:', form.value)
+    ElMessage.error('请先选择目标语言')
+    translateButtonState.value.isLoading = false
+    translateButtonState.value.disabled = false
+    return
   }
   
   // 1.判断是否上传文件
@@ -1166,6 +1494,16 @@ async function handleTranslate(transform) {
     } else {
       // 单个文件翻译（保持原有逻辑）
       console.log('翻译表单：', form.value)
+      
+      // 最终验证：确保lang字段存在且不为空
+      if (!form.value.lang || !form.value.lang.trim()) {
+        console.error('目标语言参数缺失或为空:', form.value)
+        ElMessage.error('请先选择目标语言')
+        translateButtonState.value.isLoading = false
+        translateButtonState.value.disabled = false
+        return
+      }
+      
       // 明确传递PDF翻译方式，避免后端回退默认值
       form.value.pdf_translate_method = translateStore.common?.pdf_translate_method || 'direct'
       
@@ -1181,6 +1519,8 @@ async function handleTranslate(transform) {
             message: '文件信息不完整，请重新上传',
             type: 'error',
           })
+          translateButtonState.value.isLoading = false
+          translateButtonState.value.disabled = false
           return
         }
       } else {
@@ -1189,6 +1529,8 @@ async function handleTranslate(transform) {
           message: '请先上传文件',
           type: 'warning',
         })
+        translateButtonState.value.isLoading = false
+        translateButtonState.value.disabled = false
         return
       }
       
@@ -2360,6 +2702,12 @@ onUnmounted(() => {
 .icon_handle {
   margin-right: 10px;
   cursor: pointer; /* 鼠标悬停时显示手型 */
+  
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed; /* 禁用时显示禁止图标 */
+    pointer-events: none; /* 禁用点击事件 */
+  }
 }
 
 /* 上传限制提示样式 */
