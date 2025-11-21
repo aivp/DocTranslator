@@ -137,12 +137,16 @@ console.log(globalApi)
 function createRequest(service: AxiosInstance) {
   return function <T>(config: AxiosRequestConfig): Promise<T> {
     const token = getToken()
+    // 只在 token 存在时才设置 Authorization 头
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+    
     const defaultConfig = {
-      headers: {
-        // 携带 Token - 使用标准的Bearer格式
-        Authorization: token ? `Bearer ${token}` : undefined,
-        'Content-Type': 'application/json',
-      },
+      headers,
       timeout: 10000,
       //本地开发环境开发，接口配置修改.env.development 正式环境读取动态变量
       baseURL: '/api/admin',
