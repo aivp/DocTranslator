@@ -331,7 +331,7 @@ class DockerOkapiIntegration:
             
             duration = time.time() - start_time
             logger.info(f"Tikal 合并完成，用时: {duration:.2f}秒")
-            
+                                                                                                                                                                                                                                                                                   
             if result.returncode == 0:
                 # 检查目录中生成的所有文件
                 logger.info(f"Tikal 合并成功，检查输出文件...")
@@ -1025,10 +1025,10 @@ class OkapiWordTranslator:
                 translated_xliff, translations
             )
             
-            if success:
+            # if success:
                 # 翻译成功日志已关闭（调试时可打开）
                 # logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元")
-                pass
+                # pass
             
             return success
             
@@ -1586,7 +1586,7 @@ class OkapiPptxTranslator:
                 translated_xliff, translations
             )
             
-            if success:
+            if success: 
                 # 翻译成功日志已关闭（调试时可打开）
                 # logger.info(f"✅ XLIFF 内容翻译完成，共翻译 {len(translations)} 个单元（使用占位符）")
                 pass
@@ -1595,7 +1595,7 @@ class OkapiPptxTranslator:
             
         except Exception as e:
             logger.error(f"翻译 XLIFF 内容失败: {e}")
-            return False
+            return False    
 
 
 # 便捷函数
@@ -1604,7 +1604,7 @@ def create_okapi_translator(okapi_home: str = "/opt/okapi", use_placeholders: bo
     return OkapiWordTranslator(okapi_home, use_placeholders)
 
 
-def verify_okapi_installation(okapi_home: str = "/opt/okapi") -> bool:
+def verify_okapi_installation(okapi_home: str = "/opt/okapi") -> bool:  
     """验证 Okapi 安装是否正确"""
     try:
         # 检查目录是否存在

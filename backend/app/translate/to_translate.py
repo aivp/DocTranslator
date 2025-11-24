@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# import tiktoken
+import tiktoken
 import datetime
 import hashlib
 import logging
@@ -50,8 +50,12 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
         app_key = trans.get('app_key', '')
         
         # 如果没有传递target_lang参数，从trans中获取
-        if target_lang is None:
-            target_lang = trans.get('lang', 'zh')
+        if target_lang is None or not target_lang or not str(target_lang).strip():
+            target_lang = trans.get('lang')
+            # 必须使用前端传值，如果没有则报错
+            if not target_lang or not str(target_lang).strip():
+                logging.error(f"目标语言参数缺失或为空: trans={trans}")
+                raise ValueError("目标语言参数(lang)缺失或为空，必须由前端传递")
         
         # 根据服务器类型选择翻译方法
         if server == 'baidu':
@@ -74,7 +78,11 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                 prompt_id=trans.get('prompt_id'),
                 texts=None,  # translate_text函数中没有texts数组
                 index=None,   # translate_text函数中没有index
-                api_key=trans.get('api_key')  # 从配置中获取API Key
+                api_key=trans.get('api_key'),  # 从配置中获取API Key
+                translate_id=trans.get('id'),
+                customer_id=trans.get('customer_id'),
+                tenant_id=trans.get('tenant_id'),
+                uuid=trans.get('uuid')
             )
         else:
             # OpenAI 翻译 (兼容新旧版本)
@@ -121,7 +129,11 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                         prompt_id=trans.get('prompt_id'),
                         texts=None,  # 备用方案中没有texts数组
                         index=None,   # 备用方案中没有index
-                        api_key=trans.get('api_key')  # 从配置中获取API Key
+                        api_key=trans.get('api_key'),  # 从配置中获取API Key
+                        translate_id=trans.get('id'),
+                        customer_id=trans.get('customer_id'),
+                        tenant_id=trans.get('tenant_id'),
+                        uuid=trans.get('uuid')
                     )
                 except:
                     return text  # 最后返回原文
@@ -267,7 +279,8 @@ def get(trans, event, texts, index):
                             
                             # 记录术语库处理开始时间
                             term_start_time = time.time()
-                            filtered_terms = optimize_terms_for_api(old_text, preloaded_terms, max_terms=50)
+                            comparison_id = trans.get('comparison_id')
+                            filtered_terms = optimize_terms_for_api(old_text, preloaded_terms, max_terms=10, comparison_id=str(comparison_id) if comparison_id else None)
                             term_end_time = time.time()
                             term_duration = term_end_time - term_start_time
                             
@@ -297,7 +310,7 @@ def get(trans, event, texts, index):
                             # 使用术语筛选功能，根据当前文本内容筛选相关术语
                             # 记录术语库处理开始时间
                             term_start_time = time.time()
-                            filtered_terms_str = get_filtered_terms_for_text(old_text, comparison_id, max_terms=50)
+                            filtered_terms_str = get_filtered_terms_for_text(old_text, comparison_id, max_terms=10)
                             term_end_time = time.time()
                             term_duration = term_end_time - term_start_time
                             
@@ -349,14 +362,49 @@ def get(trans, event, texts, index):
                                     logging.error(f"查询术语库 {comp_id} 时发生异常: {str(e)}")
                                     continue
                             
-                            # 转换为tm_list格式
+                            # 转换为tm_list格式（需要筛选，避免传入过多术语导致超时）
                             if all_terms:
-                                tm_list = []
-                                for source, target in all_terms.items():
-                                    tm_list.append({
-                                        "source": source,
-                                        "target": target
-                                    })
+                                # 使用术语筛选功能，只选择最相关的少量术语
+                                try:
+                                    from .term_filter import optimize_terms_for_api
+                                    
+                                    # 记录术语库处理开始时间
+                                    term_start_time = time.time()
+                                    # 统一限制：最多10个术语（避免API超时）
+                                    max_terms = 10
+                                    
+                                    filtered_terms = optimize_terms_for_api(old_text, all_terms, max_terms=max_terms, comparison_id=str(comparison_id) if comparison_id else None)
+                                    term_end_time = time.time()
+                                    term_duration = term_end_time - term_start_time
+                                    
+                                    if filtered_terms:
+                                        logging.info(f"📚 术语库筛选用时: {term_duration:.3f}秒, 原始: {len(all_terms)}条, 筛选后: {len(filtered_terms)}条")
+                                        # 转换为tm_list格式
+                                        tm_list = []
+                                        for term in filtered_terms:
+                                            tm_list.append({
+                                                "source": term['source'],
+                                                "target": term['target']
+                                            })
+                                    else:
+                                        logging.info("没有找到相关术语")
+                                        tm_list = []
+                                        
+                                except Exception as e:
+                                    logging.error(f"术语筛选失败: {str(e)}，回退到原始逻辑（但限制数量）")
+                                    # 如果筛选失败，至少限制数量，避免传入过多术语
+                                    tm_list = []
+                                    term_count = 0
+                                    max_fallback_terms = 10  # 回退时最多10个术语（统一限制）
+                                    for source, target in all_terms.items():
+                                        if term_count >= max_fallback_terms:
+                                            break
+                                        tm_list.append({
+                                            "source": source,
+                                            "target": target
+                                        })
+                                        term_count += 1
+                                    logging.warning(f"⚠️ 使用回退逻辑，限制为前{len(tm_list)}个术语")
                                 
                                 # logging.info(f"原始术语库处理完成，共 {len(tm_list)} 条术语")
                         else:
@@ -389,14 +437,40 @@ def get(trans, event, texts, index):
                         logging.info(f"✅ 跳过表格分隔行翻译: {element_type}, 内容: {repr(text['text'])}")
                     elif model == 'qwen-mt-plus':
                         logging.info(f"🔍 调用 qwen_translate (MD文件): texts={texts is not None}, index={index}")
-                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), texts=texts, index=index, tenant_id=trans.get('tenant_id'), api_key=trans.get('api_key'))
+                        translate_id_val = trans.get('id')
+                        customer_id_val = trans.get('customer_id')
+                        tenant_id_val = trans.get('tenant_id')
+                        uuid_val = trans.get('uuid')
+                        logging.debug(f"🔍 Token记录参数: translate_id={translate_id_val}, customer_id={customer_id_val}, tenant_id={tenant_id_val}, uuid={uuid_val}")
+                        content = qwen_translate(
+                            text['text'], target_lang, source_lang="auto", 
+                            tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), 
+                            texts=texts, index=index, tenant_id=tenant_id_val, 
+                            api_key=trans.get('api_key'),
+                            translate_id=translate_id_val,
+                            customer_id=customer_id_val,
+                            uuid=uuid_val
+                        )
                     else:
                         content = req(text['text'], target_lang, model, prompt, True)
                 else:
                     # 统一处理：只要是qwen-mt-plus模型，都使用带上下文的翻译
                     if model == 'qwen-mt-plus':
                         logging.info(f"🔍 调用 qwen_translate (统一处理): texts={texts is not None}, index={index}")
-                        content = qwen_translate(text['text'], target_lang, source_lang="auto", tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), texts=texts, index=index, tenant_id=trans.get('tenant_id'), api_key=trans.get('api_key'))
+                        translate_id_val = trans.get('id')
+                        customer_id_val = trans.get('customer_id')
+                        tenant_id_val = trans.get('tenant_id')
+                        uuid_val = trans.get('uuid')
+                        logging.debug(f"🔍 Token记录参数: translate_id={translate_id_val}, customer_id={customer_id_val}, tenant_id={tenant_id_val}, uuid={uuid_val}")
+                        content = qwen_translate(
+                            text['text'], target_lang, source_lang="auto", 
+                            tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), 
+                            texts=texts, index=index, tenant_id=tenant_id_val, 
+                            api_key=trans.get('api_key'),
+                            translate_id=translate_id_val,
+                            customer_id=customer_id_val,
+                            uuid=uuid_val
+                        )
                     else:
                         # 其他模型：根据是否有上下文选择翻译方式
                         if 'context_text' in text and text.get('context_type') == 'body':
@@ -810,6 +884,13 @@ def complete(trans, text_count, spend_time):
     db.execute(
         "update translate set status='done',end_at=%s,process=100,target_filesize=%s,word_count=%s,target_filepath=%s where id=%s",
         end_time, target_filesize, text_count, target_filepath, trans['id'])
+    
+    # 汇总token使用情况
+    try:
+        from app.utils.token_recorder import aggregate_tokens_for_translate
+        aggregate_tokens_for_translate(trans['id'])
+    except Exception as e:
+        logging.warning(f"⚠️ 汇总token使用失败: translate_id={trans['id']}, 错误: {e}")
 
 
 def error(translate_id, message):

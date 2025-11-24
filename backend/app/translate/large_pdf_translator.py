@@ -245,6 +245,146 @@ class LargePDFTranslator:
         # 线程安全锁
         self.lock = threading.Lock()
     
+    def _check_textbox_overlap(self, textbox, other_bboxes, min_gap=2.0):
+        """
+        检查文本框是否与其他文本框重叠
+        
+        Args:
+            textbox: 要检查的文本框Rect对象
+            other_bboxes: 其他文本框的边界列表 [[x0, y0, x1, y1], ...]
+            min_gap: 最小间距（像素），默认2.0
+        
+        Returns:
+            bool: True表示有重叠，False表示无重叠
+        """
+        try:
+            for other_bbox in other_bboxes:
+                other_rect = fitz.Rect(other_bbox[0], other_bbox[1], other_bbox[2], other_bbox[3])
+                # 检查是否有重叠（包括最小间距）
+                if textbox.intersects(other_rect):
+                    # 计算重叠区域
+                    intersection = textbox & other_rect
+                    if intersection.width > min_gap and intersection.height > min_gap:
+                        return True
+            return False
+        except Exception as e:
+            logger.warning(f"检查文本框重叠失败: {e}")
+            return False
+    
+    def _adjust_textbox_for_translation(self, original_text, translated_text, font_size, bbox, box_width, box_height, other_bboxes=None):
+        """
+        根据翻译后文本长度调整文本框大小和字体大小，避免与其他文本框重叠
+        
+        Args:
+            original_text: 原始文本
+            translated_text: 翻译后的文本
+            font_size: 原始字体大小
+            bbox: 原始文本框边界 [x0, y0, x1, y1]
+            box_width: 文本框宽度
+            box_height: 文本框高度
+            other_bboxes: 同一页面上其他文本框的边界列表，用于检测重叠
+        
+        Returns:
+            tuple: (调整后的字体大小, 调整后的文本框Rect对象)
+        """
+        try:
+            # 计算文本长度比例
+            original_length = len(original_text.strip()) if original_text else 0
+            translated_length = len(translated_text.strip()) if translated_text else 0
+            
+            if original_length == 0:
+                # 如果没有原始文本，使用原始设置
+                return font_size, fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+            
+            length_ratio = translated_length / original_length if original_length > 0 else 1.0
+            
+            # 估算每行字符数（中文字符按字体大小，英文字符按字体大小的0.6倍）
+            chars_per_line = max(1, int(box_width / (font_size * 0.6)))
+            
+            # 策略1: 如果翻译后文本变长，先尝试缩小字体
+            adjusted_font_size = font_size
+            adjusted_height = box_height
+            
+            if length_ratio > 1.2:  # 文本长度增加超过20%
+                # 根据长度比例缩小字体，但不要小于原始大小的60%
+                adjusted_font_size = max(font_size * 0.6, font_size / length_ratio)
+                adjusted_font_size = int(adjusted_font_size)
+                
+                # 重新计算需要的行数
+                new_chars_per_line = max(1, int(box_width / (adjusted_font_size * 0.6)))
+                new_translated_lines = max(1, int(translated_length / new_chars_per_line) + 1)
+                new_line_height = adjusted_font_size * 1.2
+                needed_height = new_translated_lines * new_line_height
+                
+                # 如果缩小字体后还是放不下，适当增加文本框高度
+                if needed_height > box_height:
+                    # 尝试逐步增加高度，检查是否与其他文本框重叠
+                    max_height_increase = box_height * 0.5  # 最多增加50%高度
+                    test_height = min(needed_height, box_height + max_height_increase)
+                    
+                    # 如果有其他文本框信息，检查重叠
+                    if other_bboxes:
+                        test_textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[1] + test_height)
+                        if self._check_textbox_overlap(test_textbox, other_bboxes):
+                            # 如果会重叠，进一步缩小字体而不是增加高度
+                            # 计算不重叠的最大高度
+                            max_safe_height = box_height
+                            for other_bbox in other_bboxes:
+                                if other_bbox[1] > bbox[1]:  # 只检查下方的文本框
+                                    # 计算到下方文本框的距离
+                                    gap = other_bbox[1] - bbox[3]
+                                    if gap > 0:
+                                        max_safe_height = min(max_safe_height, box_height + gap - 2.0)
+                            
+                            # 如果安全高度不够，进一步缩小字体
+                            if max_safe_height < needed_height:
+                                # 根据需要的行数和安全高度，计算合适的字体大小
+                                safe_lines = max(1, int(max_safe_height / (adjusted_font_size * 1.2)))
+                                if safe_lines < new_translated_lines:
+                                    # 需要进一步缩小字体
+                                    adjusted_font_size = max(font_size * 0.5, adjusted_font_size * (safe_lines / new_translated_lines))
+                                    adjusted_font_size = int(adjusted_font_size)
+                                    adjusted_height = max_safe_height
+                                else:
+                                    adjusted_height = max_safe_height
+                            else:
+                                adjusted_height = test_height
+                        else:
+                            adjusted_height = test_height
+                    else:
+                        # 没有其他文本框信息，保守处理：最多增加30%高度
+                        adjusted_height = min(needed_height, box_height * 1.3)
+                else:
+                    adjusted_height = needed_height
+            elif length_ratio < 0.8:  # 文本长度减少超过20%
+                # 如果文本变短，可以适当增大字体，但不要超过原始大小的120%
+                adjusted_font_size = min(font_size * 1.2, font_size / length_ratio)
+                adjusted_font_size = int(adjusted_font_size)
+            
+            # 创建调整后的文本框
+            # 保持左上角不变，调整右下角
+            adjusted_textbox = fitz.Rect(
+                bbox[0], 
+                bbox[1], 
+                bbox[2], 
+                bbox[1] + adjusted_height
+            )
+            
+            # 最后再次检查重叠（如果提供了其他文本框信息）
+            if other_bboxes and self._check_textbox_overlap(adjusted_textbox, other_bboxes):
+                # 如果仍然重叠，使用原始大小，但缩小字体
+                logger.warning(f"调整后的文本框仍会重叠，使用原始大小并缩小字体")
+                adjusted_textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                if length_ratio > 1.2:
+                    adjusted_font_size = max(font_size * 0.5, font_size / length_ratio)
+                    adjusted_font_size = int(adjusted_font_size)
+            
+            return adjusted_font_size, adjusted_textbox
+            
+        except Exception as e:
+            logger.warning(f"调整文本框失败，使用原始设置: {e}")
+            return font_size, fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+    
     def __del__(self):
         """清理临时文件"""
         if hasattr(self, 'temp_dir') and os.path.exists(self.temp_dir):
@@ -417,6 +557,7 @@ class LargePDFTranslator:
                     if original_text != translated_text:
                         # 翻译成功日志已关闭（调试时可打开）
                         # logger.info(f"翻译成功 ({i+1}/{len(texts)}): '{original_text[:20]}...' -> '{translated_text[:20]}...'")
+                        pass  # if 块不能为空，添加 pass 占位
                     else:
                         logger.warning(f"翻译结果与原文相同 ({i+1}/{len(texts)}): '{original_text[:20]}...'")
                 
@@ -603,7 +744,10 @@ class LargePDFTranslator:
                 redact_rects = []
                 text_insertions = []
                 
-                for text_info in page_data["texts"]:
+                # 收集当前页面的所有文本框边界，用于重叠检测
+                all_bboxes = [text_info["bbox"] for text_info in page_data["texts"] if text_info.get("text", "").strip()]
+                
+                for text_idx, text_info in enumerate(page_data["texts"]):
                     # 使用翻译后的文本
                     text = text_info["text"]
                     if text and text.strip():
@@ -628,19 +772,31 @@ class LargePDFTranslator:
                         else:
                             color = (0, 0, 0)  # 默认黑色
                         
-                        # 创建文本框矩形
-                        textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                        # 获取原始文本（如果存在）用于计算长度比例
+                        original_text = text_info.get("original_text", text)
                         
-                        # 收集需要删除的区域（避免文本重叠）
-                        redact_rects.append(textbox)
+                        # 计算文本框尺寸
+                        box_width = bbox[2] - bbox[0]
+                        box_height = bbox[3] - bbox[1]
+                        
+                        # 获取其他文本框的边界（排除当前文本框）
+                        other_bboxes = [b for i, b in enumerate(all_bboxes) if i != text_idx]
+                        
+                        # 根据翻译后文本长度调整文本框和字体大小，避免重叠
+                        adjusted_font_size, adjusted_textbox = self._adjust_textbox_for_translation(
+                            original_text, text, font_size, bbox, box_width, box_height, other_bboxes
+                        )
+                        
+                        # 收集需要删除的区域（避免文本重叠，使用原始文本框）
+                        redact_rects.append(fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3]))
                         
                         # 准备HTML文本
                         html_text = f"""
                         <div style="
-                            font-size: {font_size}px;
+                            font-size: {adjusted_font_size}px;
                             color: rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)});
                             font-family: sans-serif;
-                            line-height: 1.0;
+                            line-height: 1.2;
                             margin: 0;
                             padding: 0;
                             background: none;
@@ -655,7 +811,7 @@ class LargePDFTranslator:
                         """
                         
                         text_insertions.append({
-                            'textbox': textbox,
+                            'textbox': adjusted_textbox,
                             'html_text': html_text,
                             'text': text
                         })

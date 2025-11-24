@@ -68,36 +68,41 @@ class VideoQueueManager:
     
     def _process_queue(self):
         """处理队列中的视频"""
+        app = self._get_app()
         try:
-            app = self._get_app()
             with app.app_context():
-                # 定期清理僵尸任务（每60次循环清理一次，约10分钟）
-                if not hasattr(self, '_cleanup_counter'):
-                    self._cleanup_counter = 0
-                self._cleanup_counter += 1
-                if self._cleanup_counter >= 60:
-                    self._cleanup_counter = 0
-                    self._cleanup_zombie_tasks()
-                
-                # 获取当前正在处理的视频数
-                current_processing = self._get_current_processing_count()
-                
-                # 如果还有空位，启动队列中的任务
-                if current_processing < self.max_concurrent_videos:
-                    # 需要启动的任务数
-                    slots_available = self.max_concurrent_videos - current_processing
+                from app.extensions import db
+                try:
+                    # 定期清理僵尸任务（每60次循环清理一次，约10分钟）
+                    if not hasattr(self, '_cleanup_counter'):
+                        self._cleanup_counter = 0
+                    self._cleanup_counter += 1
+                    if self._cleanup_counter >= 60:
+                        self._cleanup_counter = 0
+                        self._cleanup_zombie_tasks()
                     
-                    # 获取队列中的任务，按创建时间排序
-                    queued_videos = self._get_queued_videos(slots_available)
+                    # 获取当前正在处理的视频数
+                    current_processing = self._get_current_processing_count()
                     
-                    for video in queued_videos:
-                        try:
-                            self._start_video_translation(video)
-                            logger.info(f"从队列启动视频翻译: video_id={video.id}, filename={video.filename}")
-                        except Exception as e:
-                            logger.error(f"启动视频翻译失败: video_id={video.id}, error={str(e)}")
+                    # 如果还有空位，启动队列中的任务
+                    if current_processing < self.max_concurrent_videos:
+                        # 需要启动的任务数
+                        slots_available = self.max_concurrent_videos - current_processing
+                        
+                        # 获取队列中的任务，按创建时间排序
+                        queued_videos = self._get_queued_videos(slots_available)
+                        
+                        for video in queued_videos:
+                            try:
+                                self._start_video_translation(video)
+                                logger.info(f"从队列启动视频翻译: video_id={video.id}, filename={video.filename}")
+                            except Exception as e:
+                                logger.error(f"启动视频翻译失败: video_id={video.id}, error={str(e)}")
+                finally:
+                    # 确保会话被清理，释放连接
+                    db.session.remove()
         except Exception as e:
-            logger.error(f"处理视频队列异常: {str(e)}")
+            logger.error(f"处理视频队列异常: {str(e)}", exc_info=True)
     
     def _cleanup_zombie_tasks(self):
         """清理僵尸任务（超过6小时且没有akool_task_id的processing任务）"""

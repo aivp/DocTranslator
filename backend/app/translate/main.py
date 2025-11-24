@@ -39,6 +39,20 @@ def main():
     uuid=sys.argv[1]
     storage_path=sys.argv[2]
     trans=db.get("select * from translate where uuid=%s", uuid)
+    
+    # 验证必要字段
+    if not trans or not trans.get('id'):
+        logging.error(f"未找到翻译记录: uuid={uuid}")
+        sys.exit(1)
+    
+    # 验证lang字段不能为空（必须由前端传递）
+    lang_value = trans.get('lang', '').strip() if trans.get('lang') else ''
+    if not lang_value:
+        logging.error(f"翻译记录中lang字段缺失或为空: uuid={uuid}, trans={trans}")
+        # 更新任务状态为失败
+        db.execute("update translate set status='failed', failed_reason='目标语言参数(lang)缺失或为空' where uuid=%s", uuid)
+        sys.exit(1)
+    
     translate_id=trans['id']
     origin_filename=trans['origin_filename']
     origin_filepath=trans['origin_filepath']
@@ -174,6 +188,16 @@ def get_comparison(comparison_id):
             if all_terms:
                 logging.info(f"任务使用术语表ID: {comparison_id}")
                 # logging.info(f"总共合并了 {len(all_terms)} 条术语")
+                
+                # 如果术语库较大（>1000条），预建立倒排索引以提升性能
+                if len(all_terms) > 1000:
+                    try:
+                        from .term_filter import build_inverted_index
+                        build_inverted_index(all_terms, comparison_id)
+                        logging.info(f"已预建立倒排索引，术语库大小: {len(all_terms)}")
+                    except Exception as e:
+                        logging.warning(f"预建立倒排索引失败: {e}")
+                
                 return all_terms
             else:
                 logging.warning(f"任务术语表ID {comparison_id} 未找到内容")
@@ -185,14 +209,14 @@ def get_comparison(comparison_id):
         logging.info("任务未使用术语库")
         return None
 
-def get_filtered_terms_for_text(text, comparison_id, max_terms=50):
+def get_filtered_terms_for_text(text, comparison_id, max_terms=10):
     """
     根据文本内容获取筛选后的术语库
     
     Args:
         text: 要翻译的文本
         comparison_id: 术语库ID
-        max_terms: 最大术语数量
+        max_terms: 最大术语数量（会根据术语库大小自动调整）
         
     Returns:
         str: 筛选后的术语库字符串，格式与原有逻辑兼容
@@ -206,11 +230,14 @@ def get_filtered_terms_for_text(text, comparison_id, max_terms=50):
     if not all_terms:
         return None
     
+    # 统一限制：最多10个术语（避免API超时）
+    max_terms = min(10, max_terms)
+    
     # 导入术语筛选模块
     from .term_filter import optimize_terms_for_api
     
-    # 筛选相关术语
-    filtered_terms = optimize_terms_for_api(text, all_terms, max_terms)
+    # 筛选相关术语（传入comparison_id以使用缓存）
+    filtered_terms = optimize_terms_for_api(text, all_terms, max_terms, comparison_id=str(comparison_id) if comparison_id else None)
     
     if not filtered_terms:
         logging.info("没有找到相关术语")

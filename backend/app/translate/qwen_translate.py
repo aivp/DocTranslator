@@ -153,7 +153,7 @@ def handle_429_error(attempt, error_msg):
         logging.error("达到429错误最大重试次数 (100)，返回原文")
         return False  # 停止重试
 
-def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10, texts=None, index=None, tenant_id=None, api_key=None):
+def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10, texts=None, index=None, tenant_id=None, api_key=None, translate_id=None, customer_id=None, uuid=None):
     """
     使用阿里云Qwen-MT翻译模型进行翻译
     
@@ -189,6 +189,9 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
     start_time = time.time()
     # 翻译日志已关闭（调试时可打开）
     # logging.info(f"🚀 开始Qwen翻译: {text[:100]}... -> {target_language}")
+    
+    # 初始化术语表token数量（用于统计）
+    terms_tokens = 0
     
     for attempt in range(max_retries):
         try:
@@ -400,15 +403,42 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                     "target_lang": target_language
                 }
                 
+                # 计算术语表的token数量（用于统计）
+                terms_tokens = 0
+                
                 # 添加可选参数
-                if tm_list is not None:
+                # 注意：只有当术语列表非空时才添加terms参数（官方API不接受空列表）
+                if tm_list is not None and len(tm_list) > 0:
                     translation_options["terms"] = tm_list
-                    # 翻译日志已关闭（调试时可打开）
-                    # logging.info(f"📚 使用术语库: {len(tm_list)} 个术语")
-                elif terms is not None:
+                    logging.info(f"📚 使用术语库: {len(tm_list)} 个术语")
+                    
+                    # 计算术语表的token数量（将术语表序列化为JSON字符串后计算）
+                    try:
+                        import json
+                        from app.utils.token_counter import count_qwen_tokens
+                        terms_json = json.dumps(tm_list, ensure_ascii=False)
+                        terms_tokens = count_qwen_tokens(terms_json, "qwen-mt-plus")
+                        logging.debug(f"📊 术语表token数量: {terms_tokens}")
+                    except Exception as e:
+                        logging.warning(f"⚠️ 计算术语表token失败: {e}")
+                        
+                elif terms is not None and len(terms) > 0:
                     translation_options["terms"] = terms
-                    # 翻译日志已关闭（调试时可打开）
-                    # logging.info(f"📚 使用自定义术语: {len(terms)} 个术语")
+                    logging.info(f"📚 使用自定义术语: {len(terms)} 个术语")
+                    
+                    # 计算术语表的token数量
+                    try:
+                        import json
+                        from app.utils.token_counter import count_qwen_tokens
+                        terms_json = json.dumps(terms, ensure_ascii=False)
+                        terms_tokens = count_qwen_tokens(terms_json, "qwen-mt-plus")
+                        logging.debug(f"📊 术语表token数量: {terms_tokens}")
+                    except Exception as e:
+                        logging.warning(f"⚠️ 计算术语表token失败: {e}")
+                else:
+                    # 如果没有术语或术语列表为空，不添加terms参数
+                    if tm_list is not None or terms is not None:
+                        logging.debug(f"术语列表为空，不添加terms参数 (tm_list长度: {len(tm_list) if tm_list else 0}, terms长度: {len(terms) if terms else 0})")
                 
                 # 硬编码domains参数 - 工程车辆和政府文件领域
                 # translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
@@ -472,7 +502,35 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             # 计算API调用用时
             api_end_time = time.time()
             api_duration = api_end_time - api_start_time
+            api_duration_ms = int(api_duration * 1000)  # 转换为毫秒
             total_duration = api_end_time - start_time
+            
+            # 记录token使用情况（如果提供了必要的参数）
+            # customer_id 必须存在，不能为 None（用于溯源）
+            if translate_id and customer_id is not None and tenant_id is not None:
+                try:
+                    from app.utils.token_recorder import record_token_usage
+                    record_token_usage(
+                        translate_id=translate_id,
+                        customer_id=customer_id,
+                        tenant_id=tenant_id,
+                        uuid=uuid or "",
+                        completion=completion,
+                        input_text=text,
+                        translated_text=translated_text,
+                        model="qwen-mt-plus",
+                        server="qwen",
+                        api_duration_ms=api_duration_ms,
+                        status="success",
+                        retry_count=attempt,
+                        terms_tokens=terms_tokens  # 传入术语表的token数量
+                    )
+                except Exception as e:
+                    # token记录失败不应该影响翻译流程
+                    logging.warning(f"⚠️ 记录token使用失败: {e}", exc_info=True)
+            else:
+                # 记录参数缺失的情况，便于调试
+                logging.warning(f"⚠️ Token记录跳过: translate_id={translate_id}, customer_id={customer_id}, tenant_id={tenant_id}, uuid={uuid}")
             
             # 翻译成功日志已关闭（调试时可打开）
             # logging.info(f"✅ 翻译成功: {translated_text[:100]}...")
@@ -482,6 +540,30 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
         except Exception as e:
             error_msg = str(e)
             error_type = type(e).__name__
+            
+            # 记录失败的token使用（如果提供了必要的参数）
+            if translate_id and customer_id and tenant_id:
+                try:
+                    from app.utils.token_recorder import record_token_usage
+                    api_duration_ms = int((time.time() - api_start_time) * 1000) if 'api_start_time' in locals() else None
+                    record_token_usage(
+                        translate_id=translate_id,
+                        customer_id=customer_id,
+                        tenant_id=tenant_id,
+                        uuid=uuid or "",
+                        completion=None,  # 失败时没有completion对象
+                        input_text=text,
+                        translated_text=None,
+                        model="qwen-mt-plus",
+                        server="qwen",
+                        api_duration_ms=api_duration_ms,
+                        status="failed",
+                        error_message=f"{error_type}: {error_msg}",
+                        retry_count=attempt,
+                        terms_tokens=terms_tokens  # 传入术语表的token数量（即使失败也要统计）
+                    )
+                except Exception as record_error:
+                    logging.warning(f"⚠️ 记录失败token使用失败: {record_error}")
             
             logging.error(f"❌ Qwen翻译API调用失败 (尝试 {attempt + 1}/{max_retries})")
             logging.error(f"   错误类型: {error_type}")

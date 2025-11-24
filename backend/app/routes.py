@@ -208,6 +208,7 @@ def register_routes(api):
     api.add_resource(AdminEditSettingOtherResource, '/api/admin/setting/other')
     api.add_resource(AdminSettingSiteResource, '/api/admin/setting/site')
 
+
     # 系统文件存储管理
     api.add_resource(SystemStorageResource, '/api/admin/system/storages')
     

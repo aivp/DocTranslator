@@ -33,6 +33,9 @@ class Translate(db.Model):
     failed_reason = db.Column(db.Text)                              # 失败原因
     failed_count = db.Column(db.Integer, default=0)                 # 失败次数
     word_count = db.Column(db.Integer, default=0)                   # 字数统计
+    input_tokens = db.Column(db.BigInteger, default=0)              # 输入token总数（汇总）
+    output_tokens = db.Column(db.BigInteger, default=0)             # 输出token总数（汇总）
+    total_tokens = db.Column(db.BigInteger, default=0)              # 总token数（汇总，input + output）
     backup_model = db.Column(db.String(64), default='')             # 备用模型
     md5 = db.Column(db.String(32))                                  # 文件MD5
     type = db.Column(db.String(64), default='')                     # 译文类型

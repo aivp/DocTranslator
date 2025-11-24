@@ -89,15 +89,25 @@ def get_all(sql: str, *params) -> List[Dict[str, Any]]:
         return []
 
 def execute(sql: str, *params) -> bool:
-    """执行SQL语句（INSERT, UPDATE, DELETE）"""
+    """
+    执行SQL语句（INSERT, UPDATE, DELETE）
+    
+    注意：此函数每次调用都会创建新连接，适合低频调用。
+    如果需要频繁调用，考虑使用批量操作或连接复用。
+    """
     try:
         pool = get_simple_pool()
         with pool.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(sql, params)
-            conn.commit()
-            cursor.close()
-            return True
+            try:
+                cursor.execute(sql, params)
+                conn.commit()
+                return True
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
     except Exception as e:
         logger.error(f"❌ 执行SQL失败: {e}")
         return False

@@ -7,6 +7,7 @@ from flask_mail import Mail
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from app.utils.jwt_utils import configure_jwt_callbacks
+import logging
 
 # 初始化扩展实例
 
@@ -18,13 +19,16 @@ api = Api()
 db = SQLAlchemy()
 jwt = JWTManager()
 migrate = Migrate()
+
+logger = logging.getLogger(__name__)
+
 def init_extensions(app):
     """初始化所有扩展"""
     db.init_app(app)
     jwt.init_app(app)
     # 拦截jwt - 必须在jwt.init_app之后立即配置
     configure_jwt_callbacks(jwt)
-    print("✅ JWT回调函数已配置")  # 添加调试输出
+    logger.info("✅ JWT回调函数已配置")
     mail.init_app(app)
     migrate.init_app(app, db)
     
@@ -35,25 +39,22 @@ def init_extensions(app):
     api.init_app(app)
     
     # 为 Flask-RESTful 注册 JWT 异常处理器（必须在 api.init_app 之后）
-    from flask_jwt_extended.exceptions import RevokedTokenError, JWTExtendedException
+    from flask_jwt_extended.exceptions import RevokedTokenError, JWTExtendedException, NoAuthorizationError
     
-    # Flask-RESTful 使用 handle_error 方法注册异常处理器
+    # 使用 Flask 的 errorhandler 处理 JWT 异常（Flask-RESTful 路由中的异常也会被捕获）
+    @app.errorhandler(RevokedTokenError)
     def handle_revoked_token(e):
         return {"message": "账号已在其他设备登录，请重新登录", "code": 401}, 401
     
+    @app.errorhandler(NoAuthorizationError)
+    def handle_no_authorization(e):
+        return {"message": "Missing Authorization Header", "code": 401}, 401
+    
+    @app.errorhandler(JWTExtendedException)
     def handle_jwt_extended_error(e):
         return {"message": str(e), "code": 401}, 401
     
-    # 使用 Flask 的 errorhandler，它可以处理 Flask-RESTful 路由中的异常
-    @app.errorhandler(RevokedTokenError)
-    def handle_revoked_token_app(e):
-        return {"message": "账号已在其他设备登录，请重新登录", "code": 401}, 401
-    
-    @app.errorhandler(JWTExtendedException)
-    def handle_jwt_extended_error_app(e):
-        return {"message": str(e), "code": 401}, 401
-    
-    print("✅ 所有路由已绑定到应用")  # 添加调试输出
+    logger.info("✅ 所有路由已绑定到应用")
 
 
 

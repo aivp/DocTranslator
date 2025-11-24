@@ -20,6 +20,13 @@ def create_app(config_class=None):
     # 初始化扩展（扩展内部会注册路由）
     init_extensions(app)
     
+    # 添加数据库会话清理钩子（确保每个请求结束后清理会话）
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        """请求结束后清理数据库会话"""
+        from app.extensions import db
+        db.session.remove()
+    
     # 设置内存监控器
     from app.utils.memory_manager import setup_memory_monitor
     setup_memory_monitor(app)
@@ -27,9 +34,10 @@ def create_app(config_class=None):
     # 启动图片合并PDF文件自动清理调度器
     from app.utils.images_to_pdf_cleanup_scheduler import init_cleanup_scheduler
     init_cleanup_scheduler(app, cleanup_interval_hours=6, expire_hours=24)
+    
 
     # 首先注册JWT相关异常处理器（优先级最高）
-    from flask_jwt_extended.exceptions import JWTExtendedException, RevokedTokenError
+    from flask_jwt_extended.exceptions import JWTExtendedException, RevokedTokenError, NoAuthorizationError
     
     @app.errorhandler(ExpiredSignatureError)
     def handle_expired_token(e):
@@ -46,6 +54,10 @@ def create_app(config_class=None):
     @app.errorhandler(RevokedTokenError)
     def handle_revoked_token(e):
         return {"message": "账号已在其他设备登录，请重新登录", "code": 401}, 401
+    
+    @app.errorhandler(NoAuthorizationError)
+    def handle_no_authorization(e):
+        return {"message": "Missing Authorization Header", "code": 401}, 401
     
     @app.errorhandler(JWTExtendedException)
     def handle_jwt_extended_error(e):

@@ -57,9 +57,9 @@ class Config:
     # 时区
     TIMEZONE = 'Asia/Shanghai'#'UTC' #'Asia/Shanghai'
     
-    # 内存管理配置
-    MEMORY_CLEANUP_THRESHOLD = int(os.getenv('MEMORY_CLEANUP_THRESHOLD', 1073741824))  # 默认1GB (单位：字节)
-    MEMORY_CLEANUP_ENABLED = os.getenv('MEMORY_CLEANUP_ENABLED', 'true').lower() == 'true'  # 是否启用自动清理
+    # 内存管理配置（硬编码，始终启用）
+    MEMORY_CLEANUP_THRESHOLD = 1073741824  # 1GB (单位：字节)
+    MEMORY_CLEANUP_ENABLED = True  # 始终启用自动清理
     
     @property
     def allowed_domains(self):

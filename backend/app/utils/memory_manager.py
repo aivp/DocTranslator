@@ -67,20 +67,26 @@ def force_memory_release():
         logger.warning(f"强制释放内存失败: {e}")
         return False
 
-def check_and_cleanup_memory(config):
+def check_and_cleanup_memory(config=None):
     """
     检查内存使用情况，并在满足条件时自动清理
     
     Args:
-        config: Flask应用配置对象
+        config: Flask应用配置对象（已废弃，保留参数以兼容旧代码）
     
     Returns:
         bool: 是否执行了清理
     """
     global _last_cleanup_time
     
-    # 检查是否启用自动清理
-    if not config.get('MEMORY_CLEANUP_ENABLED', True):
+    # 硬编码配置：始终启用，阈值为1GB
+    # 注意：阈值设置为1GB，用于防止内存泄漏（当内存超过1GB且无任务时清理）
+    # 正常使用后内存会在400~500MB，这是Python内存分配器的正常行为
+    MEMORY_CLEANUP_ENABLED = True
+    MEMORY_CLEANUP_THRESHOLD = 1073741824  # 1GB (单位：字节) - 用于防止内存泄漏
+    
+    # 检查是否启用自动清理（硬编码为True，此检查实际不会生效）
+    if not MEMORY_CLEANUP_ENABLED:
         return False
     
     # 检查清理间隔
@@ -89,8 +95,8 @@ def check_and_cleanup_memory(config):
     if current_time - _last_cleanup_time < _cleanup_interval:
         return False
     
-    # 获取阈值
-    threshold = config.get('MEMORY_CLEANUP_THRESHOLD', 1073741824)  # 默认1GB
+    # 使用硬编码的阈值
+    threshold = MEMORY_CLEANUP_THRESHOLD
     
     # 检查当前内存使用
     current_memory = get_memory_usage()

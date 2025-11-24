@@ -180,7 +180,7 @@ class AdminTranslateDownloadBatchResource(Resource):
 
 # 下载单个翻译文件
 class AdminTranslateDownloadResource(Resource):
-    # @jwt_required()
+    @jwt_required()
     def get(self, id):
         """通过 ID 下载单个翻译结果文件[^5]"""
         # 查询翻译记录

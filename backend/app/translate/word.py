@@ -204,7 +204,8 @@ def start_with_okapi(trans, start_time):
                                 # 记录术语库处理开始时间
                                 term_start_time = time.time()
                                 from .term_filter import optimize_terms_for_api
-                                filtered_terms = optimize_terms_for_api(text, preloaded_terms, max_terms=50)
+                                comparison_id = self.trans.get('comparison_id')
+                                filtered_terms = optimize_terms_for_api(text, preloaded_terms, max_terms=10, comparison_id=str(comparison_id) if comparison_id else None)
                                 term_end_time = time.time()
                                 term_duration = term_end_time - term_start_time
                                 
@@ -213,7 +214,7 @@ def start_with_okapi(trans, start_time):
                                 # 如果没有预加载的术语库，回退到原来的方法
                                 logger.warning(f"文本 {index} 没有预加载的术语库，回退到数据库查询")
                                 from .main import get_filtered_terms_for_text
-                                filtered_terms = get_filtered_terms_for_text(text, comparison_id, max_terms=50)
+                                filtered_terms = get_filtered_terms_for_text(text, comparison_id, max_terms=10)
                             
                             if filtered_terms:
                                 logger.debug(f"文本 {index} 使用术语库")
@@ -229,7 +230,10 @@ def start_with_okapi(trans, start_time):
                                         prompt_id=temp_trans.get('prompt_id'),
                                         texts=texts, index=index,
                                         tenant_id=temp_trans.get('tenant_id'),
-                                        api_key=temp_trans.get('api_key')
+                                        api_key=temp_trans.get('api_key'),
+                                        translate_id=temp_trans.get('id'),
+                                        customer_id=temp_trans.get('customer_id'),
+                                        uuid=temp_trans.get('uuid')
                                     )
                                 else:
                                     translated = to_translate.translate_text(
@@ -246,7 +250,10 @@ def start_with_okapi(trans, start_time):
                                         prompt_id=self.trans.get('prompt_id'),
                                         texts=texts, index=index,
                                         tenant_id=self.trans.get('tenant_id'),
-                                        api_key=self.trans.get('api_key')
+                                        api_key=self.trans.get('api_key'),
+                                        translate_id=self.trans.get('id'),
+                                        customer_id=self.trans.get('customer_id'),
+                                        uuid=self.trans.get('uuid')
                                     )
                                 else:
                                     translated = to_translate.translate_text(
@@ -262,7 +269,11 @@ def start_with_okapi(trans, start_time):
                                     prompt=self.trans.get('prompt'),
                                     prompt_id=self.trans.get('prompt_id'),
                                     texts=texts, index=index,
-                                    api_key=self.trans.get('api_key')
+                                    api_key=self.trans.get('api_key'),
+                                    translate_id=self.trans.get('id'),
+                                    customer_id=self.trans.get('customer_id'),
+                                    uuid=self.trans.get('uuid'),
+                                    tenant_id=self.trans.get('tenant_id')
                                 )
                             else:
                                 translated = to_translate.translate_text(
@@ -321,7 +332,11 @@ def start_with_okapi(trans, start_time):
         
         # 前端已直接传入英文名（English Name），直接使用，无需映射
         source_lang = "auto"  # 写死为auto，让API自动检测源语言
-        target_lang = trans.get('lang', 'English')  # 前端已传入英文名，直接使用
+        target_lang = trans.get('lang')  # 必须使用前端传值
+        # 必须使用前端传值，如果没有则报错
+        if not target_lang or not str(target_lang).strip():
+            logger.error(f"目标语言参数缺失或为空: trans={trans}")
+            raise ValueError("目标语言参数(lang)缺失或为空，必须由前端传递")
         
         logger.info(f"🔍 语言设置:")
         logger.info(f"  源语言: {source_lang}")

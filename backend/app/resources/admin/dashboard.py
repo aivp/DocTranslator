@@ -106,7 +106,7 @@ class DashboardTrendResource(Resource):
             if tenant_id is not None and not is_super_admin():
                 base_query = base_query.join(
                     TenantCustomer, Translate.customer_id == TenantCustomer.customer_id
-                ).filter(TenantCustomer.tenant_id == tenant_id)
+                ).filter(TenantCustomer.tenant_id == tenant_id) 
             
             # 获取日期范围
             end_date = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -216,14 +216,17 @@ class DashboardRecentTasksResource(Resource):
             task_list = []
             for task in tasks:
                 task_data = task.to_dict()
+                # 直接从模型对象获取 total_tokens（因为 to_dict 可能不包含此字段）
+                total_tokens = task.total_tokens if task.total_tokens is not None else 0
                 # 只返回必要字段
                 task_list.append({
                     'id': task_data.get('id'),
-                    'translate_no': task_data.get('translate_no'),
+                    'translate_no': task.translate_no,  # 直接从模型获取
                     'origin_filename': task_data.get('origin_filename'),
                     'status': task_data.get('status'),
                     'created_at': task_data.get('created_at'),
-                    'customer_id': task_data.get('customer_id')
+                    'customer_id': task_data.get('customer_id'),
+                    'total_tokens': total_tokens  # 总token消耗量
                 })
             
             return APIResponse.success({'tasks': task_list})

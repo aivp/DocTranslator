@@ -27,7 +27,10 @@ from app.utils.pymupdf_queue import (
 
 from ..utils.doc2x import Doc2XService
 
-# 线程安全打印锁
+# 配置日志记录器
+logger = logging.getLogger(__name__)
+
+# 线程安全打印锁（保留用于向后兼容）
 print_lock = Lock()
 
 # 特殊符号和数学符号的正则表达式
@@ -40,23 +43,23 @@ NUMBERS_PATTERN = re.compile(r'^[\d\s\.,\-\+\*\/\(\)\[\]\{\}]+$')
 def check_docx_quality(docx_path):
     """检查转换后的DOCX文件质量，分析编码和文本内容"""
     try:
-        print("\n=== 开始DOCX文件质量检查 ===")
-        print("文件路径: " + docx_path)
+        logger.info("=== 开始DOCX文件质量检查 ===")
+        logger.info(f"文件路径: {docx_path}")
         
         # 检查文件基本信息
         file_size = os.path.getsize(docx_path)
-        print("文件大小: " + str(file_size) + " 字节")
+        logger.info(f"文件大小: {file_size} 字节")
         
         if file_size < 1000:  # 小于1KB可能有问题
-            print("⚠️  警告: 文件大小异常，可能转换失败")
+            logger.warning("⚠️  警告: 文件大小异常，可能转换失败")
             return False
         
         # 尝试加载文档
         try:
             document = Document(docx_path)
-            print(f"✅ 文档加载成功")
+            logger.info("✅ 文档加载成功")
         except Exception as e:
-            print(f"❌ 文档加载失败: {str(e)}")
+            logger.error(f"❌ 文档加载失败: {str(e)}")
             return False
         
         # 分析文档结构
@@ -64,10 +67,10 @@ def check_docx_quality(docx_path):
         table_count = len(document.tables)
         section_count = len(document.sections)
         
-        print(f"文档结构: {paragraph_count} 个段落, {table_count} 个表格, {section_count} 个节")
+        logger.info(f"文档结构: {paragraph_count} 个段落, {table_count} 个表格, {section_count} 个节")
         
         # 分析前几个段落的文本内容
-        print(f"\n--- 前5个段落内容分析 ---")
+        logger.debug("--- 前5个段落内容分析 ---")
         chinese_chars = 0
         total_chars = 0
         sample_texts = []
@@ -85,24 +88,24 @@ def check_docx_quality(docx_path):
                 
                 # 显示段落内容（限制长度避免日志过长）
                 display_text = text[:100] + "..." if len(text) > 100 else text
-                print(f"段落{i+1}: '{display_text}'")
-                print(f"  长度: {para_total}, 中文字符: {para_chinese}")
+                logger.debug(f"段落{i+1}: '{display_text}'")
+                logger.debug(f"  长度: {para_total}, 中文字符: {para_chinese}")
                 
                 # 显示编码信息
                 try:
                     encoded = text.encode('utf-8')
-                    print(f"  UTF-8编码: {encoded}")
+                    logger.debug(f"  UTF-8编码: {encoded}")
                 except Exception as e:
-                    print(f"  编码检查失败: {str(e)}")
+                    logger.warning(f"  编码检查失败: {str(e)}")
         
         # 分析表格内容
         if table_count > 0:
-            print(f"\n--- 表格内容分析 ---")
+            logger.debug("--- 表格内容分析 ---")
             table_chinese = 0
             table_total = 0
             
             for i, table in enumerate(document.tables[:2]):  # 只分析前2个表格
-                print(f"表格{i+1}:")
+                logger.debug(f"表格{i+1}:")
                 for row_idx, row in enumerate(table.rows[:3]):  # 只分析前3行
                     for col_idx, cell in enumerate(row.cells[:3]):  # 只分析前3列
                         if cell.text.strip():
@@ -114,41 +117,40 @@ def check_docx_quality(docx_path):
                             
                             if cell_total > 0:
                                 display_text = text[:50] + "..." if len(text) > 50 else text
-                                print(f"  单元格[{row_idx+1},{col_idx+1}]: '{display_text}' (中文字符: {cell_chinese})")
+                                logger.debug(f"  单元格[{row_idx+1},{col_idx+1}]: '{display_text}' (中文字符: {cell_chinese})")
             
             chinese_chars += table_chinese
             total_chars += table_total
-            print(f"表格总计: {table_chinese} 个中文字符, {table_total} 个总字符")
+            logger.info(f"表格总计: {table_chinese} 个中文字符, {table_total} 个总字符")
         
         # 统计结果
-        print(f"\n--- 质量检查结果 ---")
+        logger.info("--- 质量检查结果 ---")
         if total_chars > 0:
             chinese_ratio = (chinese_chars / total_chars) * 100
-            print(f"中文字符比例: {chinese_chars}/{total_chars} ({chinese_ratio:.1f}%)")
+            logger.info(f"中文字符比例: {chinese_chars}/{total_chars} ({chinese_ratio:.1f}%)")
             
             if chinese_ratio < 10:
-                print("⚠️  警告: 中文字符比例过低，可能存在编码问题")
+                logger.warning("⚠️  警告: 中文字符比例过低，可能存在编码问题")
             elif chinese_ratio > 80:
-                print("✅ 中文字符比例正常")
+                logger.info("✅ 中文字符比例正常")
             else:
-                print("ℹ️  中文字符比例中等")
+                logger.info("ℹ️  中文字符比例中等")
         else:
-            print("⚠️  警告: 未发现任何文本内容")
+            logger.warning("⚠️  警告: 未发现任何文本内容")
         
         # 检查是否有明显的问题
         if paragraph_count == 0 and table_count == 0:
-            print("❌ 严重问题: 文档没有任何内容")
+            logger.error("❌ 严重问题: 文档没有任何内容")
             return False
         
         if chinese_chars == 0 and total_chars > 0:
-            print("⚠️  警告: 有文本内容但没有中文字符，可能存在编码问题")
+            logger.warning("⚠️  警告: 有文本内容但没有中文字符，可能存在编码问题")
         
-        print(f"=== DOCX质量检查完成 ===\n")
+        logger.info("=== DOCX质量检查完成 ===")
         return True
         
     except Exception as e:
-        print(f"❌ DOCX质量检查失败: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"❌ DOCX质量检查失败: {str(e)}", exc_info=True)
         return False
 
 
@@ -167,39 +169,35 @@ def get_doc2x_save_dir():
 
 def start(trans):
     """PDF翻译入口"""
-    print("🚨 DEBUG: PDF翻译函数被调用！")
-    print("🚨 DEBUG: 这是强制输出测试")
+    logger.debug("PDF翻译函数被调用")
     
     try:
         # 开始时间
         start_time = datetime.datetime.now()
-        print(f"=== 开始PDF翻译任务 ===")
-        print(f"任务ID: {trans['id']}")
-        print(f"源文件: {trans['file_path']}")
-        print(f"目标文件: {trans['target_file']}")
-        print(f"开始时间: {start_time}")
-        print("=" * 50)
+        logger.info(f"=== 开始PDF翻译任务 ===")
+        logger.info(f"任务ID: {trans['id']}")
+        logger.info(f"源文件: {trans['file_path']}")
+        logger.info(f"目标文件: {trans['target_file']}")
+        logger.info(f"开始时间: {start_time}")
         
         # 检查PDF翻译方法设置
         # 优先使用trans中的pdf_translate_method，如果没有则从系统设置中获取
         pdf_translate_method = trans.get('pdf_translate_method')
         if not pdf_translate_method:
             pdf_translate_method = get_pdf_translate_method()
-        print(f"📋 PDF翻译方法: {pdf_translate_method}")
+        logger.info(f"📋 PDF翻译方法: {pdf_translate_method}")
         
         # 根据设置选择翻译方法
         if pdf_translate_method == 'direct':
-            print("🎯 使用直接PDF翻译方法")
+            logger.info("🎯 使用直接PDF翻译方法")
             return start_direct_pdf_translation(trans)
         else:
-            print("🎯 使用Doc2x转换后翻译方法")
+            logger.info("🎯 使用Doc2x转换后翻译方法")
             return start_doc2x_pdf_translation(trans)
 
     except Exception as e:
-        # 打印详细错误信息
-        print("❌ PDF翻译过程出错: " + str(e))
-        print("详细错误信息:")
-        traceback.print_exc()
+        # 记录详细错误信息
+        logger.error(f"❌ PDF翻译过程出错: {str(e)}", exc_info=True)
         # 确保错误状态被正确记录
         to_translate.error(trans['id'], "PDF翻译过程出错: " + str(e))
         return False
@@ -210,12 +208,11 @@ def start_doc2x_pdf_translation(trans):
     try:
         # 开始时间
         start_time = datetime.datetime.now()
-        print(f"=== 开始Doc2x PDF翻译任务 ===")
-        print(f"任务ID: {trans['id']}")
-        print(f"源文件: {trans['file_path']}")
-        print(f"目标文件: {trans['target_file']}")
-        print(f"开始时间: {start_time}")
-        print("=" * 50)
+        logger.info(f"=== 开始Doc2x PDF翻译任务 ===")
+        logger.info(f"任务ID: {trans['id']}")
+        logger.info(f"源文件: {trans['file_path']}")
+        logger.info(f"目标文件: {trans['target_file']}")
+        logger.info(f"开始时间: {start_time}")
         
         # 立即更新任务状态为"changing"，设置PDF转换初始进度0%
         try:
@@ -1391,6 +1388,13 @@ def start_small_pdf_translation(trans):
             except Exception as e:
                 print(f"⚠️ 更新任务状态失败: {str(e)}")
             
+            # 汇总token使用情况
+            try:
+                from app.utils.token_recorder import aggregate_tokens_for_translate
+                aggregate_tokens_for_translate(trans['id'])
+            except Exception as e:
+                print(f"⚠️ 汇总token使用失败: translate_id={trans['id']}, 错误: {e}")
+            
             return True
         else:
             print(f"❌ 小文件PDF翻译失败")
@@ -1442,6 +1446,13 @@ def start_large_pdf_translation(trans, total_pages):
             except Exception as e:
                 print(f"⚠️ 更新任务状态失败: {str(e)}")
             
+            # 汇总token使用情况
+            try:
+                from app.utils.token_recorder import aggregate_tokens_for_translate
+                aggregate_tokens_for_translate(trans['id'])
+            except Exception as e:
+                print(f"⚠️ 汇总token使用失败: translate_id={trans['id']}, 错误: {e}")
+            
             return True
         else:
             print("❌ 大文件PDF翻译失败")
@@ -1468,6 +1479,146 @@ class DirectPDFTranslator:
         self.doc = None
         self.extracted_texts = []
         
+    def _check_textbox_overlap(self, textbox, other_bboxes, min_gap=2.0):
+        """
+        检查文本框是否与其他文本框重叠
+        
+        Args:
+            textbox: 要检查的文本框Rect对象
+            other_bboxes: 其他文本框的边界列表 [[x0, y0, x1, y1], ...]
+            min_gap: 最小间距（像素），默认2.0
+        
+        Returns:
+            bool: True表示有重叠，False表示无重叠
+        """
+        try:
+            for other_bbox in other_bboxes:
+                other_rect = fitz.Rect(other_bbox[0], other_bbox[1], other_bbox[2], other_bbox[3])
+                # 检查是否有重叠（包括最小间距）
+                if textbox.intersects(other_rect):
+                    # 计算重叠区域
+                    intersection = textbox & other_rect
+                    if intersection.width > min_gap and intersection.height > min_gap:
+                        return True
+            return False
+        except Exception as e:
+            logging.warning(f"检查文本框重叠失败: {e}")
+            return False
+    
+    def _adjust_textbox_for_translation(self, original_text, translated_text, font_size, bbox, box_width, box_height, other_bboxes=None):
+        """
+        根据翻译后文本长度调整文本框大小和字体大小，避免与其他文本框重叠
+        
+        Args:
+            original_text: 原始文本
+            translated_text: 翻译后的文本
+            font_size: 原始字体大小
+            bbox: 原始文本框边界 [x0, y0, x1, y1]
+            box_width: 文本框宽度
+            box_height: 文本框高度
+            other_bboxes: 同一页面上其他文本框的边界列表，用于检测重叠
+        
+        Returns:
+            tuple: (调整后的字体大小, 调整后的文本框Rect对象)
+        """
+        try:
+            # 计算文本长度比例
+            original_length = len(original_text.strip()) if original_text else 0
+            translated_length = len(translated_text.strip()) if translated_text else 0
+            
+            if original_length == 0:
+                # 如果没有原始文本，使用原始设置
+                return font_size, fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+            
+            length_ratio = translated_length / original_length if original_length > 0 else 1.0
+            
+            # 估算每行字符数（中文字符按字体大小，英文字符按字体大小的0.6倍）
+            chars_per_line = max(1, int(box_width / (font_size * 0.6)))
+            
+            # 策略1: 如果翻译后文本变长，先尝试缩小字体
+            adjusted_font_size = font_size
+            adjusted_height = box_height
+            
+            if length_ratio > 1.2:  # 文本长度增加超过20%
+                # 根据长度比例缩小字体，但不要小于原始大小的60%
+                adjusted_font_size = max(font_size * 0.6, font_size / length_ratio)
+                adjusted_font_size = int(adjusted_font_size)
+                
+                # 重新计算需要的行数
+                new_chars_per_line = max(1, int(box_width / (adjusted_font_size * 0.6)))
+                new_translated_lines = max(1, int(translated_length / new_chars_per_line) + 1)
+                new_line_height = adjusted_font_size * 1.2
+                needed_height = new_translated_lines * new_line_height
+                
+                # 如果缩小字体后还是放不下，适当增加文本框高度
+                if needed_height > box_height:
+                    # 尝试逐步增加高度，检查是否与其他文本框重叠
+                    max_height_increase = box_height * 0.5  # 最多增加50%高度
+                    test_height = min(needed_height, box_height + max_height_increase)
+                    
+                    # 如果有其他文本框信息，检查重叠
+                    if other_bboxes:
+                        test_textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[1] + test_height)
+                        if self._check_textbox_overlap(test_textbox, other_bboxes):
+                            # 如果会重叠，进一步缩小字体而不是增加高度
+                            # 计算不重叠的最大高度
+                            max_safe_height = box_height
+                            for other_bbox in other_bboxes:
+                                if other_bbox[1] > bbox[1]:  # 只检查下方的文本框
+                                    # 计算到下方文本框的距离
+                                    gap = other_bbox[1] - bbox[3]
+                                    if gap > 0:
+                                        max_safe_height = min(max_safe_height, box_height + gap - 2.0)
+                            
+                            # 如果安全高度不够，进一步缩小字体
+                            if max_safe_height < needed_height:
+                                # 根据需要的行数和安全高度，计算合适的字体大小
+                                safe_lines = max(1, int(max_safe_height / (adjusted_font_size * 1.2)))
+                                if safe_lines < new_translated_lines:
+                                    # 需要进一步缩小字体
+                                    adjusted_font_size = max(font_size * 0.5, adjusted_font_size * (safe_lines / new_translated_lines))
+                                    adjusted_font_size = int(adjusted_font_size)
+                                    adjusted_height = max_safe_height
+                                else:
+                                    adjusted_height = max_safe_height
+                            else:
+                                adjusted_height = test_height
+                        else:
+                            adjusted_height = test_height
+                    else:
+                        # 没有其他文本框信息，保守处理：最多增加30%高度
+                        adjusted_height = min(needed_height, box_height * 1.3)
+                else:
+                    adjusted_height = needed_height
+            elif length_ratio < 0.8:  # 文本长度减少超过20%
+                # 如果文本变短，可以适当增大字体，但不要超过原始大小的120%
+                adjusted_font_size = min(font_size * 1.2, font_size / length_ratio)
+                adjusted_font_size = int(adjusted_font_size)
+            
+            # 创建调整后的文本框
+            # 保持左上角不变，调整右下角
+            adjusted_textbox = fitz.Rect(
+                bbox[0], 
+                bbox[1], 
+                bbox[2], 
+                bbox[1] + adjusted_height
+            )
+            
+            # 最后再次检查重叠（如果提供了其他文本框信息）
+            if other_bboxes and self._check_textbox_overlap(adjusted_textbox, other_bboxes):
+                # 如果仍然重叠，使用原始大小，但缩小字体
+                logging.warning(f"调整后的文本框仍会重叠，使用原始大小并缩小字体")
+                adjusted_textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                if length_ratio > 1.2:
+                    adjusted_font_size = max(font_size * 0.5, font_size / length_ratio)
+                    adjusted_font_size = int(adjusted_font_size)
+            
+            return adjusted_font_size, adjusted_textbox
+            
+        except Exception as e:
+            logging.warning(f"调整文本框失败，使用原始设置: {e}")
+            return font_size, fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+    
     def step1_split_pdf(self, output_dir):
         """步骤1: 拆分PDF为文本JSON和无文本PDF"""
         print("=" * 60)
@@ -1681,6 +1832,7 @@ class DirectPDFTranslator:
             
             # 2. 打开无文本PDF
             print("\n2. 打开无文本PDF...")
+            doc = None
             doc = fitz.open(no_text_pdf_file)
             print(f"   打开了 {doc.page_count} 页的PDF")
             
@@ -1692,7 +1844,10 @@ class DirectPDFTranslator:
                 page = doc[page_num]
                 print(f"   处理第 {page_num + 1} 页...")
                 
-                for text_info in page_data["texts"]:
+                # 收集当前页面的所有文本框边界，用于重叠检测
+                all_bboxes = [text_info["bbox"] for text_info in page_data["texts"] if text_info.get("text", "").strip()]
+                
+                for text_idx, text_info in enumerate(page_data["texts"]):
                     text = text_info["text"]
                     if text and text.strip():
                         bbox = text_info["bbox"]
@@ -1718,25 +1873,28 @@ class DirectPDFTranslator:
                         
                         # 使用insert_htmlbox方法（支持中文，避免背景覆盖）
                         try:
-                            # 创建文本框
-                            textbox = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                            # 获取原始文本（如果存在）用于计算长度比例
+                            original_text = text_info.get("original_text", text)
                             
-                            # 计算文本长度和box宽度，决定是否需要换行
+                            # 计算文本框尺寸
                             box_width = bbox[2] - bbox[0]
                             box_height = bbox[3] - bbox[1]
                             
-                            # 估算每行字符数（根据字体大小）
-                            chars_per_line = max(1, int(box_width / (font_size * 0.6)))  # 0.6是经验值
-
-                            wrapped_text = text
+                            # 获取其他文本框的边界（排除当前文本框）
+                            other_bboxes = [b for i, b in enumerate(all_bboxes) if i != text_idx]
+                            
+                            # 根据翻译后文本长度调整文本框和字体大小，避免重叠
+                            adjusted_font_size, adjusted_textbox = self._adjust_textbox_for_translation(
+                                original_text, text, font_size, bbox, box_width, box_height, other_bboxes
+                            )
                             
                             # 构建HTML文本，使用完全透明的背景
                             html_text = f"""
                             <div style="
-                                font-size: {font_size}px;
+                                font-size: {adjusted_font_size}px;
                                 color: rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)});
                                 font-family: sans-serif;
-                                line-height: 1.0;
+                                line-height: 1.2;
                                 margin: 0;
                                 padding: 0;
                                 background: none;
@@ -1746,14 +1904,14 @@ class DirectPDFTranslator:
                                 outline: none;
                                 box-shadow: none;
                             ">
-                                {wrapped_text}
+                                {text}
                             </div>
                             """
                             
                             # 使用insert_htmlbox插入文本
-                            page.insert_htmlbox(textbox, html_text)
-                            logging.info(f"✅ 文本插入成功: '{text[:20]}...'")
-                            print(f"   ✅ 文本插入成功: '{text[:20]}...'")
+                            page.insert_htmlbox(adjusted_textbox, html_text)
+                            logging.info(f"✅ 文本插入成功: '{text[:20]}...' (字体: {font_size}pt -> {adjusted_font_size}pt)")
+                            print(f"   ✅ 文本插入成功: '{text[:20]}...' (字体: {font_size}pt -> {adjusted_font_size}pt)")
                         except Exception as e:
                             logging.error(f"文本插入失败: {e}")
                             print(f"   ❌ 文本插入失败: '{text[:20]}...' - {e}")
@@ -1763,7 +1921,6 @@ class DirectPDFTranslator:
             # 4. 保存最终PDF
             print("\n4. 保存最终PDF...")
             doc.save(output_file)
-            doc.close()
             print(f"✅ 最终翻译后的PDF已保存到: {output_file}")
             
             return output_file
@@ -1771,6 +1928,14 @@ class DirectPDFTranslator:
         except Exception as e:
             logging.error(f"回填PDF时出错: {e}")
             raise
+        finally:
+            # 确保PDF文档被正确关闭，防止内存泄漏
+            if doc is not None:
+                try:
+                    doc.close()
+                    logger.debug("PDF文档已关闭")
+                except Exception as close_error:
+                    logger.warning(f"关闭PDF文档时出错: {close_error}")
     
     def run_complete_translation(self, trans, output_file):
         """运行完整的翻译流程"""
@@ -1860,24 +2025,23 @@ class DirectPDFTranslator:
             if os.path.exists(original_file) and original_file != output_file:
                 try:
                     os.remove(original_file)
-                    print("✅ 已删除原始上传文件: " + os.path.basename(original_file))
+                    logger.info("✅ 已删除原始上传文件: " + os.path.basename(original_file))
                 except Exception as e:
-                    logging.warning("删除原始上传文件失败: " + str(e))
-                    print("⚠️ 删除原始上传文件失败: " + str(e))
+                    logger.warning("删除原始上传文件失败: " + str(e))
             
             # 确保输出文件保持UUID后缀，避免多次翻译冲突
             # 不重命名文件，保持数据库路径与实际文件一致
             
-            print("\n" + "=" * 60)
+            logger.debug("=" * 60)
             # 翻译成功日志已关闭（调试时可打开）
-            # print("🎉 完整PDF翻译流程完成!")
-            print("=" * 60)
-            print(f"📄 输入文件: {self.input_pdf_path}")
-            print(f"📝 提取文本: {extracted_texts_file}")
-            print(f"🔄 翻译文本: {translated_texts_file}")
-            print(f"📄 无文本PDF: {no_text_pdf_file}")
-            print(f"🎯 最终输出: {final_pdf_file}")
-            print("=" * 60)
+            # logger.info("🎉 完整PDF翻译流程完成!")
+            logger.debug("=" * 60)
+            logger.debug(f"📄 输入文件: {self.input_pdf_path}")
+            logger.debug(f"📝 提取文本: {extracted_texts_file}")
+            logger.debug(f"🔄 翻译文本: {translated_texts_file}")
+            logger.debug(f"📄 无文本PDF: {no_text_pdf_file}")
+            logger.debug(f"🎯 最终输出: {final_pdf_file}")
+            logger.debug("=" * 60)
             
             # 清理临时文件和目录
             self._cleanup_temp_files(temp_files, temp_dir)

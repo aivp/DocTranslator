@@ -197,7 +197,11 @@ def start_with_okapi(trans):
         
         # 确定源语言和目标语言
         source_lang = "zh"  # PPTX 默认源语言为中文
-        target_lang = trans.get('lang', 'English')
+        target_lang = trans.get('lang')  # 必须使用前端传值
+        # 必须使用前端传值，如果没有则报错
+        if not target_lang or not str(target_lang).strip():
+            logger.error(f"目标语言参数缺失或为空: trans={trans}")
+            raise ValueError("目标语言参数(lang)缺失或为空，必须由前端传递")
         
         # 语言代码映射（如果需要）
         lang_code_map = {
@@ -221,12 +225,19 @@ def start_with_okapi(trans):
             # 更新数据库状态
             try:
                 from .to_translate import db
-                db.execute("update translate set status='done', process='100.0', result_path=%s where id=%s",
+                db.execute("update translate set status='done', process='100.0', target_filepath=%s where id=%s",
                          output_file, trans['id'])
                 # 翻译成功日志已关闭（调试时可打开）
                 # logger.info(f"✅ PPTX 翻译完成: {output_file}")
             except Exception as e:
                 logger.error(f"更新数据库状态失败: {e}")
+            
+            # 汇总token使用情况
+            try:
+                from app.utils.token_recorder import aggregate_tokens_for_translate
+                aggregate_tokens_for_translate(trans['id'])
+            except Exception as e:
+                logger.warning(f"⚠️ 汇总token使用失败: translate_id={trans['id']}, 错误: {e}")
             
             # 翻译成功，删除原始文件以节省空间
             original_file = trans['file_path']

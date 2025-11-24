@@ -88,17 +88,19 @@ class ImageTranslateQueueManager:
             queued_tasks = []
             try:
                 with app.app_context():
-                    # 获取队列中的任务（状态为uploaded，等待翻译）
-                    # 使用快速查询，避免阻塞
-                    queued_tasks = self._get_queued_tasks(1)  # 每次只取1个任务
-                    # 立即关闭session，释放连接
                     from app.extensions import db
-                    db.session.close()
+                    try:
+                        # 获取队列中的任务（状态为uploaded，等待翻译）
+                        # 使用快速查询，避免阻塞
+                        queued_tasks = self._get_queued_tasks(1)  # 每次只取1个任务
+                    finally:
+                        # 立即清理session，释放连接
+                        db.session.remove()
             except Exception as e:
                 logger.error(f"获取队列任务时发生异常: {str(e)}", exc_info=True)
                 try:
                     from app.extensions import db
-                    db.session.close()
+                    db.session.remove()
                 except:
                     pass
                 return

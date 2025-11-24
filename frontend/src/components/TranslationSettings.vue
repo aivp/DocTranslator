@@ -87,10 +87,30 @@
             clearable
             filterable
             :disabled="!!settingsForm.aiServer.prompt_id"
-            @focus="comparison_id_focus">
+            @focus="comparison_id_focus"
+            @change="handleTerminologyChange">
             <el-option v-for="term in translateStore.terms" :key="term.id" :label="term.title" :value="term.id" />
           </el-select>
         </el-form-item>
+
+        <!-- 术语库提示 -->
+        <div v-if="hasSelectedTerminologies" class="terminology-warning">
+          <el-alert
+            title="性能提示"
+            type="warning"
+            :closable="false"
+            show-icon>
+            <template #default>
+              <p>
+                <strong>术语数量会较大程度影响翻译速度。</strong>
+                <span v-if="selectedTerminologiesCount > 0">
+                  当前已选择 {{ selectedTerminologiesCount }} 个术语库，共约 {{ totalTermsCount }} 条术语。
+                </span>
+                建议您定期<strong>精进术语表</strong>，只保留最常用和最相关的术语，以提高翻译效率。
+              </p>
+            </template>
+          </el-alert>
+        </div>
 
         <!-- PDF翻译方法选择 -->
         <el-form-item label="PDF翻译方法" width="100%">
@@ -355,6 +375,32 @@ const comparison_id_focus = async () => {
   } catch (error) {
     console.error('获取术语库失败:', error)
   }
+}
+
+// 计算已选择的术语库信息
+const hasSelectedTerminologies = computed(() => {
+  return Array.isArray(settingsForm.value.aiServer.comparison_id) && 
+         settingsForm.value.aiServer.comparison_id.length > 0
+})
+
+const selectedTerminologiesCount = computed(() => {
+  if (!hasSelectedTerminologies.value) return 0
+  return settingsForm.value.aiServer.comparison_id.length
+})
+
+const totalTermsCount = computed(() => {
+  if (!hasSelectedTerminologies.value) return 0
+  const selectedIds = settingsForm.value.aiServer.comparison_id
+  const total = translateStore.terms
+    .filter(term => selectedIds.includes(term.id))
+    .reduce((sum, term) => sum + (term.term_count || 0), 0)
+  return total
+})
+
+// 处理术语库选择变化
+const handleTerminologyChange = () => {
+  // 可以在这里添加额外的逻辑，比如记录选择变化
+  console.log('术语库选择已更新:', settingsForm.value.aiServer.comparison_id)
 }
 
 // 处理PDF翻译方法切换
@@ -813,6 +859,32 @@ h4:contains("Doc2x"),
       color: #f56c6c;
       line-height: 1.5;
       font-weight: 500;
+    }
+  }
+}
+
+.terminology-warning {
+  margin-bottom: 20px;
+  margin-top: -10px;
+  
+  .el-alert {
+    border-radius: 8px;
+    border-color: #e6a23c;
+    
+    .el-alert__title {
+      font-weight: 600;
+      color: #e6a23c;
+    }
+    
+    p {
+      margin: 8px 0 0 0;
+      color: #606266;
+      line-height: 1.6;
+      
+      strong {
+        color: #e6a23c;
+        font-weight: 600;
+      }
     }
   }
 }

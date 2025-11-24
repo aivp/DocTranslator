@@ -228,6 +228,7 @@ class TranslateEngine:
             'extension': os.path.splitext(task.origin_filepath)[1],  # 动态获取文件扩展名
             'pdf_translate_method': getattr(task, 'pdf_translate_method', None),  # PDF翻译方法
             'user_id': task.customer_id,  # 添加用户ID，用于文件隔离
+            'customer_id': task.customer_id,  # 添加customer_id，用于token记录
             'tenant_id': tenant_id,  # 添加租户ID，用于API Key获取
             # 流式翻译配置
             'use_streaming': getattr(task, 'use_streaming', False),  # 是否启用流式翻译
