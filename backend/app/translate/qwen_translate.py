@@ -150,7 +150,7 @@ def handle_429_error(attempt, error_msg):
         time.sleep(wait_time)
         return True  # 继续重试
     else:
-        logging.error("达到429错误最大重试次数 (100)，返回原文")
+        logging.warning("达到429错误最大重试次数 (100)，返回原文")
         return False  # 停止重试
 
 def qwen_translate(text, target_language, source_lang="auto", tm_list=None, terms=None, domains=None, prompt=None, prompt_id=None, max_retries=10, texts=None, index=None, tenant_id=None, api_key=None, translate_id=None, customer_id=None, uuid=None):
@@ -587,7 +587,7 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 if handle_429_error(attempt, error_msg):
                     continue
                 else:
-                    logging.error(f"🚫 达到429错误最大重试次数，返回原文")
+                    logging.warning(f"🚫 达到429错误最大重试次数，返回原文")
                     return text
             else:
                 # 非频率限制错误，使用原始重试策略

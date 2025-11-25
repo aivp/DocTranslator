@@ -80,16 +80,19 @@ def shutdown_process_pool():
                 _process_pool = None
 
 
-def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir):
+def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir, progress_queue=None):
     """
     在独立进程中合并PDF（避免阻塞主线程）
+    优化：真正的流式合并，合并一个就关闭一个，避免同时打开多个PDF
     
     Args:
         batch_results: 批次处理结果列表
         output_path: 最终输出路径
         input_pdf_path: 原始PDF路径
         temp_dir: 临时文件目录
+        progress_queue: 进度队列（可选），用于向主进程报告进度
     """
+    merged_doc = None
     try:
         logger.info("进程开始合并翻译后的PDF...")
         
@@ -100,28 +103,74 @@ def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir)
             raise Exception("没有成功的批次可以合并")
         
         successful_batches.sort(key=lambda x: x["start_page"])
+        total_batches = len(successful_batches)
+        
+        logger.info(f"准备合并 {total_batches} 个批次...")
         
         # 创建合并文档
         merged_doc = safe_fitz_new_document()
-        batch_docs = []
         
-        # 流式合并，避免同时打开所有PDF
-        for batch_result in successful_batches:
-            translated_pdf_path = batch_result["translated_pdf_path"]
-            if os.path.exists(translated_pdf_path):
-                batch_doc = safe_fitz_open(translated_pdf_path)
-                batch_docs.append(batch_doc)
-                safe_fitz_insert_pdf(merged_doc, batch_doc, 0, batch_doc.page_count)
-                logger.info(f"合并批次 {batch_result['batch_num']}: 页面 {batch_result['start_page']}-{batch_result['end_page']-1}")
+        # 真正的流式合并：合并一个就立即关闭，避免同时打开多个PDF
+        for idx, batch_result in enumerate(successful_batches):
+            batch_doc = None
+            try:
+                translated_pdf_path = batch_result["translated_pdf_path"]
+                if not os.path.exists(translated_pdf_path):
+                    logger.warning(f"批次 {batch_result['batch_num']} 的PDF文件不存在: {translated_pdf_path}")
+                    continue
                 
-                # 每合并几个批次后强制垃圾回收
-                if len(batch_docs) % 5 == 0:
+                # 打开批次PDF
+                batch_doc = safe_fitz_open(translated_pdf_path)
+                
+                # 插入到合并文档
+                safe_fitz_insert_pdf(merged_doc, batch_doc, 0, batch_doc.page_count)
+                
+                logger.info(f"✅ 合并批次 {batch_result['batch_num']}/{total_batches}: 页面 {batch_result['start_page']}-{batch_result['end_page']-1}")
+                
+                # 更新进度（90% + 9% * (idx+1)/total_batches）
+                if progress_queue:
+                    progress = 90.0 + 9.0 * (idx + 1) / total_batches
+                    try:
+                        progress_queue.put(progress)
+                    except Exception as e:
+                        logger.debug(f"更新进度失败: {e}")
+                
+                # 立即关闭批次PDF，释放内存
+                safe_fitz_close(batch_doc)
+                batch_doc = None
+                
+                # 每合并3个批次后强制垃圾回收和内存释放
+                if (idx + 1) % 3 == 0:
                     import gc
                     gc.collect()
-                    logger.debug(f"已合并 {len(batch_docs)} 个批次，执行垃圾回收")
+                    # 尝试释放C库内存
+                    try:
+                        libc = ctypes.CDLL("libc.so.6")
+                        libc.malloc_trim(0)
+                    except Exception:
+                        pass
+                    logger.debug(f"已合并 {idx + 1}/{total_batches} 个批次，执行内存清理")
+                    
+            except Exception as e:
+                logger.error(f"合并批次 {batch_result.get('batch_num', idx)} 时出错: {e}")
+                # 确保即使出错也关闭文档
+                if batch_doc is not None:
+                    try:
+                        safe_fitz_close(batch_doc)
+                    except Exception:
+                        pass
+                continue
         
-        # 保存合并后的PDF
+        # 保存合并后的PDF（这是最耗内存的操作）
+        logger.info("开始保存合并后的PDF（这可能需要一些时间）...")
+        if progress_queue:
+            try:
+                progress_queue.put(99.0)  # 保存时更新为99%
+            except Exception:
+                pass
+        
         merged_doc.save(output_path)
+        logger.info(f"✅ PDF保存完成: {output_path}")
         
         # 删除原始文件
         if os.path.exists(input_pdf_path) and input_pdf_path != output_path:
@@ -131,7 +180,7 @@ def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir)
             except Exception as e:
                 logger.warning(f"删除原始文件失败: {e}")
         
-        # 清理临时文件
+        # 清理临时文件（延迟清理，避免影响合并性能）
         if os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
@@ -139,23 +188,38 @@ def _merge_pdfs_in_process(batch_results, output_path, input_pdf_path, temp_dir)
             except Exception as e:
                 logger.warning(f"清理临时目录失败: {e}")
         
-        logger.info(f"进程完成PDF合并: {output_path}")
+        logger.info(f"✅ 进程完成PDF合并: {output_path}")
+        
+        # 最终进度更新
+        if progress_queue:
+            try:
+                progress_queue.put(100.0)
+            except Exception:
+                pass
         
     except Exception as e:
-        logger.error(f"进程PDF合并失败: {e}")
+        logger.error(f"进程PDF合并失败: {e}", exc_info=True)
+        raise
     finally:
-        # 确保所有文档对象被正确关闭
-        if 'merged_doc' in locals() and merged_doc is not None:
+        # 确保合并文档被正确关闭
+        if merged_doc is not None:
             try:
                 merged_doc.close()
+                logger.debug("合并PDF文档已关闭")
             except Exception as e:
                 logger.warning(f"关闭合并PDF文档时出错: {e}")
         
-        for batch_doc in batch_docs:
+        # 强制内存清理
+        try:
+            import gc
+            gc.collect()
             try:
-                safe_fitz_close(batch_doc)
-            except Exception as e:
-                logger.warning(f"关闭批次PDF文档时出错: {e}")
+                libc = ctypes.CDLL("libc.so.6")
+                libc.malloc_trim(0)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug(f"最终内存清理失败: {e}")
 
 
 def _compress_pdf_in_process(input_pdf_path, output_pdf_path):
@@ -1035,17 +1099,19 @@ class LargePDFTranslator:
                 "thread_id": thread_id
             }
     
-    def merge_translated_pdfs(self, batch_results, output_path, cancel_event=None):
+    def merge_translated_pdfs(self, batch_results, output_path, cancel_event=None, trans=None):
         """
         合并所有翻译后的PDF（使用独立进程执行，避免阻塞其他任务）
+        优化：添加进度反馈、超时机制和真正的流式合并
         
         Args:
             batch_results: 批次处理结果列表
             output_path: 最终输出路径
             cancel_event: 取消事件
+            trans: 翻译任务信息（可选，用于更新进度）
         """
         try:
-            logger.info("开始合并翻译后的PDF（使用独立进程）...")
+            logger.info("开始合并翻译后的PDF（使用独立进程，带进度反馈）...")
             
             # 检查是否已被取消
             if cancel_event and cancel_event.is_set():
@@ -1058,16 +1124,26 @@ class LargePDFTranslator:
             if not successful_batches:
                 raise Exception("没有成功的批次可以合并")
             
+            # 创建进度队列，用于接收合并进度
+            progress_queue = Queue()
+            
             # 使用独立进程执行合并操作，避免阻塞其他翻译任务
-            # 虽然当前任务会等待合并完成，但其他任务不会受影响
             process = Process(
                 target=_merge_pdfs_in_process,
-                args=(successful_batches, output_path, self.input_pdf_path, self.temp_dir)
+                args=(successful_batches, output_path, self.input_pdf_path, self.temp_dir, progress_queue)
             )
             process.start()
+            logger.info(f"PDF合并进程已启动 (PID: {process.pid})")
             
-            # 等待进程完成，但定期检查取消事件
+            # 合并超时时间：根据批次数动态计算，最少5分钟，最多30分钟
+            total_batches = len(successful_batches)
+            timeout_seconds = max(300, min(1800, total_batches * 30))  # 每个批次最多30秒
+            start_time = time.time()
+            
+            # 等待进程完成，同时监控进度和取消事件
+            last_progress = 90.0
             while process.is_alive():
+                # 检查取消事件
                 if cancel_event and cancel_event.is_set():
                     logger.info("PDF合并被取消，终止进程")
                     process.terminate()
@@ -1075,19 +1151,60 @@ class LargePDFTranslator:
                     if process.is_alive():
                         process.kill()  # 强制杀死进程
                     return False
-                time.sleep(0.1)  # 短暂等待
+                
+                # 检查超时
+                elapsed_time = time.time() - start_time
+                if elapsed_time > timeout_seconds:
+                    logger.error(f"PDF合并超时（{elapsed_time:.1f}秒 > {timeout_seconds}秒），终止进程")
+                    process.terminate()
+                    process.join(timeout=5)
+                    if process.is_alive():
+                        process.kill()
+                    raise Exception(f"PDF合并超时（超过{timeout_seconds}秒）")
+                
+                # 尝试获取进度更新（非阻塞）
+                try:
+                    while not progress_queue.empty():
+                        progress = progress_queue.get_nowait()
+                        if progress > last_progress:
+                            last_progress = progress
+                            logger.info(f"📊 PDF合并进度: {progress:.1f}%")
+                            # 更新数据库进度
+                            if trans:
+                                try:
+                                    self.update_progress(trans, progress)
+                                except Exception as e:
+                                    logger.debug(f"更新合并进度失败: {e}")
+                except Exception:
+                    pass  # 队列为空或出错，继续等待
+                
+                time.sleep(0.5)  # 每0.5秒检查一次，减少CPU占用
             
-            process.join()  # 确保进程完全结束
+            process.join(timeout=10)  # 确保进程完全结束
+            
+            # 获取最终进度
+            try:
+                while not progress_queue.empty():
+                    progress = progress_queue.get_nowait()
+                    last_progress = progress
+            except Exception:
+                pass
             
             if process.exitcode == 0:
-                logger.info(f"PDF合并完成: {output_path}")
+                logger.info(f"✅ PDF合并完成: {output_path} (最终进度: {last_progress:.1f}%)")
+                # 确保进度更新为100%
+                if trans and last_progress < 100.0:
+                    try:
+                        self.update_progress(trans, 100.0)
+                    except Exception as e:
+                        logger.debug(f"更新最终进度失败: {e}")
                 return output_path
             else:
-                logger.error(f"PDF合并进程失败，退出码: {process.exitcode}")
+                logger.error(f"❌ PDF合并进程失败，退出码: {process.exitcode}")
                 return False
             
         except Exception as e:
-            logger.error(f"PDF合并失败: {e}")
+            logger.error(f"PDF合并失败: {e}", exc_info=True)
             return False
     
     def _cleanup_temp_files(self, temp_files=None, temp_dir=None):
@@ -1231,12 +1348,10 @@ class LargePDFTranslator:
             print(f"\n🔄 合并所有翻译后的PDF...")
             # 合并开始，进度应该是90%（所有批次完成）
             print(f"📊 进度: 合并中 (90.0%)")
+            self.update_progress(trans, 90.0)
             
-            # 在合并过程中更新进度为95%，让用户知道系统还在工作
-            self.update_progress(trans, 95.0)
-            print(f"📊 进度: 合并中 (95.0%)")
-            
-            final_output_file = self.merge_translated_pdfs(batch_results, output_file, cancel_event)
+            # 传递trans参数以支持进度更新
+            final_output_file = self.merge_translated_pdfs(batch_results, output_file, cancel_event, trans=trans)
             
             # 内存优化：合并后立即清理batch_results
             try:

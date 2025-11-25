@@ -1383,7 +1383,9 @@ def start_small_pdf_translation(trans):
             # 更新任务状态为完成
             try:
                 from .to_translate import db
-                db.execute("update translate set status='done', process='100' where id=%s", trans['id'])
+                import pytz
+                end_time = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
+                db.execute("update translate set status='done', process='100', end_at=%s where id=%s", end_time, trans['id'])
                 print("✅ 已更新任务状态为done，进度100%")
             except Exception as e:
                 print(f"⚠️ 更新任务状态失败: {str(e)}")
@@ -1441,7 +1443,9 @@ def start_large_pdf_translation(trans, total_pages):
             # 更新任务状态为完成
             try:
                 from .to_translate import db
-                db.execute("update translate set status='done', process='100' where id=%s", trans['id'])
+                import pytz
+                end_time = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
+                db.execute("update translate set status='done', process='100', end_at=%s where id=%s", end_time, trans['id'])
                 print("✅ 已更新任务状态为done，进度100%")
             except Exception as e:
                 print(f"⚠️ 更新任务状态失败: {str(e)}")

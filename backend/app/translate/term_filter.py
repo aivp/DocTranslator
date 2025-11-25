@@ -20,10 +20,17 @@ logger = logging.getLogger(__name__)
 
 # 全局倒排索引缓存：{comparison_id: inverted_index}
 _inverted_index_cache: Dict[str, Dict[str, List[Tuple[str, str]]]] = {}
+# 倒排索引缓存访问时间：{comparison_id: last_access_time}
+_inverted_index_cache_time: Dict[str, float] = {}
 
 # 结果缓存：{text_hash: filtered_terms}
 _result_cache: Dict[str, List[Dict[str, str]]] = {}
+# 结果缓存访问时间：{text_hash: last_access_time}
+_result_cache_time: Dict[str, float] = {}
 _max_cache_size = 1000  # 最大缓存条目数
+
+# 缓存过期时间（秒）：1小时未使用则过期
+_cache_expire_time = 3600  # 1小时 = 3600秒
 
 def calculate_similarity(text: str, term_source: str) -> float:
     """
@@ -79,6 +86,45 @@ def calculate_similarity(text: str, term_source: str) -> float:
     
     return 0.0
 
+def _cleanup_expired_cache():
+    """
+    清理过期的缓存（倒排索引和结果缓存）
+    """
+    global _inverted_index_cache, _inverted_index_cache_time, _result_cache, _result_cache_time
+    
+    current_time = time.time()
+    
+    # 清理过期的倒排索引缓存
+    expired_keys = []
+    for key, last_access in _inverted_index_cache_time.items():
+        if current_time - last_access > _cache_expire_time:
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        if key in _inverted_index_cache:
+            del _inverted_index_cache[key]
+        if key in _inverted_index_cache_time:
+            del _inverted_index_cache_time[key]
+    
+    if expired_keys:
+        logger.info(f"清理了 {len(expired_keys)} 个过期的倒排索引缓存")
+    
+    # 清理过期的结果缓存
+    expired_result_keys = []
+    for key, last_access in _result_cache_time.items():
+        if current_time - last_access > _cache_expire_time:
+            expired_result_keys.append(key)
+    
+    for key in expired_result_keys:
+        if key in _result_cache:
+            del _result_cache[key]
+        if key in _result_cache_time:
+            del _result_cache_time[key]
+    
+    if expired_result_keys:
+        logger.info(f"清理了 {len(expired_result_keys)} 个过期的结果缓存")
+
+
 def build_inverted_index(all_terms: Dict[str, str], comparison_id: Optional[str] = None) -> Dict[str, List[Tuple[str, str]]]:
     """
     为术语库建立倒排索引
@@ -93,11 +139,26 @@ def build_inverted_index(all_terms: Dict[str, str], comparison_id: Optional[str]
     if not all_terms:
         return {}
     
+    # 定期清理过期缓存（每10次调用清理一次，避免频繁清理）
+    if len(_inverted_index_cache) > 0 and len(_inverted_index_cache) % 10 == 0:
+        _cleanup_expired_cache()
+    
     # 检查缓存
     cache_key = comparison_id or str(id(all_terms))
     if cache_key in _inverted_index_cache:
-        logger.debug(f"使用缓存的倒排索引，术语库大小: {len(all_terms)}")
-        return _inverted_index_cache[cache_key]
+        # 检查是否过期
+        if cache_key in _inverted_index_cache_time:
+            current_time = time.time()
+            if current_time - _inverted_index_cache_time[cache_key] <= _cache_expire_time:
+                # 更新访问时间
+                _inverted_index_cache_time[cache_key] = current_time
+                logger.debug(f"使用缓存的倒排索引，术语库大小: {len(all_terms)}")
+                return _inverted_index_cache[cache_key]
+            else:
+                # 缓存已过期，删除
+                logger.debug(f"倒排索引缓存已过期，重新构建")
+                del _inverted_index_cache[cache_key]
+                del _inverted_index_cache_time[cache_key]
     
     logger.info(f"开始建立倒排索引，术语库大小: {len(all_terms)}")
     start_time = time.time()
@@ -123,6 +184,7 @@ def build_inverted_index(all_terms: Dict[str, str], comparison_id: Optional[str]
     # 缓存索引
     if cache_key:
         _inverted_index_cache[cache_key] = inverted_index
+        _inverted_index_cache_time[cache_key] = time.time()  # 记录缓存时间
     
     elapsed = time.time() - start_time
     logger.info(f"倒排索引建立完成，用时: {elapsed:.3f}秒, 索引词汇数: {len(inverted_index)}")
@@ -153,8 +215,19 @@ def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int =
     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
     cache_key = f"{comparison_id or ''}_{text_hash}"
     if cache_key in _result_cache:
-        logger.debug(f"使用缓存的筛选结果")
-        return _result_cache[cache_key]
+        # 检查是否过期
+        if cache_key in _result_cache_time:
+            current_time = time.time()
+            if current_time - _result_cache_time[cache_key] <= _cache_expire_time:
+                # 更新访问时间
+                _result_cache_time[cache_key] = current_time
+                logger.debug(f"使用缓存的筛选结果")
+                return _result_cache[cache_key]
+            else:
+                # 缓存已过期，删除
+                logger.debug(f"结果缓存已过期，重新筛选")
+                del _result_cache[cache_key]
+                del _result_cache_time[cache_key]
     
     term_count = len(all_terms)
     logger.debug(f"开始筛选术语，文本长度: {len(text)}, 术语库大小: {term_count}")
@@ -196,8 +269,12 @@ def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int =
                     if len(_result_cache) >= _max_cache_size:
                         keys_to_remove = list(_result_cache.keys())[:_max_cache_size // 2]
                         for key in keys_to_remove:
-                            del _result_cache[key]
+                            if key in _result_cache:
+                                del _result_cache[key]
+                            if key in _result_cache_time:
+                                del _result_cache_time[key]
                     _result_cache[cache_key] = result
+                    _result_cache_time[cache_key] = time.time()  # 记录缓存时间
                     return result
         
         # 通过索引快速查找相关术语
@@ -291,9 +368,13 @@ def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int =
         # 清除最旧的缓存（简单策略：清除一半）
         keys_to_remove = list(_result_cache.keys())[:_max_cache_size // 2]
         for key in keys_to_remove:
-            del _result_cache[key]
+            if key in _result_cache:
+                del _result_cache[key]
+            if key in _result_cache_time:
+                del _result_cache_time[key]
     
     _result_cache[cache_key] = result
+    _result_cache_time[cache_key] = time.time()  # 记录缓存时间
     
     elapsed = time.time() - start_time
     logger.debug(f"术语筛选完成: {term_count} -> {len(result)} 个术语, 用时: {elapsed:.3f}秒")
@@ -475,21 +556,28 @@ def clear_term_cache(comparison_id: Optional[str] = None):
     Args:
         comparison_id: 术语库ID，如果为None则清除所有缓存
     """
-    global _inverted_index_cache, _result_cache
+    global _inverted_index_cache, _inverted_index_cache_time, _result_cache, _result_cache_time
     
     if comparison_id:
         if comparison_id in _inverted_index_cache:
             del _inverted_index_cache[comparison_id]
             logger.info(f"已清除术语库 {comparison_id} 的倒排索引缓存")
+        if comparison_id in _inverted_index_cache_time:
+            del _inverted_index_cache_time[comparison_id]
         
         # 清除相关的结果缓存
         keys_to_remove = [k for k in _result_cache.keys() if k.startswith(f"{comparison_id}_")]
         for key in keys_to_remove:
-            del _result_cache[key]
+            if key in _result_cache:
+                del _result_cache[key]
+            if key in _result_cache_time:
+                del _result_cache_time[key]
         logger.info(f"已清除术语库 {comparison_id} 的结果缓存，共 {len(keys_to_remove)} 条")
     else:
         _inverted_index_cache.clear()
+        _inverted_index_cache_time.clear()
         _result_cache.clear()
+        _result_cache_time.clear()
         logger.info("已清除所有术语库缓存")
 
 def batch_filter_terms(texts: List[str], all_terms: Dict[str, str], max_terms: int = 10) -> List[List[Dict[str, str]]]:

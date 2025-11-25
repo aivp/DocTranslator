@@ -50,7 +50,10 @@ def main():
     if not lang_value:
         logging.error(f"翻译记录中lang字段缺失或为空: uuid={uuid}, trans={trans}")
         # 更新任务状态为失败
-        db.execute("update translate set status='failed', failed_reason='目标语言参数(lang)缺失或为空' where uuid=%s", uuid)
+        from datetime import datetime
+        import pytz
+        end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
+        db.execute("update translate set status='failed', failed_reason='目标语言参数(lang)缺失或为空', end_at=%s where uuid=%s", end_time, uuid)
         sys.exit(1)
     
     translate_id=trans['id']

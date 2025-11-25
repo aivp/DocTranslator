@@ -225,8 +225,10 @@ def start_with_okapi(trans):
             # 更新数据库状态
             try:
                 from .to_translate import db
-                db.execute("update translate set status='done', process='100.0', target_filepath=%s where id=%s",
-                         output_file, trans['id'])
+                import pytz
+                end_time = datetime.now(pytz.timezone('Asia/Shanghai'))
+                db.execute("update translate set status='done', process='100.0', target_filepath=%s, end_at=%s where id=%s",
+                         output_file, end_time, trans['id'])
                 # 翻译成功日志已关闭（调试时可打开）
                 # logger.info(f"✅ PPTX 翻译完成: {output_file}")
             except Exception as e:

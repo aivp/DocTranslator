@@ -230,7 +230,8 @@ class TranslateStartResource(Resource):
             
             # 更新翻译记录
             translate.server = data.get('server', 'openai')
-            translate.origin_filename = origin_filename
+            # 不覆盖 origin_filename，保持上传时保存的原始文件名（避免显示重命名后的文件名）
+            # translate.origin_filename = origin_filename  # 注释掉，保持数据库中的原始文件名
             translate.target_filepath = target_abs_path  # 存储翻译结果的绝对路径
 
             translate.model = data['model']

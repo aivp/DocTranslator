@@ -13,18 +13,18 @@ logger = logging.getLogger(__name__)
 
 class QueueManager:
     def __init__(self):
-        self.max_concurrent_tasks = 10  # 最大并发任务数改为10
-        self.max_memory_gb = 10  # 最大内存占用(GB)
-        self.critical_memory_gb = 8  # 临界内存阈值(GB) - 超过此值开始积极清理
-        self.emergency_memory_gb = 12  # 紧急内存阈值(GB) - 超过此值动态暂停任务
+        self.max_concurrent_tasks = 12  # 最大并发任务数（从10增加到12，提升20%并发能力）
+        self.max_memory_gb = 16  # 最大内存占用(GB)（从10GB增加到16GB，预留2GB安全余量）
+        self.critical_memory_gb = 12  # 临界内存阈值(GB) - 超过此值开始积极清理（从8GB增加到12GB）
+        self.emergency_memory_gb = 14  # 紧急内存阈值(GB) - 超过此值动态暂停任务（从12GB增加到14GB）
         self.task_pause_duration = 30  # 任务暂停时长(秒) - 增加到30秒
         self.emergency_pause_active = False  # 紧急暂停状态标志
         self.emergency_start_time = None  # 紧急保护开始时间
         self.emergency_timeout_minutes = 5  # 紧急保护超时时间(分钟)
         self.memory_release_check_minutes = 2  # 内存释放检查时间(分钟)
         self.max_pdf_tasks = 2  # 最大PDF翻译任务数（已废弃，使用下面的分别限制）
-        self.max_large_pdf_tasks = 1  # 最大大PDF翻译任务数（超过25页）
-        self.max_small_pdf_tasks = 3  # 最大小PDF翻译任务数（25页以内）
+        self.max_large_pdf_tasks = 2  # 最大大PDF翻译任务数（从1增加到2，超过25页）
+        self.max_small_pdf_tasks = 4  # 最大小PDF翻译任务数（从3增加到4，25页以内）
         self.large_pdf_page_threshold = 25  # 大PDF页数阈值
         self.queue_lock = threading.Lock()
         self.monitor_thread = None

@@ -52,6 +52,7 @@ class TranslateEngine:
                 if task:
                     task.status = 'failed'
                     task.failed_reason = f'任务启动失败: {str(e)}'
+                    task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 设置结束时间
                     db.session.commit()
             except:
                 pass
@@ -66,6 +67,16 @@ class TranslateEngine:
                 task = db.session.query(Translate).get(task_id)
                 if not task:
                     app.logger.error(f"任务 {task_id} 不存在")
+                    # 如果任务不存在，尝试设置失败状态（如果任务记录还存在）
+                    try:
+                        task = db.session.query(Translate).get(task_id)
+                        if task:
+                            task.status = 'failed'
+                            task.failed_reason = '任务记录不存在或已被删除'
+                            task.end_at = datetime.now(pytz.timezone(app.config['TIMEZONE']))
+                            db.session.commit()
+                    except:
+                        pass
                     return
 
                 # 执行核心逻辑，传递取消事件
