@@ -484,6 +484,9 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 logging.warning(f"⚠️ 翻译结果为空，跳过此文本: {text[:50]}...")
                 return ""  # 直接返回空字符串，不重试
             
+            # 清理翻译结果中可能包含的领域提示文本
+            translated_text = _clean_domain_hint_from_result(translated_text)
+            
             # 打印响应结果
             # if prompt:  # 只有使用提示词时才打印
             #     print("=" * 80)
@@ -603,6 +606,47 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
     # 如果所有重试都失败了
     logging.error(f"💥 所有重试都失败了，返回原文")
     return text
+
+def _clean_domain_hint_from_result(translated_text: str) -> str:
+    """
+    清理翻译结果中可能包含的领域提示文本
+    
+    Args:
+        translated_text: 翻译后的文本
+        
+    Returns:
+        str: 清理后的文本
+    """
+    if not translated_text:
+        return translated_text
+    
+    import re
+    
+    # 领域提示的关键词模式（匹配硬编码的领域提示文本）
+    domain_patterns = [
+        r'The text originates from the domains of.*?document fields\.',
+        r'This text is from the engineering vehicle.*?administrative documents\.',
+        r'engineering vehicles.*?administrative documents',
+        r'heavy machinery.*?construction equipment',
+        r'professional terminologies.*?administrative processes',
+        r'technical accuracy.*?industry-specific jargon',
+        r'formal and precise technical description.*?engineering documents',
+        r'rigorous.*?formal.*?official style.*?government communication',
+    ]
+    
+    # 移除匹配的领域提示文本
+    cleaned_text = translated_text
+    for pattern in domain_patterns:
+        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
+    
+    # 移除可能出现在文本开头的领域提示标记
+    cleaned_text = re.sub(r'^(领域提示|Domain Hint|领域说明|Domain Description)[:：]\s*', '', cleaned_text, flags=re.IGNORECASE)
+    
+    # 清理多余的空格和换行
+    cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text)  # 移除多余的空行
+    cleaned_text = re.sub(r'^\s+|\s+$', '', cleaned_text, flags=re.MULTILINE)  # 移除首尾空白
+    
+    return cleaned_text.strip()
 
 def _is_translation_result_abnormal(translated_text: str) -> bool:
     """
