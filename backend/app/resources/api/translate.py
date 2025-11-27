@@ -409,8 +409,15 @@ class TranslateStartResource(Resource):
                     current_app.logger.warning(f"任务状态在启动前已改变: uuid={uuid_value}, status={translate.status}")
                     return APIResponse.error(f"任务状态已改变（状态: {translate.status}），无法启动", 400)
                 
-                # 确保状态是 'none' 或 'queued'，如果不是，记录警告但继续
-                if translate.status not in ['none', 'queued']:
+                # 如果是失败状态，重置为可启动状态（重试场景）
+                if translate.status == 'failed':
+                    current_app.logger.info(f"重试失败任务: uuid={uuid_value}, 重置状态为 queued")
+                    translate.status = 'queued'
+                    translate.failed_reason = None  # 清空失败原因
+                    translate.end_at = None  # 清空结束时间，让任务可以重新开始
+                    translate.process = 0.0  # 重置进度
+                    db.session.commit()
+                elif translate.status not in ['none', 'queued']:
                     current_app.logger.warning(f"任务状态异常，但尝试启动: uuid={uuid_value}, status={translate.status}")
                 
                 success = TranslateEngine(translate.id).execute()
@@ -876,25 +883,43 @@ class TranslateDownloadResource(Resource):
         if not translate.target_filepath or not os.path.exists(translate.target_filepath):
             return APIResponse.error('文件不存在', 404)
 
-        # 生成下载文件名（移除后缀）
+        # 生成下载文件名
+        # 优先使用实际文件的扩展名（对于doc2x转换的PDF，实际文件是.docx）
+        actual_file_path = translate.target_filepath
+        actual_file_ext = os.path.splitext(actual_file_path)[1].lower()
         original_filename = translate.origin_filename
+        
         if original_filename:
             # 移除路径，只保留文件名
             filename = os.path.basename(original_filename)
-            # 移除后缀（如 _a97f0abf, _compressed_aggressive 等）
-            if '_' in filename:
-                # 找到最后一个下划线和点号的位置
-                name_part = os.path.splitext(filename)[0]  # 移除扩展名
-                if '_' in name_part:
-                    # 移除最后一个下划线及其后面的内容
-                    parts = name_part.split('_')
-                    if len(parts) > 1:
-                        # 检查最后一部分是否是数字或压缩标识
-                        last_part = parts[-1]
-                        if last_part.isdigit() or 'compressed' in last_part.lower() or len(last_part) == 8:
-                            filename = '_'.join(parts[:-1]) + os.path.splitext(filename)[1]
+            # 获取原始文件的基础名称（不含扩展名）
+            original_base = os.path.splitext(filename)[0]
+            original_ext = os.path.splitext(filename)[1].lower()
+            
+            # 如果实际文件扩展名与原始文件扩展名不同（如doc2x转换：.pdf -> .docx）
+            # 使用实际文件的扩展名，并移除原始扩展名
+            if actual_file_ext != original_ext and actual_file_ext:
+                # 对于 .pdf.docx 这种情况，需要移除 .pdf，只保留 .docx
+                if filename.lower().endswith('.pdf') and actual_file_ext == '.docx':
+                    filename = original_base + '.docx'
+                else:
+                    # 其他情况，使用实际文件的扩展名
+                    filename = original_base + actual_file_ext
+            else:
+                # 扩展名相同，移除后缀（如 _a97f0abf, _compressed_aggressive 等）
+                if '_' in filename:
+                    # 找到最后一个下划线和点号的位置
+                    name_part = os.path.splitext(filename)[0]  # 移除扩展名
+                    if '_' in name_part:
+                        # 移除最后一个下划线及其后面的内容
+                        parts = name_part.split('_')
+                        if len(parts) > 1:
+                            # 检查最后一部分是否是数字或压缩标识
+                            last_part = parts[-1]
+                            if last_part.isdigit() or 'compressed' in last_part.lower() or len(last_part) == 8:
+                                filename = '_'.join(parts[:-1]) + os.path.splitext(filename)[1]
         else:
-            filename = os.path.basename(translate.target_filepath)
+            filename = os.path.basename(actual_file_path)
         
         # 返回文件
         response = make_response(send_file(

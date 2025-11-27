@@ -115,10 +115,16 @@ class TranslateEngine:
         try:
             task = db.session.query(Translate).get(self.task_id)
             if task:
-                # 检查当前状态，如果已经是 done 或 failed，不重复更新
-                if task.status in ['done', 'failed']:
-                    self.app.logger.info(f"任务 {self.task_id} 状态已经是 {task.status}，跳过更新")
+                # 如果任务已经是 done 状态，不重复更新（已完成的任务不应该被覆盖）
+                if task.status == 'done':
+                    self.app.logger.info(f"任务 {self.task_id} 状态已经是 done，跳过更新")
                     return
+                
+                # 如果任务状态是 failed，但这是重试后的新结果，应该允许更新
+                # 这样可以确保重试时能够正确更新状态
+                if task.status == 'failed' and not success:
+                    # 如果还是失败，允许更新失败原因和结束时间（可能是新的失败原因）
+                    self.app.logger.info(f"任务 {self.task_id} 重试后仍然失败，更新失败信息")
                 
                 task.status = 'done' if success else 'failed'
                 task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区

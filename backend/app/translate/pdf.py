@@ -261,8 +261,7 @@ def start_doc2x_pdf_translation(trans):
 
         # 使用Doc2X服务将PDF转换为DOCX
         print(f"开始将PDF转换为DOCX: {original_path}")
-        import logging
-        logger = logging.getLogger(__name__)
+        # 使用全局的 logger，不要重新定义
         
         # 记录Doc2X开始时间
         doc2x_start_time = datetime.datetime.now()
