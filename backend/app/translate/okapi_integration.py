@@ -956,9 +956,21 @@ class OkapiWordTranslator:
                     else:
                         logger.warning("Word文档字体调整失败，但翻译已完成")
                     
-                    # 只有在字体调整完成后才返回成功
+                    # 步骤5：处理文本框中的表格
+                    logger.info("🔄 步骤5: 处理文本框中的表格...")
+                    try:
+                        from app.translate.word import adjust_tables_in_textboxes
+                        from docx import Document
+                        doc = Document(output_file)
+                        adjust_tables_in_textboxes(doc)
+                        doc.save(output_file)
+                        logger.info("✅ 文本框表格处理完成")
+                    except Exception as e:
+                        logger.warning(f"处理文本框中的表格时出错: {e}，但翻译已完成")
+                    
+                    # 只有在所有处理完成后才返回成功
                     # 这样可以确保前端状态更新时，所有处理都已完成
-                    logger.info("🎯 所有处理完成：翻译 + 字体调整")
+                    logger.info("🎯 所有处理完成：翻译 + 字体调整 + 文本框表格处理")
                     return True
                 else:
                     logger.error("❌ Word文档合并失败，无法进行字体调整")

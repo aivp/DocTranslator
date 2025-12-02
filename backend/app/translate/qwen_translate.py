@@ -38,6 +38,70 @@ def is_pure_symbol(text: str) -> bool:
     
     return False
 
+def is_pure_number(text: str) -> bool:
+    """
+    检查文本是否为纯数字（包括正负数、小数、带千位分隔符的数字等）
+    
+    支持的格式：
+    - 纯整数：123, -123, +123
+    - 小数：123.45, -123.45, +123.45, .5, -.5
+    - 千位分隔符：1,234, 1,234.56, -1,234.56
+    - 科学计数法：1.23e10, 1.23E-10, -1.23e+5
+    
+    Args:
+        text: 要检查的文本
+        
+    Returns:
+        bool: 如果文本是纯数字则返回True，否则返回False
+    """
+    if not text or not text.strip():
+        return False
+    
+    # 去除首尾空白字符
+    cleaned_text = text.strip()
+    
+    # 如果为空，返回False
+    if not cleaned_text:
+        return False
+    
+    # 定义数字模式：
+    # 1. 可选的符号（+或-）
+    # 2. 可选的千位分隔符（逗号分隔的数字）
+    # 3. 数字部分（整数或小数）
+    # 4. 可选的科学计数法（e或E后跟可选的符号和数字）
+    
+    # 匹配模式：
+    # - 整数：^[+-]?\d+$
+    # - 小数：^[+-]?\d*\.\d+$ 或 ^[+-]?\d+\.\d*$
+    # - 千位分隔符：^[+-]?\d{1,3}(,\d{3})*(\.\d+)?$
+    # - 科学计数法：^[+-]?\d+(\.\d+)?[eE][+-]?\d+$
+    
+    # 综合模式：匹配所有数字格式
+    # 先移除千位分隔符（逗号），然后检查是否为有效数字
+    # 这样可以处理：123, 1,234, 1,234.56, -1,234.56 等
+    
+    # 移除千位分隔符（逗号）
+    text_without_commas = cleaned_text.replace(',', '')
+    
+    # 匹配模式：
+    # 1. 可选的符号（+或-）
+    # 2. 数字部分（可以是整数、小数、或科学计数法）
+    number_pattern = r'^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$'
+    
+    # 检查是否匹配数字模式
+    if re.match(number_pattern, text_without_commas):
+        # 额外验证：确保如果包含逗号，逗号的位置是正确的（千位分隔符）
+        if ',' in cleaned_text:
+            # 验证逗号分隔符格式：每3位一个逗号
+            # 例如：1,234,567.89 或 1,234
+            comma_pattern = r'^[+-]?\d{1,3}(,\d{3})*(\.\d+)?(?:[eE][+-]?\d+)?$'
+            if not re.match(comma_pattern, cleaned_text):
+                return False
+        
+        return True
+    
+    return False
+
 # 请求频率控制 - 线程安全版本
 import threading
 
@@ -183,6 +247,11 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
     
     if not target_language:
         logging.error("目标语言未指定")
+        return text
+    
+    # 检查是否为纯数字，如果是则直接返回，不进行翻译
+    if is_pure_number(text):
+        logging.debug(f"⚠️ 待翻译文本为纯数字，跳过翻译: {repr(text)}")
         return text
     
     # 记录开始时间
@@ -441,19 +510,28 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                         logging.debug(f"术语列表为空，不添加terms参数 (tm_list长度: {len(tm_list) if tm_list else 0}, terms长度: {len(terms) if terms else 0})")
                 
                 # 硬编码domains参数 - 工程车辆和政府文件领域
-                # translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
-                # 针对占位符特殊优化
-                translation_options["domains"] = "The text originates from the domains of engineering vehicles, machinery, as well as government and official documents. It covers heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices, encompassing professional terminologies related to vehicle design, mechanical engineering, hydraulic systems, electrical control, safety standards, operating procedures, official wording, bureaucratic terminologies, administrative processes, legal citations, and institutional communication. Attention should be paid to technical accuracy, industry-specific jargon, professional engineering expressions, a formal and authoritative tone, bureaucratic sentence patterns, document structure, and administrative nomenclature. Do not translate the symbol '♂' during translation; retain it as is. The translation should conform to the formal and precise technical description style applicable to engineering documents and technical manuals, as well as the rigorous, formal, and official style suitable for government communication and administrative document fields."
+                # 如果目标语言是葡萄牙语或日语，不传入domains参数，避免领域词被翻译后出现在结果中
+                # excluded_languages = ['portuguese', 'pt', 'português', 'japanese', 'ja', 'jp', '日本語', '日语']
+                # if target_language and target_language.lower() not in excluded_languages:
+                #     # translation_options["domains"] = "This text is from the engineering vehicle and construction machinery domain, as well as government and official document domain. It involves heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices. The content includes professional terminology related to vehicle design, mechanical engineering, hydraulic systems, electrical controls, safety standards, operational procedures, formal language, official terminology, administrative procedures, legal references, and institutional communication. Pay attention to technical accuracy, industry-specific terminology, professional engineering language, formal and authoritative tone, bureaucratic language patterns, official document structure, and administrative terminology. Maintain formal and precise technical descriptions suitable for engineering documentation and technical manuals, as well as the serious, formal, and official style appropriate for government communications and administrative documents."
+                #     # 针对占位符特殊优化
+                #     # translation_options["domains"] = "The text originates from the domains of engineering vehicles, machinery, as well as government and official documents. It covers heavy machinery, construction equipment, industrial vehicles, administrative procedures, policy documents, and official notices, encompassing professional terminologies related to vehicle design, mechanical engineering, hydraulic systems, electrical control, safety standards, operating procedures, official wording, bureaucratic terminologies, administrative processes, legal citations, and institutional communication. Attention should be paid to technical accuracy, industry-specific jargon, professional engineering expressions, a formal and authoritative tone, bureaucratic sentence patterns, document structure, and administrative nomenclature. Do not translate the symbol '♂' during translation; retain it as is. The translation should conform to the formal and precise technical description style applicable to engineering documents and technical manuals, as well as the rigorous, formal, and official style suitable for government communication and administrative document fields."
+                #     translation_options["domains"] = "This text is from the automotive and governmental domains. It includes vehicle user manuals with technical specifications, safety instructions, and maintenance procedures, as well as official government documents requiring formal, precise, and standardized language. Use terminology consistent with the Machinery and Agreement & Certificate domains."
+                #     logging.debug(f"🎯 目标语言为 {target_language}，使用领域提示")
+                # else:
+                #     logging.debug(f"🎯 目标语言为 {target_language}（葡萄牙语或日语），不传入domains参数")
                 # logging.info(f"🎯 使用硬编码领域提示: 工程车辆和政府文件")
-                    
-                # # 添加详细的请求参数日志
+                translation_options["domains"] = "This text is from the industrial vehicle domain. It mainly involves the R&D, operation and maintenance of industrial vehicles, including many terms related to mechanics, hydraulics and safety systems. Pay attention to professional technical terminologies and sentence patterns when translating. Translate into this industrial vehicle domain style."
+
+                # 添加详细的请求参数日志
                 # logging.info(f"🔧 Qwen翻译请求参数:")
                 # logging.info(f"  model: qwen-mt-plus")
                 # logging.info(f"  use_prompt: False")
                 # logging.info(f"  source_lang: {source_lang}")
                 # logging.info(f"  target_lang: {target_language}")
                 # logging.info(f"  translation_options: {translation_options}")
-                # logging.info(f"  text: {text[:100]}...")
+                # logging.info(f"  📤 提交的翻译文本 (完整): {text}")
+                # logging.info(f"  📤 提交的翻译文本 (前200字符): {text[:200]}...")
                 
                 # 等待请求间隔
                 wait_for_rate_limit()
@@ -462,14 +540,14 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 api_start_time = time.time()
                 
                 # 调用API
-                # 翻译日志已关闭（调试时可打开）
-                # logging.info(f"📡 发送API请求...")
+                logging.info(f"📡 发送API请求...")
                 completion = client.chat.completions.create(
                     model="qwen-mt-plus",
                     messages=[{"role": "user", "content": text}],
                     extra_body={"translation_options": translation_options}
                 )
                 
+                logging.info(f"🔧 API请求参数: {completion}")
                 # 计算API调用用时
                 api_end_time = time.time()
                 api_duration = api_end_time - api_start_time
@@ -485,17 +563,18 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 return ""  # 直接返回空字符串，不重试
             
             # 清理翻译结果中可能包含的领域提示文本
+            translated_text_before_clean = translated_text
             translated_text = _clean_domain_hint_from_result(translated_text)
             
             # 打印响应结果
-            # if prompt:  # 只有使用提示词时才打印
-            #     print("=" * 80)
-            #     print("✅ QWEN-MT-PLUS 提示词翻译响应")
-            #     print("=" * 80)
-            #     print(f"📝 原始文本: {text}")
-            #     print(f"🎯 翻译结果: {translated_text}")
-            #     print(f"⏱️ API调用用时: {api_duration:.3f}秒")
-            #     print("=" * 80)
+            logging.info("=" * 80)
+            logging.info("✅ QWEN-MT-PLUS 翻译响应")
+            logging.info("=" * 80)
+            logging.info(f"📝 原始文本 (完整): {text}")
+            logging.info(f"📥 API返回的原始结果 (完整): {translated_text_before_clean}")
+            logging.info(f"🎯 清理后的翻译结果 (完整): {translated_text}")
+            logging.info(f"⏱️ API调用用时: {api_duration:.3f}秒")
+            logging.info("=" * 80)
             
             # 检查翻译结果质量（暂时注释掉）
             # if _is_translation_result_abnormal(translated_text):
@@ -547,7 +626,7 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             # 记录失败的token使用（如果提供了必要的参数）
             if translate_id and customer_id and tenant_id:
                 try:
-                    from app.utils.token_recorder import record_token_usage
+                    from app.utils.token_recorder import record_token_usage 
                     api_duration_ms = int((time.time() - api_start_time) * 1000) if 'api_start_time' in locals() else None
                     record_token_usage(
                         translate_id=translate_id,
@@ -622,21 +701,45 @@ def _clean_domain_hint_from_result(translated_text: str) -> str:
     
     import re
     
-    # 领域提示的关键词模式（匹配硬编码的领域提示文本）
+    # 领域提示的关键词模式（匹配硬编码的领域提示文本，包括英文和翻译后的版本）
+    # 英文原版
     domain_patterns = [
         r'The text originates from the domains of.*?document fields\.',
         r'This text is from the engineering vehicle.*?administrative documents\.',
+        r'This text is from the automotive and governmental domains.*?Certificate domains\.',
         r'engineering vehicles.*?administrative documents',
         r'heavy machinery.*?construction equipment',
         r'professional terminologies.*?administrative processes',
         r'technical accuracy.*?industry-specific jargon',
         r'formal and precise technical description.*?engineering documents',
         r'rigorous.*?formal.*?official style.*?government communication',
+        r'automotive and governmental domains.*?Agreement & Certificate domains',
+    ]
+    
+    # 日语翻译版本（根据日志中的实际内容）
+    japanese_patterns = [
+        r'このテキストは自動車および政府関連の分野に属します.*?整合させるようにしてください[。.]',
+        r'自動車および政府関連の分野',
+        r'技術仕様.*?安全指示.*?メンテナンス手順',
+        r'車両のユーザーマニュアル',
+        r'公式かつ正確で標準化された表現',
+        r'政府の公文書',
+        r'「機械」と「契約・証明書」の分野',
+        r'用語は.*?整合させる',
+    ]
+    
+    # 葡萄牙语翻译版本
+    portuguese_patterns = [
+        r'O texto se origina dos domínios de.*?campos de documentos[.]',
+        r'Os domínios de.*?documentos oficiais',
+        r'máquinas pesadas.*?equipamentos de construção',
+        r'terminologias profissionais.*?processos administrativos',
     ]
     
     # 移除匹配的领域提示文本
     cleaned_text = translated_text
-    for pattern in domain_patterns:
+    all_patterns = domain_patterns + japanese_patterns + portuguese_patterns
+    for pattern in all_patterns:
         cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
     
     # 移除可能出现在文本开头的领域提示标记
@@ -645,6 +748,9 @@ def _clean_domain_hint_from_result(translated_text: str) -> str:
     # 清理多余的空格和换行
     cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text)  # 移除多余的空行
     cleaned_text = re.sub(r'^\s+|\s+$', '', cleaned_text, flags=re.MULTILINE)  # 移除首尾空白
+    
+    # 清理 ♦ 符号（Unicode: \u2666）
+    cleaned_text = cleaned_text.replace('♦', '')
     
     return cleaned_text.strip()
 

@@ -1630,9 +1630,15 @@ def apply_translations_with_adaptive_styles(document, texts):
     # 翻译完成后，重新调整所有表格的布局
     try:
         for table in document.tables:
-            adjust_table_layout_for_translation(table)
+            adjust_table_layout_for_translation(table, document)
     except Exception as e:
         logger.error(f"最终调整表格布局时出错: {str(e)}")
+    
+    # 翻译完成后，单独处理文本框中的表格
+    try:
+        adjust_tables_in_textboxes(document)
+    except Exception as e:
+        logger.error(f"处理文本框中的表格时出错: {str(e)}")
 
     # 智能run拼接已经在翻译过程中处理，这里不需要额外处理
 
@@ -1868,9 +1874,15 @@ def apply_translations(document, texts):
     # 翻译完成后，重新调整所有表格的布局
     try:
         for table in document.tables:
-            adjust_table_layout_for_translation(table)
+            adjust_table_layout_for_translation(table, document)
     except Exception as e:
         logger.error(f"最终调整表格布局时出错: {str(e)}")
+    
+    # 翻译完成后，单独处理文本框中的表格
+    try:
+        adjust_tables_in_textboxes(document)
+    except Exception as e:
+        logger.error(f"处理文本框中的表格时出错: {str(e)}")
 
     return text_count
 
@@ -2168,10 +2180,387 @@ def distribute_preserving_original_spaces(runs, translated_text, original_text):
             run.text = translated_text[start_pos:end_pos]
 
 
-def adjust_table_layout_for_translation(table):
-    """调整表格布局以适应翻译后的文本长度"""
+def _is_table_in_textbox(table):
+    """
+    检测表格是否在文本框中
+    
+    Returns:
+        tuple: (is_in_textbox, textbox_element, textbox_width)
+    """
     try:
-        from docx.shared import Inches, Cm
+        # 检查表格的父元素链，看是否在文本框中
+        table_element = table._element
+        parent = table_element.getparent()
+        
+        max_depth = 30  # 增加查找深度
+        depth = 0
+        textbox_width = None
+        
+        # 向上遍历父元素，查找文本框
+        while parent is not None and depth < max_depth:
+            depth += 1
+            tag_str = str(parent.tag)
+            
+            # 检查是否是文本框内容区域
+            if 'txbxContent' in tag_str or tag_str.endswith('txbxContent'):
+                logger.info(f"      找到文本框内容区域 (深度 {depth})")
+                # 继续向上查找drawing元素以获取宽度
+                temp_parent = parent.getparent()
+                temp_depth = 0
+                while temp_parent is not None and temp_depth < 20:
+                    temp_tag = str(temp_parent.tag)
+                    if 'drawing' in temp_tag.lower():
+                        # 查找extent元素获取宽度
+                        extent = temp_parent.find('.//wp:extent', {
+                            'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+                        })
+                        if extent is not None:
+                            cx = extent.get('cx')
+                            if cx:
+                                try:
+                                    textbox_width = int(cx) / 914400.0
+                                    logger.info(f"      从drawing元素获取文本框宽度: {textbox_width:.2f}英寸")
+                                except:
+                                    pass
+                        break
+                    temp_parent = temp_parent.getparent()
+                    temp_depth += 1
+                
+                if textbox_width is None:
+                    textbox_width = 3.5  # 默认值
+                    logger.warning(f"      无法获取文本框宽度，使用默认值: {textbox_width}英寸")
+                
+                return True, parent, textbox_width
+            
+            # 检查是否是VML文本框
+            if 'v:textbox' in tag_str or tag_str.endswith('}textbox'):
+                logger.info(f"      找到VML文本框 (深度 {depth})")
+                # 尝试从style属性获取宽度
+                style = parent.get('style', '')
+                if 'width' in style:
+                    import re
+                    match = re.search(r'width:\s*([\d.]+)(pt|px|in|cm)', style)
+                    if match:
+                        value = float(match.group(1))
+                        unit = match.group(2)
+                        if unit == 'pt':
+                            textbox_width = value / 72.0
+                        elif unit == 'px':
+                            textbox_width = value / 96.0
+                        elif unit == 'cm':
+                            textbox_width = value / 2.54
+                        elif unit == 'in':
+                            textbox_width = value
+                        logger.info(f"      从VML style获取文本框宽度: {textbox_width:.2f}英寸")
+                
+                if textbox_width is None:
+                    textbox_width = 3.5  # 默认值
+                    logger.warning(f"      无法获取VML文本框宽度，使用默认值: {textbox_width}英寸")
+                
+                return True, parent, textbox_width
+            
+            # 检查是否是DrawingML文本框
+            if 'drawing' in tag_str.lower():
+                # 查找文本框内容
+                txbx = parent.find('.//w:txbxContent', {
+                    'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+                })
+                if txbx is not None:
+                    logger.info(f"      找到DrawingML文本框 (深度 {depth})")
+                    # 获取宽度
+                    extent = parent.find('.//wp:extent', {
+                        'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+                    })
+                    if extent is not None:
+                        cx = extent.get('cx')
+                        if cx:
+                            try:
+                                textbox_width = int(cx) / 914400.0
+                                logger.info(f"      从extent获取文本框宽度: {textbox_width:.2f}英寸")
+                            except:
+                                pass
+                    
+                    if textbox_width is None:
+                        textbox_width = 3.5  # 默认值
+                        logger.warning(f"      无法获取DrawingML文本框宽度，使用默认值: {textbox_width}英寸")
+                    
+                    return True, txbx, textbox_width
+            
+            parent = parent.getparent()
+        
+        return False, None, None
+    except Exception as e:
+        logger.error(f"检测表格是否在文本框中时出错: {e}", exc_info=True)
+        return False, None, None
+
+def _get_textbox_width(textbox_element):
+    """获取文本框的宽度（单位：英寸）"""
+    try:
+        from docx.shared import Inches, Emu
+        
+        # 尝试从DrawingML获取宽度
+        # DrawingML使用EMU单位（1英寸 = 914400 EMU）
+        width_attr = textbox_element.get('cx')  # cx是宽度属性
+        if width_attr:
+            try:
+                width_emu = int(width_attr)
+                width_inches = width_emu / 914400.0
+                return width_inches
+            except:
+                pass
+        
+        # 尝试从VML获取宽度
+        width_attr = textbox_element.get('style')
+        if width_attr and 'width' in width_attr:
+            import re
+            match = re.search(r'width:\s*([\d.]+)(pt|px|in|cm)', width_attr)
+            if match:
+                value = float(match.group(1))
+                unit = match.group(2)
+                if unit == 'pt':
+                    return value / 72.0  # 转换为英寸
+                elif unit == 'px':
+                    return value / 96.0  # 假设96 DPI
+                elif unit == 'cm':
+                    return value / 2.54  # 转换为英寸
+                elif unit == 'in':
+                    return value
+        
+        # 如果无法获取，返回默认值
+        return 4.0  # 默认4英寸
+    except Exception as e:
+        logger.debug(f"获取文本框宽度时出错: {e}")
+        return 4.0  # 默认4英寸
+
+def adjust_tables_in_textboxes(document):
+    """
+    在翻译完成后，直接遍历文档XML结构，查找文本框中的表格并调整字体大小
+    这个方法不依赖document.tables，而是直接从XML中查找表格元素
+    """
+    try:
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        
+        logger.info("🔍 开始查找文本框中的表格...")
+        logger.info(f"   文档中共有 {len(document.tables)} 个表格（通过document.tables）")
+        
+        # 方法：直接遍历文档的XML结构，查找文本框中的表格
+        processed_count = 0
+        
+        # 获取文档的主体部分
+        body = document._body._body
+        
+        # 定义命名空间
+        w_ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        wp_ns = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+        v_ns = 'urn:schemas-microsoft-com:vml'
+        
+        # 查找所有文本框（DrawingML和VML）
+        # 1. 查找DrawingML文本框
+        drawings = body.findall('.//w:drawing', {'w': w_ns, 'wp': wp_ns})
+        logger.info(f"   找到 {len(drawings)} 个DrawingML元素")
+        
+        for drawing_idx, drawing in enumerate(drawings):
+            try:
+                # 查找文本框内容
+                txbx_content = drawing.find('.//w:txbxContent', {'w': w_ns})
+                if txbx_content is not None:
+                    logger.info(f"   找到DrawingML文本框 {drawing_idx}")
+                    
+                    # 获取文本框宽度
+                    extent = drawing.find('.//wp:extent', {'wp': wp_ns})
+                    textbox_width = None
+                    if extent is not None:
+                        cx = extent.get('cx')
+                        if cx:
+                            try:
+                                textbox_width = int(cx) / 914400.0
+                                logger.info(f"      文本框宽度: {textbox_width:.2f}英寸")
+                            except:
+                                pass
+                    
+                    if textbox_width is None:
+                        textbox_width = 3.5
+                        logger.warning(f"      无法获取宽度，使用默认值: {textbox_width}英寸")
+                    
+                    # 在文本框中查找表格
+                    tables_in_txbx = txbx_content.findall('.//w:tbl', {'w': w_ns})
+                    logger.info(f"      文本框中找到 {len(tables_in_txbx)} 个表格")
+                    
+                    for tbl_elem in tables_in_txbx:
+                        # 尝试通过表格元素创建Table对象
+                        try:
+                            from docx.table import Table
+                            table = Table(tbl_elem, document)
+                            
+                            logger.info(f"      ✅ 处理表格: {len(table.columns)}列 x {len(table.rows)}行")
+                            adjust_table_font_for_textbox(table, textbox_width)
+                            processed_count += 1
+                        except Exception as e:
+                            logger.error(f"      创建表格对象失败: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"处理DrawingML文本框 {drawing_idx} 时出错: {e}", exc_info=True)
+        
+        # 2. 查找VML文本框
+        vml_textboxes = body.findall('.//v:textbox', {'v': v_ns})
+        logger.info(f"   找到 {len(vml_textboxes)} 个VML文本框")
+        
+        for vml_idx, vtextbox in enumerate(vml_textboxes):
+            try:
+                # 查找文本框内容
+                txbx_content = vtextbox.find('.//w:txbxContent', {'w': w_ns})
+                if txbx_content is not None:
+                    logger.info(f"   找到VML文本框 {vml_idx}")
+                    
+                    # 获取文本框宽度（从style属性）
+                    textbox_width = None
+                    style = vtextbox.get('style', '')
+                    if 'width' in style:
+                        import re
+                        match = re.search(r'width:\s*([\d.]+)(pt|px|in|cm)', style)
+                        if match:
+                            value = float(match.group(1))
+                            unit = match.group(2)
+                            if unit == 'pt':
+                                textbox_width = value / 72.0
+                            elif unit == 'px':
+                                textbox_width = value / 96.0
+                            elif unit == 'cm':
+                                textbox_width = value / 2.54
+                            elif unit == 'in':
+                                textbox_width = value
+                            logger.info(f"      文本框宽度: {textbox_width:.2f}英寸")
+                    
+                    if textbox_width is None:
+                        textbox_width = 3.5
+                        logger.warning(f"      无法获取宽度，使用默认值: {textbox_width}英寸")
+                    
+                    # 在文本框中查找表格
+                    tables_in_txbx = txbx_content.findall('.//w:tbl', {'w': w_ns})
+                    logger.info(f"      文本框中找到 {len(tables_in_txbx)} 个表格")
+                    
+                    for tbl_elem in tables_in_txbx:
+                        # 尝试通过表格元素创建Table对象
+                        try:
+                            from docx.table import Table
+                            table = Table(tbl_elem, document)
+                            
+                            logger.info(f"      ✅ 处理表格: {len(table.columns)}列 x {len(table.rows)}行")
+                            adjust_table_font_for_textbox(table, textbox_width)
+                            processed_count += 1
+                        except Exception as e:
+                            logger.error(f"      创建表格对象失败: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"处理VML文本框 {vml_idx} 时出错: {e}", exc_info=True)
+        
+        logger.info(f"✅ 文本框表格处理完成，共处理 {processed_count} 个表格")
+        
+    except Exception as e:
+        logger.error(f"查找文本框中的表格时出错: {e}", exc_info=True)
+
+def adjust_table_font_for_textbox(table, textbox_width=None):
+    """
+    调整文本框中的表格字体大小，确保表格完整显示在文本框内
+    
+    Args:
+        table: 表格对象
+        textbox_width: 文本框宽度（英寸），如果为None则使用默认值
+    """
+    try:
+        from docx.shared import Pt
+        
+        num_cols = len(table.columns)
+        num_rows = len(table.rows)
+        
+        if num_cols == 0:
+            return
+        
+        # 如果没有提供文本框宽度，使用默认值
+        if textbox_width is None:
+            textbox_width = 3.5  # 默认3.5英寸
+            logger.warning(f"⚠️ 未提供文本框宽度，使用默认值: {textbox_width}英寸")
+        
+        available_width = textbox_width
+        margin = 0.15  # 文本框内边距
+        usable_width = max(2.0, available_width - margin * 2)  # 最小2英寸
+        
+        logger.info(f"📐 调整文本框中的表格字体:")
+        logger.info(f"   文本框宽度: {textbox_width:.2f}英寸")
+        logger.info(f"   可用宽度: {usable_width:.2f}英寸")
+        logger.info(f"   表格列数: {num_cols}, 行数: {num_rows}")
+        
+        # 计算每列的最大文本宽度
+        column_max_widths = [0.0] * num_cols
+        
+        for col_idx in range(num_cols):
+            max_text_length = 0
+            max_font_size = 10.0
+            
+            for row_idx in range(num_rows):
+                if col_idx < len(table.rows[row_idx].cells):
+                    cell = table.rows[row_idx].cells[col_idx]
+                    for paragraph in cell.paragraphs:
+                        cell_text = paragraph.text
+                        text_length = len(cell_text) if cell_text else 0
+                        max_text_length = max(max_text_length, text_length)
+                        
+                        for run in paragraph.runs:
+                            if run.font.size:
+                                try:
+                                    font_size = run.font.size.pt
+                                    max_font_size = max(max_font_size, font_size)
+                                except:
+                                    pass
+            
+            # 估算该列需要的宽度
+            char_width = max_font_size * 0.8 / 72.0  # 转换为英寸
+            column_max_widths[col_idx] = max_text_length * char_width
+        
+        # 计算表格总宽度（包括单元格内边距和列间距）
+        cell_padding = 0.1  # 每列左右内边距总和
+        column_spacing = 0.1  # 列间距
+        total_table_width = sum(column_max_widths) + num_cols * cell_padding + (num_cols - 1) * column_spacing
+        
+        logger.info(f"   表格总宽度: {total_table_width:.2f}英寸")
+        
+        # 计算字体缩放比例
+        if total_table_width > usable_width:
+            font_scale = usable_width / total_table_width * 0.95  # 留5%余量，无下限
+            logger.info(f"⚠️ 表格超出文本框，缩放字体到: {font_scale * 100:.1f}%")
+            
+            # 应用字体缩放（无下限）
+            scaled_count = 0
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            try:
+                                if run.font.size:
+                                    original_size = run.font.size.pt
+                                    new_size = original_size * font_scale  # 无下限缩小
+                                    run.font.size = Pt(new_size)
+                                    scaled_count += 1
+                                    if scaled_count <= 3:  # 只记录前3个
+                                        logger.info(f"     字体缩放: {original_size:.1f}pt -> {new_size:.1f}pt")
+                                else:
+                                    # 如果没有设置字体大小，使用缩放后的默认值
+                                    default_size = 10 * font_scale
+                                    run.font.size = Pt(default_size)
+                                    scaled_count += 1
+                            except Exception as e:
+                                logger.debug(f"设置字体大小失败: {e}")
+            
+            logger.info(f"✅ 字体缩放完成，共缩放 {scaled_count} 个run")
+        else:
+            logger.info(f"✅ 表格宽度合适，无需缩放")
+        
+    except Exception as e:
+        logger.error(f"调整文本框表格字体时出错: {e}", exc_info=True)
+
+def adjust_table_layout_for_translation(table, document=None):
+    """调整表格布局以适应翻译后的文本长度，特别处理文本框中的表格"""
+    try:
+        from docx.shared import Inches, Pt
         
         # 获取表格的列数和行数
         num_cols = len(table.columns)
@@ -2180,49 +2569,306 @@ def adjust_table_layout_for_translation(table):
         if num_cols == 0:
             return
         
-        # 计算每列的理想宽度
-        # 根据列数分配可用宽度，留出一些边距
-        available_width = 6.0  # 假设页面宽度为6英寸
-        margin = 0.5  # 左右边距
-        usable_width = available_width - margin * 2
+        # 检测表格是否在文本框中（使用更直接的方法）
+        is_in_textbox = False
+        textbox_width = None
         
-        # 为每列分配宽度，可以根据内容调整
-        column_widths = []
-        for col_idx in range(num_cols):
-            # 计算该列所有单元格的最大文本长度
-            max_text_length = 0
-            for row_idx in range(num_rows):
-                if col_idx < len(table.rows[row_idx].cells):
-                    cell = table.rows[row_idx].cells[col_idx]
-                    for paragraph in cell.paragraphs:
-                        text_length = len(paragraph.text)
-                        max_text_length = max(max_text_length, text_length)
+        try:
+            # 检查表格元素的父元素链
+            table_element = table._element
+            parent = table_element.getparent()
+            depth = 0
+            max_depth = 20  # 增加查找深度
             
-            # 根据文本长度计算列宽（中文字符大约需要0.1英寸宽度）
-            # 最小列宽为0.5英寸，最大为2.0英寸
-            estimated_width = max(0.5, min(2.0, max_text_length * 0.1))
-            column_widths.append(estimated_width)
-        
-        # 调整列宽
-        for col_idx, width in enumerate(column_widths):
-            if col_idx < len(table.columns):
-                # 设置列宽
-                table.columns[col_idx].width = Inches(width)
+            logger.info(f"🔍 开始检测表格是否在文本框中，表格列数: {num_cols}, 行数: {num_rows}")
+            
+            # 记录完整的父元素链用于调试
+            parent_chain = []
+            full_parent_info = []
+            
+            while parent is not None and depth < max_depth:
+                tag_str = str(parent.tag)
+                tag_short = tag_str.split('}')[-1] if '}' in tag_str else tag_str
+                parent_chain.append(tag_short)
                 
-                # 同时设置该列所有单元格的宽度
+                # 记录更详细的信息
+                attrs = dict(parent.attrib) if hasattr(parent, 'attrib') else {}
+                full_parent_info.append({
+                    'depth': depth,
+                    'tag': tag_short,
+                    'full_tag': tag_str,
+                    'has_attrs': len(attrs) > 0
+                })
+                
+                # 检查是否是文本框内容区域（多种方式）
+                if 'txbxContent' in tag_str or 'txbx' in tag_str.lower() or 'textbox' in tag_str.lower():
+                    is_in_textbox = True
+                    logger.info(f"✅ 检测到表格在文本框中！")
+                    logger.info(f"   匹配的标签: {tag_short}")
+                    logger.info(f"   父元素链（最近5层）: {' -> '.join(parent_chain[-5:])}")
+                    
+                    # 尝试获取文本框宽度
+                    # 方法1: 从当前元素向上查找drawing元素
+                    temp_parent = parent.getparent()
+                    temp_depth = 0
+                    while temp_parent is not None and temp_depth < max_depth:
+                        temp_tag = str(temp_parent.tag)
+                        if 'drawing' in temp_tag.lower():
+                            # 查找extent元素获取宽度
+                            extent = temp_parent.find('.//wp:extent', {
+                                'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+                            })
+                            if extent is not None:
+                                cx = extent.get('cx')  # 宽度（EMU单位）
+                                if cx:
+                                    try:
+                                        textbox_width = int(cx) / 914400.0  # 转换为英寸
+                                        logger.info(f"✅ 从drawing元素获取文本框宽度: {textbox_width:.2f}英寸")
+                                        break
+                                    except Exception as e:
+                                        logger.debug(f"转换文本框宽度失败: {e}")
+                            
+                            # 方法2: 查找inline元素获取宽度
+                            inline = temp_parent.find('.//wp:inline', {
+                                'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+                            })
+                            if inline is not None and textbox_width is None:
+                                extent = inline.find('.//wp:extent', {
+                                    'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+                                })
+                                if extent is not None:
+                                    cx = extent.get('cx')
+                                    if cx:
+                                        try:
+                                            textbox_width = int(cx) / 914400.0
+                                            logger.info(f"✅ 从inline元素获取文本框宽度: {textbox_width:.2f}英寸")
+                                            break
+                                        except:
+                                            pass
+                        
+                        temp_parent = temp_parent.getparent()
+                        temp_depth += 1
+                    
+                    # 如果还没找到宽度，尝试从VML获取
+                    if textbox_width is None:
+                        vml_parent = parent
+                        vml_depth = 0
+                        while vml_parent is not None and vml_depth < max_depth:
+                            if 'v:textbox' in str(vml_parent.tag) or 'textbox' in str(vml_parent.tag).lower():
+                                style = vml_parent.get('style', '')
+                                if 'width' in style:
+                                    import re
+                                    match = re.search(r'width:\s*([\d.]+)(pt|px|in|cm)', style)
+                                    if match:
+                                        value = float(match.group(1))
+                                        unit = match.group(2)
+                                        if unit == 'pt':
+                                            textbox_width = value / 72.0
+                                        elif unit == 'px':
+                                            textbox_width = value / 96.0
+                                        elif unit == 'cm':
+                                            textbox_width = value / 2.54
+                                        elif unit == 'in':
+                                            textbox_width = value
+                                        logger.info(f"✅ 从VML获取文本框宽度: {textbox_width:.2f}英寸")
+                                        break
+                            vml_parent = vml_parent.getparent()
+                            vml_depth += 1
+                    
+                    break
+                
+                parent = parent.getparent()
+                depth += 1
+            
+            if not is_in_textbox:
+                logger.warning(f"❌ 表格不在文本框中（通过父元素链检测）")
+                logger.info(f"   完整父元素链（共{len(parent_chain)}层）:")
+                for i, info in enumerate(full_parent_info[:15]):  # 显示前15层
+                    logger.info(f"     depth_{info['depth']}: {info['tag']} (完整: {info['full_tag'][:100]}...)")
+                if len(full_parent_info) > 15:
+                    logger.info(f"     ... 还有 {len(full_parent_info) - 15} 层")
+                
+                # 尝试另一种方法：通过检查表格的实际宽度来判断
+                # 如果表格宽度明显小于页面宽度（比如小于4英寸），可能是文本框中的表格
+                logger.info(f"   尝试备用检测方法：通过表格宽度判断...")
+                try:
+                    # 尝试获取表格的实际宽度
+                    table_width = 0
+                    if table.columns:
+                        try:
+                            # 尝试从第一列获取宽度
+                            first_col_width = table.columns[0].width
+                            if first_col_width:
+                                # 计算表格总宽度（假设所有列宽之和）
+                                table_width = sum(col.width.inches if col.width else 0 for col in table.columns)
+                                logger.info(f"   表格当前总宽度: {table_width:.2f}英寸")
+                                
+                                # 如果表格宽度小于4英寸，可能是文本框中的表格
+                                if table_width > 0 and table_width < 4.0:
+                                    logger.info(f"   ⚠️ 表格宽度较小（{table_width:.2f}英寸），可能是文本框中的表格，强制处理")
+                                    is_in_textbox = True
+                                    textbox_width = table_width * 1.2  # 估算文本框宽度为表格宽度的1.2倍
+                        except Exception as e:
+                            logger.debug(f"获取表格宽度失败: {e}")
+                except Exception as e:
+                    logger.debug(f"备用检测方法失败: {e}")
+        except Exception as e:
+            logger.error(f"检测表格位置时出错: {e}", exc_info=True)
+        
+        if is_in_textbox:
+            # 表格在文本框中，只通过缩小字体来适应
+            if textbox_width is None:
+                textbox_width = 3.5  # 默认较小的宽度
+                logger.warning(f"⚠️ 无法获取文本框宽度，使用默认值: {textbox_width}英寸")
+            
+            available_width = textbox_width
+            margin = 0.15  # 文本框内边距
+            usable_width = max(2.0, available_width - margin * 2)  # 最小2英寸
+            
+            logger.info(f"✅ 检测到表格在文本框中！")
+            logger.info(f"   文本框宽度: {textbox_width:.2f}英寸")
+            logger.info(f"   可用宽度: {usable_width:.2f}英寸")
+            logger.info(f"   表格列数: {num_cols}, 行数: {num_rows}")
+            
+            # 计算每列的最大文本宽度（基于文本长度和当前字体大小）
+            column_max_widths = [0.0] * num_cols
+            column_font_sizes = [10.0] * num_cols  # 默认10pt
+            
+            logger.info(f"开始计算表格宽度...")
+            
+            for col_idx in range(num_cols):
+                max_text_length = 0
+                max_font_size = 10.0
+                
                 for row_idx in range(num_rows):
                     if col_idx < len(table.rows[row_idx].cells):
                         cell = table.rows[row_idx].cells[col_idx]
-                        cell.width = Inches(width)
-        
-        # 设置表格的自动调整属性
-        table.autofit = True
+                        for paragraph in cell.paragraphs:
+                            cell_text = paragraph.text
+                            text_length = len(cell_text) if cell_text else 0
+                            max_text_length = max(max_text_length, text_length)
+                            
+                            for run in paragraph.runs:
+                                # 获取字体大小
+                                if run.font.size:
+                                    try:
+                                        font_size = run.font.size.pt
+                                        max_font_size = max(max_font_size, font_size)
+                                    except:
+                                        pass
+                
+                # 估算该列需要的宽度（中文字符按字体大小，英文字符按0.6倍）
+                # 假设平均每字符宽度为字体大小的0.8倍（考虑中英文混合）
+                char_width = max_font_size * 0.8 / 72.0  # 转换为英寸
+                column_max_widths[col_idx] = max_text_length * char_width
+                column_font_sizes[col_idx] = max_font_size
+                
+                logger.info(f"   列{col_idx+1}: 最大文本长度={max_text_length}, 最大字体={max_font_size:.1f}pt, 估算宽度={column_max_widths[col_idx]:.2f}英寸")
+            
+            # 计算表格总宽度（所有列宽之和，加上列间距和单元格内边距）
+            # 每列左右内边距各约0.05英寸，列间距约0.1英寸
+            cell_padding = 0.1  # 每列左右内边距总和
+            column_spacing = 0.1  # 列间距
+            total_table_width = sum(column_max_widths) + num_cols * cell_padding + (num_cols - 1) * column_spacing
+            
+            logger.info(f"表格宽度计算:")
+            logger.info(f"   各列宽度之和: {sum(column_max_widths):.2f}英寸")
+            logger.info(f"   单元格内边距: {num_cols * cell_padding:.2f}英寸")
+            logger.info(f"   列间距: {(num_cols - 1) * column_spacing:.2f}英寸")
+            logger.info(f"   表格总宽度: {total_table_width:.2f}英寸")
+            logger.info(f"   可用宽度: {usable_width:.2f}英寸")
+            
+            # 计算需要的字体缩放比例
+            if total_table_width > usable_width:
+                font_scale = usable_width / total_table_width * 0.95  # 留5%余量，无下限
+                logger.info(f"⚠️ 表格超出文本框！需要缩放字体到: {font_scale * 100:.1f}%")
+            else:
+                font_scale = 1.0
+                logger.info(f"✅ 表格宽度合适，无需缩放")
+            
+            # 应用字体缩放（无下限）
+            if font_scale < 1.0:
+                logger.info(f"🔧 开始缩小字体到: {font_scale * 100:.1f}%")
+                
+                scaled_count = 0
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                try:
+                                    if run.font.size:
+                                        original_size = run.font.size.pt
+                                        new_size = original_size * font_scale  # 无下限缩小
+                                        run.font.size = Pt(new_size)
+                                        scaled_count += 1
+                                        if scaled_count <= 3:  # 只记录前3个
+                                            logger.info(f"   字体缩放: {original_size:.1f}pt -> {new_size:.1f}pt")
+                                    else:
+                                        # 如果没有设置字体大小，使用缩放后的默认值
+                                        default_size = 10 * font_scale
+                                        run.font.size = Pt(default_size)
+                                        scaled_count += 1
+                                except Exception as e:
+                                    logger.debug(f"设置字体大小失败: {e}")
+                
+                logger.info(f"✅ 字体缩放完成，共缩放 {scaled_count} 个run")
+            else:
+                logger.info(f"ℹ️ 表格宽度合适，无需缩放字体")
+            
+            # 设置表格自动调整，让Word自动处理列宽
+            try:
+                table.autofit = True
+            except:
+                pass
+            
+        else:
+            # 表格不在文本框中，使用原有逻辑
+            # 计算每列的理想宽度
+            # 根据列数分配可用宽度，留出一些边距
+            available_width = 6.0  # 假设页面宽度为6英寸
+            margin = 0.5  # 左右边距
+            usable_width = available_width - margin * 2
+            
+            # 为每列分配宽度，可以根据内容调整
+            column_widths = []
+            for col_idx in range(num_cols):
+                # 计算该列所有单元格的最大文本长度
+                max_text_length = 0
+                for row_idx in range(num_rows):
+                    if col_idx < len(table.rows[row_idx].cells):
+                        cell = table.rows[row_idx].cells[col_idx]
+                        for paragraph in cell.paragraphs:
+                            text_length = len(paragraph.text)
+                            max_text_length = max(max_text_length, text_length)
+                
+                # 根据文本长度计算列宽（中文字符大约需要0.1英寸宽度）
+                # 最小列宽为0.5英寸，最大为2.0英寸
+                estimated_width = max(0.5, min(2.0, max_text_length * 0.1))
+                column_widths.append(estimated_width)
+            
+            # 调整列宽
+            for col_idx, width in enumerate(column_widths):
+                if col_idx < len(table.columns):
+                    # 设置列宽
+                    table.columns[col_idx].width = Inches(width)
+                    
+                    # 同时设置该列所有单元格的宽度
+                    for row_idx in range(num_rows):
+                        if col_idx < len(table.rows[row_idx].cells):
+                            cell = table.rows[row_idx].cells[col_idx]
+                            cell.width = Inches(width)
+            
+            # 设置表格的自动调整属性
+            table.autofit = True
         
         # 设置表格样式，确保内容不会超出边界
-        table.style = 'Table Grid'
+        try:
+            table.style = 'Table Grid'
+        except:
+            pass
         
     except Exception as e:
-        logger.error(f"调整表格布局时出错: {str(e)}")
+        logger.error(f"调整表格布局时出错: {str(e)}", exc_info=True)
 
 
 def process_table_with_layout_adjustment(table, local_texts):
@@ -2259,5 +2905,6 @@ def process_table_with_layout_adjustment(table, local_texts):
                                         tb_para = Paragraph(p_elem, paragraph)
                                         extract_paragraph_with_merge(tb_para, local_texts, "textbox", 0, 1)
     
-    # 调整表格布局
-    adjust_table_layout_for_translation(table)
+    # 调整表格布局（注意：这里无法获取document，所以传None）
+    # 如果需要document，需要在调用时传入
+    adjust_table_layout_for_translation(table, None)
