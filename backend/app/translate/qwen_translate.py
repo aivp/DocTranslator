@@ -647,10 +647,10 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                 except Exception as record_error:
                     logging.warning(f"⚠️ 记录失败token使用失败: {record_error}")
             
-            logging.error(f"❌ Qwen翻译API调用失败 (尝试 {attempt + 1}/{max_retries})")
-            logging.error(f"   错误类型: {error_type}")
-            logging.error(f"   错误信息: {error_msg}")
-            logging.error(f"   输入文本: {text[:100]}...")
+            logging.warning(f"❌ Qwen翻译API调用失败 (尝试 {attempt + 1}/{max_retries})")
+            logging.warning(f"   错误类型: {error_type}")
+            logging.warning(f"   错误信息: {error_msg}")
+            logging.warning(f"   输入文本: {text[:100]}...")
             
             # 检查是否是data_inspection_failed错误
             if "data_inspection_failed" in error_msg.lower() or "inappropriate content" in error_msg.lower():

@@ -112,33 +112,101 @@ class TranslateEngine:
     
     def _complete_task(self, success, failed_reason=None):
         """更新任务状态（只在任务真正完成或失败时调用）"""
-        try:
-            task = db.session.query(Translate).get(self.task_id)
-            if task:
-                # 如果任务已经是 done 状态，不重复更新（已完成的任务不应该被覆盖）
-                if task.status == 'done':
-                    self.app.logger.info(f"任务 {self.task_id} 状态已经是 done，跳过更新")
+        max_retries = 3
+        retry_delay = 1  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                # 如果重试，先刷新session以确保连接有效
+                if attempt > 0:
+                    try:
+                        db.session.expire_all()  # 过期所有对象，强制重新加载
+                        db.session.remove()  # 移除当前session，下次会自动创建新连接
+                        self.app.logger.info(f"重试 {attempt}/{max_retries}: 刷新数据库连接")
+                    except Exception as refresh_error:
+                        self.app.logger.warning(f"刷新数据库连接时出错: {refresh_error}")
+                
+                # 重新获取任务对象（确保使用新的连接）
+                task = db.session.query(Translate).get(self.task_id)
+                if task:
+                    # 如果任务已经是 done 状态，不重复更新（已完成的任务不应该被覆盖）
+                    if task.status == 'done':
+                        self.app.logger.info(f"任务 {self.task_id} 状态已经是 done，跳过更新")
+                        return
+                    
+                    # 如果任务状态是 failed，但这是重试后的新结果，应该允许更新
+                    # 这样可以确保重试时能够正确更新状态
+                    if task.status == 'failed' and not success:
+                        # 如果还是失败，允许更新失败原因和结束时间（可能是新的失败原因）
+                        self.app.logger.info(f"任务 {self.task_id} 重试后仍然失败，更新失败信息")
+                    
+                    task.status = 'done' if success else 'failed'
+                    task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
+                    task.process = 100.00 if success else task.process  # 失败时保持当前进度
+                    
+                    # 如果失败且有原因，设置失败原因
+                    if not success and failed_reason:
+                        task.failed_reason = failed_reason
+                    
+                    db.session.commit()
+                    self.app.logger.info(f"任务 {self.task_id} 状态已更新为 {task.status}")
+                    return  # 成功，退出重试循环
+                else:
+                    self.app.logger.warning(f"任务 {self.task_id} 不存在，无法更新状态")
                     return
+                    
+            except Exception as e:
+                db.session.rollback()
                 
-                # 如果任务状态是 failed，但这是重试后的新结果，应该允许更新
-                # 这样可以确保重试时能够正确更新状态
-                if task.status == 'failed' and not success:
-                    # 如果还是失败，允许更新失败原因和结束时间（可能是新的失败原因）
-                    self.app.logger.info(f"任务 {self.task_id} 重试后仍然失败，更新失败信息")
+                # 获取详细的错误信息
+                error_type = type(e).__name__
+                error_str = str(e)
+                error_code = None
                 
-                task.status = 'done' if success else 'failed'
-                task.end_at = datetime.now(pytz.timezone(self.app.config['TIMEZONE']))  # 使用配置的东八区时区
-                task.process = 100.00 if success else task.process  # 失败时保持当前进度
+                # 尝试提取MySQL错误代码
+                if hasattr(e, 'args') and len(e.args) > 0:
+                    if isinstance(e.args[0], int):
+                        error_code = e.args[0]
+                    elif isinstance(e.args[0], tuple) and len(e.args[0]) > 0:
+                        error_code = e.args[0][0] if isinstance(e.args[0][0], int) else None
                 
-                # 如果失败且有原因，设置失败原因
-                if not success and failed_reason:
-                    task.failed_reason = failed_reason
+                # 检查是否是连接丢失错误
+                is_connection_error = False
+                if 'Lost connection' in error_str or error_code == 2013 or 'OperationalError' in error_type:
+                    is_connection_error = True
                 
-                db.session.commit()
-                self.app.logger.info(f"任务 {self.task_id} 状态已更新为 {task.status}")
-        except Exception as e:
-            db.session.rollback()
-            self.app.logger.error(f"状态更新失败: {str(e)}", exc_info=True)
+                # 构建详细的错误信息
+                error_detail = f"[{error_type}]"
+                if error_code:
+                    error_detail += f"[错误代码: {error_code}]"
+                error_detail += f" {error_str}"
+                
+                if is_connection_error and attempt < max_retries - 1:
+                    # 连接错误且还有重试机会，等待后重试（只记录warning，不记录error）
+                    import time
+                    self.app.logger.warning(
+                        f"数据库连接丢失（尝试 {attempt + 1}/{max_retries}），{retry_delay}秒后重试 | "
+                        f"位置: _complete_task | 任务ID: {self.task_id} | {error_detail}"
+                    )
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                    continue
+                else:
+                    # 非连接错误，或已达到最大重试次数（此时才记录error）
+                    if is_connection_error:
+                        # 连接错误且已重试3次，记录error
+                        self.app.logger.error(
+                            f"状态更新失败：数据库连接丢失，已重试 {max_retries} 次仍失败 | "
+                            f"位置: _complete_task | 任务ID: {self.task_id} | {error_detail}",
+                            exc_info=True
+                        )
+                    else:
+                        # 非连接错误，直接记录error
+                        self.app.logger.error(
+                            f"状态更新失败 | 位置: _complete_task | 任务ID: {self.task_id} | {error_detail}",
+                            exc_info=True
+                        )
+                    return  # 失败，退出重试循环
 
     def _execute_core(self, task, cancel_event):
         """执行核心翻译逻辑"""
