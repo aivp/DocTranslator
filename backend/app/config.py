@@ -99,13 +99,13 @@ class ProductionConfig(Config):
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_pre_ping': True,
         'pool_recycle': 300,
-        'pool_size': 50,  # 增加基础连接池大小（从30增加到50）
-        'max_overflow': 70,  # 增加溢出连接数（从50增加到70），总共最多120个连接
-        'pool_timeout': 5,  # 减少连接获取超时（从10秒减少到5秒），快速失败
+        'pool_size': 80,  # 增加基础连接池大小（从50增加到80，提升60%）
+        'max_overflow': 120,  # 增加溢出连接数（从70增加到120，提升71%），总共最多200个连接
+        'pool_timeout': 10,  # 增加连接获取超时（从5秒增加到10秒），减少连接获取失败
         'connect_args': {
-            'connect_timeout': 5,  # 连接超时5秒
-            'read_timeout': 10,    # 读取超时10秒
-            'write_timeout': 10    # 写入超时10秒
+            'connect_timeout': 10,  # 连接超时10秒（从5秒增加）
+            'read_timeout': 30,     # 读取超时30秒（从10秒增加，支持高并发时的慢查询）
+            'write_timeout': 30     # 写入超时30秒（从10秒增加，支持高并发时的慢更新）
         }
     }
 
