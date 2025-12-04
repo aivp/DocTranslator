@@ -139,11 +139,7 @@ def check_and_cleanup_memory(config=None):
     
     # 检查是否启用自动清理
     if not MEMORY_CLEANUP_ENABLED:
-        return False
-    
-    # 检查清理间隔
-    current_time = time.time()
-    if current_time - _last_cleanup_time < _cleanup_interval:
+        logger.debug("内存清理已禁用")
         return False
     
     # 使用全局阈值
@@ -154,14 +150,31 @@ def check_and_cleanup_memory(config=None):
     
     if current_memory == 0:
         # 无法获取内存信息，跳过清理
+        logger.debug("无法获取内存信息，跳过清理")
+        return False
+    
+    # 检查清理间隔
+    current_time = time.time()
+    time_since_last_cleanup = current_time - _last_cleanup_time
+    
+    # 记录检查信息（即使不清理也记录，方便排查）
+    memory_mb = current_memory / 1024 / 1024
+    threshold_mb = threshold / 1024 / 1024
+    logger.debug(f"内存检查: 当前={memory_mb:.1f}MB, 阈值={threshold_mb:.1f}MB, 距上次清理={time_since_last_cleanup:.0f}秒")
+    
+    # 检查清理间隔
+    if time_since_last_cleanup < _cleanup_interval:
+        logger.debug(f"距离上次清理仅 {time_since_last_cleanup:.0f} 秒，未达到间隔 {_cleanup_interval} 秒，跳过清理")
         return False
     
     if current_memory < threshold:
+        logger.debug(f"内存使用 {memory_mb:.1f}MB 低于阈值 {threshold_mb:.1f}MB，无需清理")
         return False
     
     # 检查是否有运行中的任务
-    if has_running_tasks():
-        logger.info(f"内存使用 {current_memory / 1024 / 1024:.1f}MB 超过阈值 {threshold / 1024 / 1024:.1f}MB，但有任务在运行，跳过清理")
+    has_tasks = has_running_tasks()
+    if has_tasks:
+        logger.info(f"内存使用 {memory_mb:.1f}MB 超过阈值 {threshold_mb:.1f}MB，但有任务在运行，跳过清理")
         return False
     
     # 执行清理
@@ -222,9 +235,19 @@ def setup_periodic_cleanup(app):
         while True:
             try:
                 time.sleep(600)  # 每10分钟检查一次
-                check_and_cleanup_memory()
+                logger.info("⏰ 定期内存检查任务触发（每10分钟检查一次）")
+                result = check_and_cleanup_memory()
+                if not result:
+                    # 即使没有清理，也记录检查结果（使用info级别，方便排查）
+                    current_memory = get_memory_usage()
+                    if current_memory > 0:
+                        memory_mb = current_memory / 1024 / 1024
+                        threshold_mb = MEMORY_CLEANUP_THRESHOLD / 1024 / 1024
+                        has_tasks = has_running_tasks()
+                        time_since_last = time.time() - _last_cleanup_time
+                        logger.info(f"📊 定期内存检查: 当前={memory_mb:.1f}MB, 阈值={threshold_mb:.1f}MB, 有任务运行={has_tasks}, 距上次清理={time_since_last:.0f}秒")
             except Exception as e:
-                logger.error(f"定期内存清理失败: {e}")
+                logger.error(f"定期内存清理失败: {e}", exc_info=True)
                 time.sleep(60)  # 出错后等待1分钟再重试
     
     # 启动后台线程
