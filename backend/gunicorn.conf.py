@@ -12,9 +12,16 @@ bind = "0.0.0.0:5000"  # 监听地址和端口
 backlog = 2048  # 等待连接的最大数量
 
 # ==================== 工作进程配置 ====================
-# 工作进程数（推荐：CPU核心数 × 2 + 1）
-# 例如：8核CPU = 8 × 2 + 1 = 17个进程
-workers = multiprocessing.cpu_count() * 2 + 1
+# 工作进程数配置
+# 方案1（推荐，保守）：workers = CPU核心数（8核 = 8进程）
+# 方案2（激进）：workers = CPU核心数 × 2 + 1（8核 = 17进程）
+# 方案3（自定义）：直接设置固定值，如 workers = 6
+
+# 默认使用保守配置：CPU核心数（平衡性能和内存）
+workers = multiprocessing.cpu_count()
+
+# 如果需要更高性能，可以取消下面的注释（会使用更多内存）
+# workers = multiprocessing.cpu_count() * 2 + 1
 
 # 工作模式（sync: 同步，gevent: 异步）
 worker_class = "sync"  # 使用同步模式（推荐，稳定可靠）

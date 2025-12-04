@@ -55,6 +55,72 @@ def get_memory_usage():
         logger.warning(f"获取内存使用量失败：{type(e).__name__}: {e}")
         return 0
 
+def get_gunicorn_total_memory():
+    """
+    获取所有Gunicorn进程的总内存使用量（字节）
+    用于多进程环境下的系统总内存监控
+    
+    Returns:
+        int: 所有Gunicorn进程的总内存（字节），如果无法获取则返回0
+    """
+    if not PSUTIL_AVAILABLE:
+        logger.debug("psutil不可用，无法获取Gunicorn总内存")
+        return 0
+    
+    try:
+        current_process = psutil.Process(os.getpid())
+        total_memory = 0
+        
+        # 方法1：通过父进程查找所有worker进程
+        try:
+            parent = current_process.parent()
+            if parent and 'gunicorn' in parent.name().lower():
+                # 找到Gunicorn master进程，获取所有子进程
+                children = parent.children(recursive=True)
+                # 包括master进程本身
+                all_processes = [parent] + children
+                
+                for proc in all_processes:
+                    try:
+                        memory_info = proc.memory_info()
+                        total_memory += memory_info.rss
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        # 进程可能已经退出或没有权限，跳过
+                        continue
+                
+                if total_memory > 0:
+                    return total_memory
+        except (psutil.NoSuchProcess, AttributeError):
+            # 父进程不存在或没有parent方法，尝试方法2
+            pass
+        
+        # 方法2：通过进程名查找所有Gunicorn进程
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'memory_info']):
+                try:
+                    proc_name = proc.info['name'].lower()
+                    if 'gunicorn' in proc_name or 'doctranslator' in proc_name:
+                        memory_info = proc.info.get('memory_info')
+                        if memory_info:
+                            total_memory += memory_info.rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError):
+                    # 进程可能已经退出或没有权限，跳过
+                    continue
+            
+            if total_memory > 0:
+                return total_memory
+        except Exception as e:
+            logger.debug(f"通过进程名查找Gunicorn进程失败: {e}")
+        
+        # 方法3：如果都失败，回退到当前进程内存（兼容单进程模式）
+        logger.warning("无法获取所有Gunicorn进程内存，回退到当前进程内存")
+        return get_memory_usage()
+        
+    except Exception as e:
+        logger.warning(f"获取Gunicorn总内存失败: {type(e).__name__}: {e}")
+        # 回退到当前进程内存
+        return get_memory_usage()
+
 def force_memory_release():
     """强制释放内存到操作系统"""
     try:
@@ -139,7 +205,7 @@ def check_and_cleanup_memory(config=None):
     
     # 检查是否启用自动清理
     if not MEMORY_CLEANUP_ENABLED:
-        logger.debug("内存清理已禁用")
+        logger.info("内存清理已禁用")
         return False
     
     # 使用全局阈值
@@ -150,7 +216,7 @@ def check_and_cleanup_memory(config=None):
     
     if current_memory == 0:
         # 无法获取内存信息，跳过清理
-        logger.debug("无法获取内存信息，跳过清理")
+        logger.info("无法获取内存信息，跳过清理")
         return False
     
     # 检查清理间隔
@@ -160,15 +226,15 @@ def check_and_cleanup_memory(config=None):
     # 记录检查信息（即使不清理也记录，方便排查）
     memory_mb = current_memory / 1024 / 1024
     threshold_mb = threshold / 1024 / 1024
-    logger.debug(f"内存检查: 当前={memory_mb:.1f}MB, 阈值={threshold_mb:.1f}MB, 距上次清理={time_since_last_cleanup:.0f}秒")
+    logger.info(f"内存检查: 当前={memory_mb:.1f}MB, 阈值={threshold_mb:.1f}MB, 距上次清理={time_since_last_cleanup:.0f}秒")
     
     # 检查清理间隔
     if time_since_last_cleanup < _cleanup_interval:
-        logger.debug(f"距离上次清理仅 {time_since_last_cleanup:.0f} 秒，未达到间隔 {_cleanup_interval} 秒，跳过清理")
+        logger.info(f"距离上次清理仅 {time_since_last_cleanup:.0f} 秒，未达到间隔 {_cleanup_interval} 秒，跳过清理")
         return False
     
     if current_memory < threshold:
-        logger.debug(f"内存使用 {memory_mb:.1f}MB 低于阈值 {threshold_mb:.1f}MB，无需清理")
+        logger.info(f"内存使用 {memory_mb:.1f}MB 低于阈值 {threshold_mb:.1f}MB，无需清理")
         return False
     
     # 检查是否有运行中的任务

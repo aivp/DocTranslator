@@ -157,19 +157,22 @@ class QueueManager:
             return 0
     
     def _get_memory_usage_gb(self) -> float:
-        """获取当前进程内存使用量(GB)"""
+        """
+        获取系统总内存使用量(GB) - 所有Gunicorn进程的总和
+        用于多进程环境下的系统级内存监控
+        """
         try:
-            from app.utils.memory_manager import get_memory_usage
+            from app.utils.memory_manager import get_gunicorn_total_memory
             
-            # 获取当前进程内存使用量（字节）
-            memory_bytes = get_memory_usage()
+            # 获取所有Gunicorn进程的总内存使用量（字节）
+            memory_bytes = get_gunicorn_total_memory()
             if memory_bytes == 0:
                 # 内存监控不可用，返回0但不报错（避免日志污染）
                 return 0.0
             return memory_bytes / (1024**3)  # 转换为GB
         except Exception as e:
             # 使用debug级别，避免频繁的警告日志
-            logger.debug(f"获取内存使用量失败: {type(e).__name__}: {e}")
+            logger.debug(f"获取系统总内存使用量失败: {type(e).__name__}: {e}")
             return 0.0
     
     def _is_large_pdf(self, file_path):
