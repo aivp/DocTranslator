@@ -1978,30 +1978,81 @@ async function updateProgressOnly() {
     
     const results = await Promise.allSettled(progressPromises)
     
+    // 需要从列表中移除的任务UUID（任务不存在或已删除）
+    const tasksToRemove = []
+    
     // 更新本地数据中的进度信息
     results.forEach(result => {
-      if (result.status === 'fulfilled' && result.value.res?.code === 200) {
-        const { task, res } = result.value
-        const progressData = res.data
+      if (result.status === 'fulfilled') {
+        const { task, res, error } = result.value
         
-        // 找到对应的任务并更新进度
-        const taskIndex = translatesData.value.findIndex(item => item.uuid === task.uuid)
-        if (taskIndex !== -1) {
-          // 只更新进度相关字段，不触发整个列表刷新
-          translatesData.value[taskIndex].process = progressData.process
-          translatesData.value[taskIndex].status = progressData.status
-          translatesData.value[taskIndex].status_name = progressData.status_name  // 添加状态名称更新
-          translatesData.value[taskIndex].spend_time = progressData.spend_time
+        // 处理错误情况（任务不存在、已删除等）
+        if (error) {
+          // 检查是否是404错误（任务不存在）
+          const is404 = error.response?.status === 404 || 
+                       error.response?.data?.code === 404 ||
+                       (res && res.code === 404)
           
-          // 如果任务完成，更新结束时间
-          if (progressData.end_at) {
-            translatesData.value[taskIndex].end_at = progressData.end_at
+          if (is404) {
+            // 任务不存在（可能已被删除），标记为需要移除
+            tasksToRemove.push(task.uuid)
+            console.log(`⚠️ 任务 ${task.uuid} 不存在（可能已删除），将从列表中移除`)
+            return
+          } else {
+            // 其他错误，记录但不移除（可能是网络问题）
+            console.warn(`⚠️ 任务 ${task.uuid} 进度查询失败:`, error)
+            return
           }
-          
-          console.log(`✅ 任务 ${task.uuid} 进度更新: ${progressData.process}%, 状态: ${progressData.status_name}`)
         }
+        
+        // 处理成功情况
+        if (res?.code === 200) {
+          const progressData = res.data
+          
+          // 找到对应的任务并更新进度
+          const taskIndex = translatesData.value.findIndex(item => item.uuid === task.uuid)
+          if (taskIndex !== -1) {
+            // 只更新进度相关字段，不触发整个列表刷新
+            translatesData.value[taskIndex].process = progressData.process
+            translatesData.value[taskIndex].status = progressData.status
+            translatesData.value[taskIndex].status_name = progressData.status_name  // 添加状态名称更新
+            translatesData.value[taskIndex].spend_time = progressData.spend_time
+            
+            // 如果任务完成，更新结束时间
+            if (progressData.end_at) {
+              translatesData.value[taskIndex].end_at = progressData.end_at
+            }
+            
+            console.log(`✅ 任务 ${task.uuid} 进度更新: ${progressData.process}%, 状态: ${progressData.status_name}`)
+          }
+        } else if (res?.code === 404) {
+          // 后端返回404（任务不存在）
+          tasksToRemove.push(task.uuid)
+          console.log(`⚠️ 任务 ${task.uuid} 不存在（后端返回404），将从列表中移除`)
+        }
+      } else {
+        // Promise rejected 的情况
+        console.warn(`⚠️ 任务进度查询Promise被拒绝:`, result.reason)
       }
     })
+    
+    // 从列表中移除不存在的任务
+    if (tasksToRemove.length > 0) {
+      const beforeLength = translatesData.value.length
+      translatesData.value = translatesData.value.filter(item => !tasksToRemove.includes(item.uuid))
+      const removedCount = beforeLength - translatesData.value.length
+      console.log(`🗑️ 已从列表中移除 ${removedCount} 个不存在的任务`)
+      
+      // 如果列表为空，更新状态
+      if (translatesData.value.length === 0) {
+        no_data.value = true
+      }
+      
+      // 从 result.value 中也移除这些任务
+      tasksToRemove.forEach(uuid => {
+        delete result.value[uuid]
+      })
+    }
     
   } catch (error) {
     console.error('更新进度失败:', error)
@@ -2079,13 +2130,26 @@ async function delTransFile(id, index) {
       type: 'warning',
     })
     isLoadingData.value = true
+    
+    // 先找到要删除的任务的uuid，用于清理result.value
+    const taskToDelete = translatesData.value.find(item => item.id === id)
+    const taskUuid = taskToDelete?.uuid
+    
+    // 立即从列表中移除（优化用户体验）
     translatesData.value.splice(index, 1)
     if (translatesData.value.length < 1) {
       no_data.value = true
     }
+    
+    // 从 result.value 中移除（如果存在）
+    if (taskUuid && result.value[taskUuid]) {
+      delete result.value[taskUuid]
+      console.log(`🗑️ 已从进度跟踪中移除任务: ${taskUuid}`)
+    }
 
     const res = await delTranslate(id)
     if (res.code == 200) {
+      // 再次确认从列表中移除（防止重复）
       translatesData.value = translatesData.value.filter((item) => item.id != id)
       if (translatesData.value.length < 1) {
         no_data.value = true
@@ -2093,6 +2157,15 @@ async function delTransFile(id, index) {
       isLoadingData.value = false
       ElMessage.success('删除成功')
       getStorageInfo()
+      
+      // 检查是否还有正在进行的任务，如果没有则停止自动刷新
+      const hasProcessingTasks = translatesData.value.some(item => 
+        item.status === 'process' || item.status === 'changing' || item.status === 'none' || item.status === 'queued'
+      )
+      if (!hasProcessingTasks && autoRefreshInterval.value) {
+        console.log('🛑 没有正在进行的任务，停止自动进度更新')
+        stopAutoRefresh()
+      }
     }
   } catch (error) {
     // 用户点击取消或请求失败

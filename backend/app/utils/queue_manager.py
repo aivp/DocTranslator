@@ -92,7 +92,7 @@ class QueueManager:
                 current_tasks = self._get_current_running_tasks()
                 memory_gb = self._get_memory_usage_gb()
                 
-                logger.debug(f"资源检查: 运行任务={current_tasks}, 内存={memory_gb:.2f}GB")
+                logger.debug(f"资源检查: 运行任务={current_tasks}, 系统总内存={memory_gb:.2f}GB")
                 
                 # 如果当前没有任务但内存超限，进行内存释放
                 if current_tasks == 0 and memory_gb >= self.max_memory_gb:
@@ -100,24 +100,24 @@ class QueueManager:
                     self._force_memory_cleanup()
                     # 释放后重新检查内存
                     memory_gb = self._get_memory_usage_gb()
-                    logger.info(f"内存释放完成，当前内存: {memory_gb:.2f}GB")
+                    logger.info(f"内存释放完成，系统总内存: {memory_gb:.2f}GB")
                 
                 # 如果内存使用率很高（超过临界值），安全进行清理
                 elif memory_gb >= self.critical_memory_gb:
                     if current_tasks <= 1:
-                        logger.info(f"内存使用率较高({memory_gb:.2f}GB >= {self.critical_memory_gb}GB)，当前任务很少({current_tasks}个)，进行安全内存清理")
+                        logger.info(f"系统总内存使用率较高({memory_gb:.2f}GB >= {self.critical_memory_gb}GB)，当前任务很少({current_tasks}个)，进行安全内存清理")
                         self._force_memory_cleanup()
                         # 释放后重新检查内存
                         memory_gb = self._get_memory_usage_gb()
-                        logger.info(f"安全内存清理完成，当前内存: {memory_gb:.2f}GB")
+                        logger.info(f"安全内存清理完成，系统总内存: {memory_gb:.2f}GB")
                     else:
-                        logger.warning(f"内存使用率较高({memory_gb:.2f}GB >= {self.critical_memory_gb}GB)，当前有{current_tasks}个任务运行中，暂停启动新任务保护现有任务")
+                        logger.warning(f"系统总内存使用率较高({memory_gb:.2f}GB >= {self.critical_memory_gb}GB)，当前有{current_tasks}个任务运行中，暂停启动新任务保护现有任务")
                         return  # 暂停启动新任务，保护正在运行的任务
                 
                 # 如果内存使用率极高（超过紧急阈值），动态暂停任务
                 elif memory_gb >= self.emergency_memory_gb:
                     if not self.emergency_pause_active:
-                        logger.critical(f"🚨 内存使用率极高({memory_gb:.2f}GB >= {self.emergency_memory_gb}GB)，启动紧急保护机制")
+                        logger.critical(f"🚨 系统总内存使用率极高({memory_gb:.2f}GB >= {self.emergency_memory_gb}GB)，启动紧急保护机制")
                         self.emergency_pause_active = True
                         self.emergency_start_time = time.time()
                         self._emergency_pause_tasks(current_tasks)
@@ -130,13 +130,13 @@ class QueueManager:
                             self.emergency_pause_active = False
                             self.emergency_start_time = None
                         else:
-                            logger.critical(f"🚨 紧急保护机制已激活({elapsed_minutes:.1f}分钟)，内存仍高({memory_gb:.2f}GB)，继续暂停任务")
+                            logger.critical(f"🚨 紧急保护机制已激活({elapsed_minutes:.1f}分钟)，系统总内存仍高({memory_gb:.2f}GB)，继续暂停任务")
                             self._emergency_pause_tasks(current_tasks)
                 
                 # 如果内存降到安全水平，停止紧急保护
                 elif memory_gb < self.emergency_memory_gb and self.emergency_pause_active:
                     elapsed_minutes = (time.time() - self.emergency_start_time) / 60 if self.emergency_start_time else 0
-                    logger.info(f"✅ 内存已降到安全水平({memory_gb:.2f}GB < {self.emergency_memory_gb}GB)，停止紧急保护机制(持续{elapsed_minutes:.1f}分钟)")
+                    logger.info(f"✅ 系统总内存已降到安全水平({memory_gb:.2f}GB < {self.emergency_memory_gb}GB)，停止紧急保护机制(持续{elapsed_minutes:.1f}分钟)")
                     self.emergency_pause_active = False
                     self.emergency_start_time = None
                 
@@ -259,7 +259,7 @@ class QueueManager:
             after_memory = self._get_memory_usage_gb()
             released = before_memory - after_memory
             
-            logger.info(f"✅ 安全内存清理完成 (释放: {released:.2f}GB, 当前: {after_memory:.2f}GB)")
+            logger.info(f"✅ 安全内存清理完成 (释放: {released:.2f}GB, 系统总内存: {after_memory:.2f}GB)")
             
         except Exception as e:
             logger.error(f"安全内存清理失败: {e}")
@@ -374,14 +374,14 @@ class QueueManager:
                     
                     # 检查内存释放效果
                     current_memory_gb = self._get_memory_usage_gb()
-                    logger.info(f"📊 内存释放后状态: {current_memory_gb:.2f}GB")
+                    logger.info(f"📊 内存释放后状态: 系统总内存 {current_memory_gb:.2f}GB")
                     
                     # 如果内存仍然很高，进行额外的安全清理
                     if current_memory_gb >= self.emergency_memory_gb:
-                        logger.warning(f"⚠️ 内存仍然很高({current_memory_gb:.2f}GB)，进行额外安全清理")
+                        logger.warning(f"⚠️ 系统总内存仍然很高({current_memory_gb:.2f}GB)，进行额外安全清理")
                         self._release_non_task_memory()
                         current_memory_gb = self._get_memory_usage_gb()
-                        logger.info(f"📊 额外清理后内存状态: {current_memory_gb:.2f}GB")
+                        logger.info(f"📊 额外清理后系统总内存状态: {current_memory_gb:.2f}GB")
                     
                     # 立即恢复暂停的任务
                     for task_id in paused_tasks:
@@ -447,7 +447,7 @@ class QueueManager:
             
             # 5. 检查释放后的内存
             after_memory_gb = self._get_memory_usage_gb()
-            logger.info(f"🧹 任务外内存释放完成，当前内存: {after_memory_gb:.2f}GB")
+            logger.info(f"🧹 任务外内存释放完成，系统总内存: {after_memory_gb:.2f}GB")
             
         except Exception as e:
             logger.error(f"释放任务外内存失败: {e}")
