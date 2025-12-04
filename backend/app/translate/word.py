@@ -408,10 +408,6 @@ def start_traditional(trans, start_time, max_threads):
     
 
 
-    # ============== 译文形式处理 ==============
-    trans_type = trans.get('type', 'trans_text_only_inherit')  # 默认继承原版面
-    logger.info(f"译文形式: {trans_type}")
-    # ===========================================
 
     # ============== Word文档预处理 ==============
     logger.info("开始Word文档预处理...")

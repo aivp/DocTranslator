@@ -10,6 +10,7 @@ import gc
 import ctypes
 import logging
 import threading
+import time
 from flask import current_app
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,9 @@ except Exception as e:
 _cleanup_lock = threading.Lock()
 _last_cleanup_time = 0
 _cleanup_interval = 300  # 5分钟内最多清理一次
+
+# 降低内存清理阈值，从1GB降到500MB，更积极地清理内存
+MEMORY_CLEANUP_THRESHOLD = 524288000  # 500MB (单位：字节)
 
 def get_memory_usage():
     """获取当前进程的内存使用量（字节）"""
@@ -54,17 +58,68 @@ def get_memory_usage():
 def force_memory_release():
     """强制释放内存到操作系统"""
     try:
-        gc.collect()
+        # 多次调用gc.collect()，确保彻底清理
+        collected = 0
+        for i in range(3):  # 执行3次垃圾回收
+            collected += gc.collect()
+        
+        logger.debug(f"垃圾回收释放了 {collected} 个对象")
+        
         # 尝试调用glibc的malloc_trim释放未使用的内存
         try:
             libc = ctypes.CDLL("libc.so.6")
             libc.malloc_trim(0)
-            logger.info("🧹 已调用malloc_trim释放内存")
+            logger.debug("🧹 已调用malloc_trim释放内存")
         except Exception as e:
             logger.debug(f"malloc_trim不可用: {e}")
         return True
     except Exception as e:
         logger.warning(f"强制释放内存失败: {e}")
+        return False
+
+def aggressive_memory_cleanup():
+    """
+    激进的内存清理：清理所有可能的缓存和引用
+    
+    包括：
+    1. 多次垃圾回收
+    2. 清理Python内部缓存
+    3. 释放内存到操作系统
+    """
+    try:
+        logger.info("🧹 开始激进内存清理...")
+        
+        # 1. 清理Python内部缓存
+        import sys
+        # 清理模块缓存（谨慎使用，可能影响性能）
+        # sys.modules 不应该清理，但可以清理一些大对象
+        
+        # 2. 多次强制垃圾回收
+        total_collected = 0
+        for i in range(5):  # 执行5次垃圾回收
+            collected = gc.collect()
+            total_collected += collected
+            if collected == 0:
+                break  # 如果没有更多对象可回收，提前退出
+        
+        logger.info(f"垃圾回收释放了 {total_collected} 个对象")
+        
+        # 3. 强制释放内存到操作系统
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+            logger.info("✅ 已调用malloc_trim释放内存到操作系统")
+        except Exception as e:
+            logger.debug(f"malloc_trim不可用: {e}")
+        
+        # 4. 检查清理后的内存
+        after_memory = get_memory_usage()
+        if after_memory > 0:
+            logger.info(f"✅ 激进内存清理完成，当前内存: {after_memory / 1024 / 1024:.1f}MB")
+        
+        return True
+    except Exception as e:
+        logger.error(f"激进内存清理失败: {e}")
         return False
 
 def check_and_cleanup_memory(config=None):
@@ -79,27 +134,27 @@ def check_and_cleanup_memory(config=None):
     """
     global _last_cleanup_time
     
-    # 硬编码配置：始终启用，阈值为1GB
-    # 注意：阈值设置为1GB，用于防止内存泄漏（当内存超过1GB且无任务时清理）
-    # 正常使用后内存会在400~500MB，这是Python内存分配器的正常行为
+    # 硬编码配置：始终启用
     MEMORY_CLEANUP_ENABLED = True
-    MEMORY_CLEANUP_THRESHOLD = 1073741824  # 1GB (单位：字节) - 用于防止内存泄漏
     
-    # 检查是否启用自动清理（硬编码为True，此检查实际不会生效）
+    # 检查是否启用自动清理
     if not MEMORY_CLEANUP_ENABLED:
         return False
     
     # 检查清理间隔
-    import time
     current_time = time.time()
     if current_time - _last_cleanup_time < _cleanup_interval:
         return False
     
-    # 使用硬编码的阈值
+    # 使用全局阈值
     threshold = MEMORY_CLEANUP_THRESHOLD
     
     # 检查当前内存使用
     current_memory = get_memory_usage()
+    
+    if current_memory == 0:
+        # 无法获取内存信息，跳过清理
+        return False
     
     if current_memory < threshold:
         return False
@@ -118,20 +173,16 @@ def check_and_cleanup_memory(config=None):
         try:
             logger.info(f"🧹 开始自动内存清理 (当前: {current_memory / 1024 / 1024:.1f}MB, 阈值: {threshold / 1024 / 1024:.1f}MB)")
             
-            # 强制垃圾回收
-            collected = gc.collect()
-            logger.info(f"垃圾回收释放 {collected} 个对象")
-            
-            # 强制释放内存到操作系统
-            force_memory_release()
+            # 使用激进清理
+            aggressive_memory_cleanup()
             
             # 检查清理后的内存
             after_memory = get_memory_usage()
-            released = current_memory - after_memory
+            if after_memory > 0:
+                released = current_memory - after_memory
+                logger.info(f"✅ 内存清理完成 (释放: {released / 1024 / 1024:.1f}MB, 当前: {after_memory / 1024 / 1024:.1f}MB)")
             
             _last_cleanup_time = current_time
-            
-            logger.info(f"✅ 内存清理完成 (释放: {released / 1024 / 1024:.1f}MB, 当前: {after_memory / 1024 / 1024:.1f}MB)")
             
             return True
             
@@ -160,3 +211,23 @@ def setup_memory_monitor(app):
         except Exception as e:
             logger.debug(f"内存检查失败: {e}")
 
+def setup_periodic_cleanup(app):
+    """
+    设置定期内存清理任务
+    
+    即使没有请求，也会定期检查并清理内存
+    """
+    def periodic_cleanup():
+        """定期清理内存的后台任务"""
+        while True:
+            try:
+                time.sleep(600)  # 每10分钟检查一次
+                check_and_cleanup_memory()
+            except Exception as e:
+                logger.error(f"定期内存清理失败: {e}")
+                time.sleep(60)  # 出错后等待1分钟再重试
+    
+    # 启动后台线程
+    cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
+    cleanup_thread.start()
+    logger.info("✅ 定期内存清理任务已启动（每10分钟检查一次）")

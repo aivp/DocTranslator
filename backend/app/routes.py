@@ -30,6 +30,7 @@ from app.resources.api.comparison import MyComparisonListResource, SharedCompari
     ExportAllComparisonsResource, ComparisonTermsResource, ComparisonTermEditResource, \
     ComparisonTermDeleteResource
 from app.resources.api.customer import GuestIdResource, CustomerDetailResource
+from app.resources.api.customer_setting import CustomerSettingResource
 from app.resources.api.doc2x import Doc2XTranslateStartResource, Doc2XTranslateStatusResource
 from app.resources.api.files import FileUploadResource, FileDeleteResource
 from app.resources.api.prompt import MyPromptListResource, SharedPromptListResource, \
@@ -108,6 +109,7 @@ def register_routes(api):
 
     api.add_resource(GuestIdResource, '/api/guest/id')
     api.add_resource(CustomerDetailResource, '/api/customer/<int:customer_id>')
+    api.add_resource(CustomerSettingResource, '/api/customer/setting')  # 用户翻译配置接口
 
     api.add_resource(MyComparisonListResource, '/api/comparison/my')
     api.add_resource(SharedComparisonListResource, '/api/comparison/share')

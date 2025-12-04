@@ -73,8 +73,18 @@ service.interceptors.response.use(
           try {
             const errorData = JSON.parse(text)
             if (errorData.code === 401) {
-              ElMessage.error('身份过期，请重新登录')
-              router.push('/login')
+              // 检查是否是登录接口
+              const isLoginRequest = response.config && (
+                response.config.url === '/login' || 
+                response.config.url === '/api/login' ||
+                response.config.url?.includes('/login')
+              )
+              if (isLoginRequest) {
+                ElMessage.error(errorData.message || '账号或密码错误')
+              } else {
+                ElMessage.error('身份过期，请重新登录')
+                router.push('/login')
+              }
               return Promise.reject(new Error('Unauthorized'))
             }
             ElMessage.error(errorData.message || '下载失败')
@@ -98,8 +108,20 @@ service.interceptors.response.use(
       const [data, statusCode] = res
       // 检查 HTTP 状态码
       if (statusCode === 401) {
-        ElMessage.error('身份过期，请重新登录')
-        router.push('/login')
+        // 检查是否是登录接口
+        const isLoginRequest = response.config && (
+          response.config.url === '/login' || 
+          response.config.url === '/api/login' ||
+          response.config.url?.includes('/login')
+        )
+        if (isLoginRequest) {
+          // 登录接口的401，显示后端返回的具体错误信息
+          const errorMsg = (data && data.message) ? data.message : '账号或密码错误'
+          ElMessage.error(errorMsg)
+        } else {
+          ElMessage.error('身份过期，请重新登录')
+          router.push('/login')
+        }
         return Promise.reject(new Error('Unauthorized'))
       }
       // 返回数据部分，但保持原有的业务状态码结构
@@ -112,8 +134,19 @@ service.interceptors.response.use(
     
     // 如果不是元组格式，按原来的逻辑处理
     if (res?.code === 401) {
-      ElMessage.error('身份过期，请重新登录')
-      router.push('/login')
+      // 检查是否是登录接口
+      const isLoginRequest = response.config && (
+        response.config.url === '/login' || 
+        response.config.url === '/api/login' ||
+        response.config.url?.includes('/login')
+      )
+      if (isLoginRequest) {
+        // 登录接口的401，显示后端返回的具体错误信息
+        ElMessage.error(res.message || '账号或密码错误')
+      } else {
+        ElMessage.error('身份过期，请重新登录')
+        router.push('/login')
+      }
       return Promise.reject(new Error('Unauthorized'))
     }
     return res
@@ -130,14 +163,32 @@ service.interceptors.response.use(
         errorMessage = response.data.error
       }
       
+      // 判断是否是登录接口（登录接口的401应该显示具体的错误信息，而不是"身份过期"）
+      const isLoginRequest = error.config && (
+        error.config.url === '/login' || 
+        error.config.url === '/api/login' ||
+        error.config.url?.includes('/login')
+      )
+      
       switch (response.status) {
         case 401:
-          ElMessage.error('身份过期，请重新登录')
-          router.push('/login')
+          // 登录接口的401错误，显示后端返回的具体错误信息（如"账号或密码错误"）
+          if (isLoginRequest) {
+            ElMessage.error(errorMessage || '账号或密码错误')
+          } else {
+            // 其他接口的401错误，显示"身份过期"
+            ElMessage.error('身份过期，请重新登录')
+            router.push('/login')
+          }
           break
         case 422:
-          ElMessage.error('身份过期，请重新登录')
-          router.push('/login')
+          // 登录接口的422错误，显示后端返回的具体错误信息
+          if (isLoginRequest) {
+            ElMessage.error(errorMessage || '请求错误')
+          } else {
+            ElMessage.error('身份过期，请重新登录')
+            router.push('/login')
+          }
           break  
         case 403:
           // 优先显示后端返回的具体错误信息

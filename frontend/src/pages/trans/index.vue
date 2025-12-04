@@ -1325,6 +1325,60 @@ async function handleTranslate(transform) {
   translateButtonState.value.isLoading = true
   translateButtonState.value.disabled = true
   
+  // 检查用户翻译配置
+  try {
+    const { getCustomerSetting } = await import('@/api/trans')
+    const settingRes = await getCustomerSetting()
+    
+    if (settingRes.code === 200 && settingRes.data) {
+      const userSetting = settingRes.data
+      
+      // 检查是否设置了目标语言
+      if (!userSetting.lang || !userSetting.lang.trim()) {
+        ElMessage({
+          message: '请先进行翻译设置，选择目标语言后再开始翻译',
+          type: 'warning',
+          duration: 5000
+        })
+        translateButtonState.value.isLoading = false
+        translateButtonState.value.disabled = false
+        return
+      }
+      
+      // 从数据库配置更新到store
+      translateStore.updateAIServerSettings({
+        lang: userSetting.lang,
+        comparison_id: userSetting.comparison_id && userSetting.comparison_id.length > 0 
+          ? userSetting.comparison_id.map(id => parseInt(id)) 
+          : [],
+        prompt_id: userSetting.prompt_id || null,
+      })
+      translateStore.updateCommonSettings({
+        pdf_translate_method: userSetting.pdf_translate_method || 'direct',
+      })
+    } else {
+      // 如果获取配置失败，提示用户先设置
+      ElMessage({
+        message: '请先进行翻译设置，选择目标语言后再开始翻译',
+        type: 'warning',
+        duration: 5000
+      })
+      translateButtonState.value.isLoading = false
+      translateButtonState.value.disabled = false
+      return
+    }
+  } catch (error) {
+    console.error('检查用户配置失败:', error)
+    ElMessage({
+      message: '检查翻译配置失败，请先进行翻译设置',
+      type: 'error',
+      duration: 5000
+    })
+    translateButtonState.value.isLoading = false
+    translateButtonState.value.disabled = false
+    return
+  }
+  
   // 首先再次赋值，防止没有更新
   form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
   
@@ -1334,7 +1388,7 @@ async function handleTranslate(transform) {
   console.log('当前表单数据:', form.value)
   console.log('当前服务类型:', currentServiceType.value)
   
-  // 确保语言字段正确设置（必须设置，不能为空）
+  // 确保语言字段正确设置（从store中获取）
   if (currentServiceType.value === 'ai') {
     if (translateStore.aiServer.lang && translateStore.aiServer.lang.trim()) {
       form.value.lang = translateStore.aiServer.lang
@@ -1344,7 +1398,7 @@ async function handleTranslate(transform) {
       }
     } else {
       // 如果语言未设置，阻止翻译
-      ElMessage.error('请先选择目标语言')
+      ElMessage.error('请先进行翻译设置，选择目标语言')
       translateButtonState.value.isLoading = false
       translateButtonState.value.disabled = false
       return
@@ -1354,7 +1408,7 @@ async function handleTranslate(transform) {
   // 最终验证：确保lang字段存在且不为空
   if (!form.value.lang || !form.value.lang.trim()) {
     console.error('目标语言参数缺失或为空:', form.value)
-    ElMessage.error('请先选择目标语言')
+    ElMessage.error('请先进行翻译设置，选择目标语言')
     translateButtonState.value.isLoading = false
     translateButtonState.value.disabled = false
     return
@@ -2196,6 +2250,29 @@ async function downAllTransFile() {
 onMounted(async () => {
   if (userStore.token) {
     getTranslatesData(1)
+    
+    // 从数据库加载用户翻译配置到Store（作为缓存）
+    try {
+      const { getCustomerSetting } = await import('@/api/trans')
+      const settingRes = await getCustomerSetting()
+      if (settingRes.code === 200 && settingRes.data) {
+        const userSetting = settingRes.data
+        // 同步到Store（作为缓存）
+        translateStore.updateAIServerSettings({
+          lang: userSetting.lang || 'English',
+          comparison_id: userSetting.comparison_id && userSetting.comparison_id.length > 0 
+            ? userSetting.comparison_id.map(id => parseInt(id)) 
+            : [],
+          prompt_id: userSetting.prompt_id || null,
+        })
+        translateStore.updateCommonSettings({
+          pdf_translate_method: userSetting.pdf_translate_method || 'direct',
+        })
+      }
+    } catch (error) {
+      console.error('加载用户翻译配置失败:', error)
+    }
+    
     form.value = { ...form.value, ...translateStore.getCurrentServiceForm }
     
     // 检查提示词的有效性

@@ -82,52 +82,84 @@ class UserRegisterResource(Resource):
 class UserLoginResource(Resource):
     def post(self):
         """用户登录接口[^3]"""
-        data = request.form
-        customer = Customer.query.filter_by(email=data['email']).first()
+        try:
+            data = request.form
+            customer = Customer.query.filter_by(email=data['email']).first()
 
-        if not customer or not verify_password(customer.password, data['password']):
-            return APIResponse.error('账号或密码错误', 500)
-        
-        # 获取租户代码（必填）
-        tenant_code = data.get('tenant_code', '').strip()
-        if not tenant_code:
-            return APIResponse.error('请输入租户代码', 400)
-        
-        # 根据租户代码查找租户
-        tenant = Tenant.query.filter_by(tenant_code=tenant_code).first()
-        if not tenant:
-            return APIResponse.error('租户代码不存在，请检查后重试', 400)
-        
-        # 验证该用户是否属于这个租户
-        tenant_customer = TenantCustomer.query.filter_by(
-            customer_id=customer.id,
-            tenant_id=tenant.id
-        ).first()
-        
-        if not tenant_customer:
-            return APIResponse.error('该账号不属于该租户，请检查租户代码', 403)
-        
-        # 生成新的 token，并获取其 jti (JWT ID)
-        # 添加 user_type 标识以区分管理员和普通用户
-        access_token = create_access_token(
-            identity=str(customer.id),
-            additional_claims={'user_type': 'customer'}
-        )
-        
-        # 解码 token 获取 jti
-        from flask_jwt_extended import decode_token
-        decoded = decode_token(access_token)
-        token_jti = decoded.get('jti')
-        
-        # 更新用户表中的当前 token ID（实现单点登录：新登录会使旧 token 失效）
-        customer.current_token_id = token_jti
-        db.session.commit()
-        
-        return APIResponse.success({
-            'token': access_token,
-            'email': data['email'],
-            'level': customer.level
-        })
+            if not customer:
+                return APIResponse.error('账号或密码错误', 401)
+            
+            # 验证密码（添加异常处理和详细日志）
+            import logging
+            try:
+                # 检查密码字段是否存在且不为空
+                if not customer.password:
+                    logging.error(f"用户密码字段为空: customer_id={customer.id}, email={data.get('email')}")
+                    return APIResponse.error('账号或密码错误', 401)
+                
+                # 记录密码格式信息（不记录实际密码）
+                password_format = "哈希格式" if '$' in customer.password else "可能是明文"
+                logging.info(f"密码验证: customer_id={customer.id}, email={data.get('email')}, 密码格式={password_format}, 密码长度={len(customer.password)}")
+                
+                # 优先使用Customer模型的verify_password方法（支持哈希和明文兼容）
+                if hasattr(customer, 'verify_password'):
+                    password_valid = customer.verify_password(data['password'])
+                else:
+                    # 回退到使用工具函数
+                    password_valid = verify_password(customer.password, data['password'])
+                
+                if not password_valid:
+                    logging.warning(f"密码验证失败: customer_id={customer.id}, email={data.get('email')}, 密码格式={password_format}")
+                    return APIResponse.error('账号或密码错误', 401)
+            except Exception as e:
+                # 如果密码验证出错（可能是密码格式问题），记录详细日志
+                logging.error(f"密码验证异常: {str(e)}, customer_id={customer.id}, email={data.get('email')}, 密码长度={len(customer.password) if customer.password else 0}")
+                return APIResponse.error('账号或密码错误', 401)
+            
+            # 获取租户代码（必填）
+            tenant_code = data.get('tenant_code', '').strip()
+            if not tenant_code:
+                return APIResponse.error('请输入租户代码', 400)
+            
+            # 根据租户代码查找租户
+            tenant = Tenant.query.filter_by(tenant_code=tenant_code).first()
+            if not tenant:
+                return APIResponse.error('租户代码不存在，请检查后重试', 400)
+            
+            # 验证该用户是否属于这个租户
+            tenant_customer = TenantCustomer.query.filter_by(
+                customer_id=customer.id,
+                tenant_id=tenant.id
+            ).first()
+            
+            if not tenant_customer:
+                return APIResponse.error('该账号不属于该租户，请检查租户代码', 403)
+            
+            # 生成新的 token，并获取其 jti (JWT ID)
+            # 添加 user_type 标识以区分管理员和普通用户
+            access_token = create_access_token(
+                identity=str(customer.id),
+                additional_claims={'user_type': 'customer'}
+            )
+            
+            # 解码 token 获取 jti
+            from flask_jwt_extended import decode_token
+            decoded = decode_token(access_token)
+            token_jti = decoded.get('jti')
+            
+            # 更新用户表中的当前 token ID（实现单点登录：新登录会使旧 token 失效）
+            customer.current_token_id = token_jti
+            db.session.commit()
+            
+            return APIResponse.success({
+                'token': access_token,
+                'email': data['email'],
+                'level': customer.level
+            })
+        except Exception as e:
+            import logging
+            logging.error(f"登录接口异常: {str(e)}", exc_info=True)
+            return APIResponse.error('服务器内部错误', 500)
 
 
 class SendResetCodeResource(Resource):

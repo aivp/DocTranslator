@@ -94,6 +94,27 @@ class TranslateStartResource(Resource):
             if customer.status == 'disabled':
                 return APIResponse.error("用户状态异常", 403)
 
+            # 检查用户翻译配置
+            from app.models.customer_setting import CustomerSetting
+            
+            tenant_id = get_current_tenant_id(user_id)
+            user_setting = CustomerSetting.query.filter_by(
+                customer_id=user_id,
+                tenant_id=tenant_id,
+                deleted_flag='N'
+            ).first()
+            
+            # 如果用户没有配置或未设置目标语言，提示先进行翻译设置
+            if not user_setting or not user_setting.lang:
+                return APIResponse.error("请先进行翻译设置，选择目标语言后再开始翻译", 400)
+            
+            # 从用户配置中读取参数（优先使用数据库配置）
+            config_lang = user_setting.lang
+            config_comparison_id = user_setting.comparison_id
+            config_prompt_id = user_setting.prompt_id
+            config_pdf_translate_method = user_setting.pdf_translate_method or 'direct'
+            config_origin_lang = user_setting.origin_lang or ''
+
             # 生成绝对路径（跨平台兼容，包含租户ID）
             def get_absolute_storage_path(filename, user_id):
                 # 获取租户翻译目录
@@ -114,15 +135,11 @@ class TranslateStartResource(Resource):
 
             # 根据PDF翻译方法处理PDF文件
             if origin_filename.lower().endswith('.pdf'):
-                # 优先使用前端传入的PDF翻译方法，如果没有则从系统设置中获取
-                pdf_translate_method = data.get('pdf_translate_method')
-                if not pdf_translate_method:
-                    pdf_method_setting = Setting.query.filter_by(
-                        group='other_setting',
-                        alias='pdf_translate_method',
-                        deleted_flag='N'
-                    ).first()
-                    pdf_translate_method = pdf_method_setting.value if pdf_method_setting else 'direct'
+                # 优先使用用户配置中的PDF翻译方法
+                pdf_translate_method = config_pdf_translate_method
+                # 如果前端传入了，使用前端的（允许临时覆盖）
+                if data.get('pdf_translate_method'):
+                    pdf_translate_method = data.get('pdf_translate_method')
                 
                 print(f"📋 使用的PDF翻译方法: {pdf_translate_method}")
                 
@@ -137,8 +154,8 @@ class TranslateStartResource(Resource):
                 # 非PDF文件不涉及PDF方法
                 pdf_translate_method = None
 
-            # 获取翻译类型（取最后一个type值）
-            translate_type = data.get('type[2]', 'trans_all_only_inherit')
+            # 翻译类型固定为仅译文（直接替换，不保留原文）
+            translate_type = 'trans_text_only_inherit'
 
             # 查询或创建翻译记录
             uuid_value = data.get('uuid', '')
@@ -238,25 +255,39 @@ class TranslateStartResource(Resource):
             translate.app_key = data.get('app_key', None)
             translate.app_id = data.get('app_id', None)
             translate.backup_model = data['backup_model']
-            translate.type = translate_type
+            translate.type = translate_type  # 固定为仅译文模式
             translate.prompt = data['prompt']
             translate.threads = int(data['threads'])
             translate.backup_model = data.get('backup_model', '')
-            translate.origin_lang = data.get('origin_lang', '')
+            # 优先使用用户配置中的源语言
+            translate.origin_lang = config_origin_lang
+            # 如果前端传入了，使用前端的（允许临时覆盖）
+            if data.get('origin_lang'):
+                translate.origin_lang = data.get('origin_lang', '')
             translate.size = data.get('size', 0)  # 更新文件大小
-            # 获取 comparison_id 并转换为字符串（支持多个ID，逗号分隔）
+            # 获取 comparison_id（优先使用用户配置）
+            comparison_id = config_comparison_id  # 从用户配置读取
+            
+            # 如果前端传入了，使用前端的（允许临时覆盖）
             # 处理数组格式的字段名：comparison_id[0], comparison_id[1], ...
-            comparison_id = []
+            frontend_comparison_id = []
             i = 0
             while f'comparison_id[{i}]' in data:
                 value = data.get(f'comparison_id[{i}]', '')
                 if value and value.strip():
-                    comparison_id.append(value.strip())
+                    frontend_comparison_id.append(value.strip())
                 i += 1
             
             # 如果没有找到数组格式，尝试直接获取 comparison_id
-            if not comparison_id:
-                comparison_id = data.get('comparison_id', '')
+            if not frontend_comparison_id:
+                frontend_comparison_id = data.get('comparison_id', '')
+            
+            # 如果前端传入了术语库，使用前端的
+            if frontend_comparison_id:
+                if isinstance(frontend_comparison_id, list):
+                    comparison_id = ','.join(map(str, frontend_comparison_id))
+                else:
+                    comparison_id = str(frontend_comparison_id)
             
             # 添加详细日志
             current_app.logger.info(f"=== 翻译任务启动 - 术语库调试信息 ===")
@@ -285,8 +316,12 @@ class TranslateStartResource(Resource):
             current_app.logger.info(f"=== 术语库调试信息结束 ===")
             
             translate.comparison_id = comparison_id if comparison_id else None
-            prompt_id = data.get('prompt_id', '0')
-            translate.prompt_id = int(prompt_id) if prompt_id else None
+            # 优先使用用户配置中的 prompt_id
+            prompt_id = config_prompt_id
+            # 如果前端传入了，使用前端的（允许临时覆盖）
+            if data.get('prompt_id'):
+                prompt_id = data.get('prompt_id', '0')
+                prompt_id = int(prompt_id) if prompt_id else None
             
             # 如果选择了提示词，获取提示词内容并保存到prompt字段
             if prompt_id and int(prompt_id) > 0:
@@ -327,11 +362,15 @@ class TranslateStartResource(Resource):
                 translate.lang = data['to_lang']
                 translate.comparison_id = 1 if data.get('needIntervene', False) else None  # 使用术语库
             else:
-                # 验证lang参数不能为空
-                lang_value = data.get('lang', '').strip()
+                # 优先使用用户配置中的目标语言
+                lang_value = config_lang
+                # 如果前端传入了，使用前端的（允许临时覆盖）
+                if data.get('lang'):
+                    lang_value = data.get('lang', '').strip()
+                
                 if not lang_value:
-                    current_app.logger.error(f"目标语言参数(lang)缺失或为空: data={data}")
-                    return APIResponse.error("目标语言参数(lang)缺失或为空，必须由前端传递", 400)
+                    current_app.logger.error(f"目标语言参数(lang)缺失或为空")
+                    return APIResponse.error("目标语言参数(lang)缺失或为空，请先进行翻译设置", 400)
                 translate.lang = lang_value
             # 使用 UTC 时间并格式化
             # current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')

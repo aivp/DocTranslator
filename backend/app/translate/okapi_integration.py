@@ -1462,6 +1462,18 @@ class OkapiPptxTranslator:
                 )
                 
                 if success:
+                    # 步骤4：应用字体缩放（按页级别）
+                    logger.info("🔄 步骤4: 应用PPT字体缩放（按页级别）...")
+                    try:
+                        from app.translate.powerpoint import apply_pptx_font_scaling_after_okapi
+                        font_success = apply_pptx_font_scaling_after_okapi(input_file, output_file)
+                        if font_success:
+                            logger.info("✅ PPT字体缩放应用成功")
+                        else:
+                            logger.warning("PPT字体缩放应用失败，但翻译已完成")
+                    except Exception as e:
+                        logger.warning(f"应用PPT字体缩放时出错: {e}，但翻译已完成")
+                    
                     # 翻译成功日志已关闭（调试时可打开）
                     # logger.info("🎯 PPTX 翻译完成")
                     return True

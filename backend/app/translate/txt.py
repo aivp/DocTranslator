@@ -210,34 +210,20 @@ def start_traditional(trans):
 
     text_count = 0
     # print(texts)
-    trans_type = trans['type']
-    onlyTransText = False
-    if trans_type == "trans_text_only_inherit" or trans_type == "trans_text_only_new" or trans_type == "trans_all_only_new" or trans_type == "trans_all_only_inherit":
-        onlyTransText = True
-
-    # 将翻译结果写入新的 TXT 文件
+    # 将翻译结果写入新的 TXT 文件（直接输出译文，不保留原文）
     try:
         with open(trans['target_file'], 'w', encoding='utf-8') as file:
             translated_paragraph = ""
-            origin_paragraph = ""
             for item in texts:
                 if item["sub"]:
                     translated_paragraph += item["text"]
-                    origin_paragraph += item["origin"]
                 else:
                     if translated_paragraph != "":
-                        if onlyTransText == False:
-                            file.write(origin_paragraph + '\n')
                         file.write(translated_paragraph + '\n\n')
                         translated_paragraph = ""
-                        origin_paragraph = ""
-                    if onlyTransText == False:
-                        file.write(item["origin"] + '\n')
                     file.write(item["text"] + '\n\n')
 
             if translated_paragraph != "":
-                if onlyTransText == False:
-                    file.write(origin_paragraph + '\n')
                 file.write(translated_paragraph + '\n')
     except Exception as e:
         print(f"无法写入文件 {trans['target_file']}: {e}")

@@ -136,7 +136,7 @@ import { useTranslateStore } from '@/store/translate'
 import { useSettingsStore } from '@/store/settings'
 import { ElMessage } from 'element-plus'
 import { prompt_my, comparison_my } from '@/api/corpus'
-import { checkOpenAI, checkDocx } from '@/api/trans'
+import { checkOpenAI, checkDocx, getCustomerSetting, saveCustomerSetting } from '@/api/trans'
 import { useUserStore } from '@/store/user'
 const userStore = useUserStore()
 const isVIP = computed(() => userStore.isVip)
@@ -573,7 +573,7 @@ const formReset = () => {
 // 保存弹窗翻译设置
 const formConfim = (formEl) => {
   if (!formEl) return
-  formEl.validate((valid) => {
+  formEl.validate(async (valid) => {
     if (valid) {
       // 清理comparison_id数据，确保没有空值
       if (Array.isArray(settingsForm.value.aiServer.comparison_id)) {
@@ -619,8 +619,36 @@ const formConfim = (formEl) => {
         translateStore.updateGoogleSettings(settingsForm.value.google)
       }
       
-      translateStore.updateCommonSettings(settingsForm.value.common)
-      ElMessage.success('设置保存成功')
+      // 优先保存到后端数据库（数据源）
+      try {
+        const saveData = {
+          lang: settingsForm.value.aiServer.lang,
+          comparison_id: settingsForm.value.aiServer.comparison_id || [],
+          prompt_id: settingsForm.value.aiServer.prompt_id || null,
+          pdf_translate_method: settingsForm.value.common.pdf_translate_method || 'direct',
+          origin_lang: ''  // 源语言可选，暂时不保存
+        }
+        
+        const saveRes = await saveCustomerSetting(saveData)
+        if (saveRes.code === 200) {
+          console.log('配置已保存到数据库:', saveRes.data)
+          
+          // 数据库保存成功后，再更新Store（作为缓存）
+          translateStore.updateCommonSettings(settingsForm.value.common)
+          ElMessage.success('设置保存成功')
+        } else {
+          console.error('保存配置到数据库失败:', saveRes.message)
+          // 即使数据库保存失败，也更新Store（降级处理）
+          translateStore.updateCommonSettings(settingsForm.value.common)
+          ElMessage.warning('设置已保存到本地，但保存到数据库失败，请刷新页面重试')
+        }
+      } catch (error) {
+        console.error('保存配置到数据库失败:', error)
+        // 即使数据库保存失败，也更新Store（降级处理）
+        translateStore.updateCommonSettings(settingsForm.value.common)
+        ElMessage.warning('设置已保存到本地，但保存到数据库失败，请刷新页面重试')
+      }
+      
       formSetShow.value = false
     }
   })
@@ -632,34 +660,78 @@ const formCancel = () => {
 }
 const open = async () => {
   formSetShow.value = true
-  // 初始化表单数据，使用硬编码的默认值
-  settingsForm.value = {
-    currentService: 'ai',  // 默认AI翻译
-    aiServer: { 
-      ...translateStore.aiServer, 
-      // 硬编码的默认值，覆盖store中的值
-      model: 'qwen-mt-plus',  // 主模型：通义千问
-      backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 备用模型：Claude
-      lang: translateStore.aiServer.lang || 'English',  // 只针对语言：使用store中的值，如果没有则默认为English（英文名）
-      type: ['trans_text', 'trans_text_only', 'trans_text_only_inherit'],  // 默认译文形式：仅文字+仅译文+继承原版面
-      threads: 30,  // 默认线程数：30
-      comparison_id: (() => {
-        // 清理数据，确保没有空值或无效值
-        const storedValue = translateStore.aiServer.comparison_id
-        if (Array.isArray(storedValue)) {
-          // 过滤掉空值、null、undefined等无效值
-          return storedValue.filter(id => id && id !== '' && id !== null && id !== undefined)
-        }
-        return []
-      })(),  // 术语库多选，使用store中的值或默认为空数组
-    },
-    baidu: { ...translateStore.baidu },
-    google: { ...translateStore.google },
-    common: { 
-      ...translateStore.common,
-      langs: translateStore.common.langs || ['', 'English'],  // 只针对langs：使用store中的值，如果没有则默认为['', 'English']
-      pdf_translate_method: translateStore.common.pdf_translate_method || 'direct',  // PDF翻译方法，默认为直接翻译
-    },
+  
+  // 从后端获取用户配置（如果没有则自动创建）
+  try {
+    const settingRes = await getCustomerSetting()
+    if (settingRes.code === 200 && settingRes.data) {
+      const userSetting = settingRes.data
+      console.log('从数据库获取的用户配置:', userSetting)
+      
+      // 使用数据库配置初始化表单
+      settingsForm.value = {
+        currentService: 'ai',  // 默认AI翻译
+        aiServer: { 
+          ...translateStore.aiServer,
+          model: 'qwen-mt-plus',  // 固定模型
+          backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',  // 固定备用模型
+          lang: userSetting.lang || translateStore.aiServer.lang || 'English',  // 从数据库读取
+          threads: 30,  // 固定线程数
+          comparison_id: userSetting.comparison_id && userSetting.comparison_id.length > 0 
+            ? userSetting.comparison_id.map(id => parseInt(id)) 
+            : [],  // 从数据库读取，转换为数字数组
+          prompt_id: userSetting.prompt_id || null,  // 从数据库读取
+        },
+        baidu: { ...translateStore.baidu },
+        google: { ...translateStore.google },
+        common: { 
+          ...translateStore.common,
+          pdf_translate_method: userSetting.pdf_translate_method || 'direct',  // 从数据库读取
+        },
+      }
+    } else {
+      // 如果获取失败，使用默认值
+      console.warn('获取用户配置失败，使用默认值')
+      settingsForm.value = {
+        currentService: 'ai',
+        aiServer: { 
+          ...translateStore.aiServer,
+          model: 'qwen-mt-plus',
+          backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+          lang: translateStore.aiServer.lang || 'English',
+          threads: 30,
+          comparison_id: [],
+          prompt_id: null,
+        },
+        baidu: { ...translateStore.baidu },
+        google: { ...translateStore.google },
+        common: { 
+          ...translateStore.common,
+          pdf_translate_method: 'direct',
+        },
+      }
+    }
+  } catch (error) {
+    console.error('获取用户配置失败:', error)
+    // 使用默认值
+    settingsForm.value = {
+      currentService: 'ai',
+      aiServer: { 
+        ...translateStore.aiServer,
+        model: 'qwen-mt-plus',
+        backup_model: 'us.anthropic.claude-sonnet-4-20250514-v1:0',
+        lang: translateStore.aiServer.lang || 'English',
+        threads: 30,
+        comparison_id: [],
+        prompt_id: null,
+      },
+      baidu: { ...translateStore.baidu },
+      google: { ...translateStore.google },
+      common: { 
+        ...translateStore.common,
+        pdf_translate_method: 'direct',
+      },
+    }
   }
   
   // 预加载提示词数据，确保下拉框显示标题而不是ID

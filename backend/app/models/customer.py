@@ -13,7 +13,7 @@ class Customer(db.Model):
     customer_no = db.Column(db.String(32))  # 用户编号
     phone = db.Column(db.String(11))  # 手机号（长度11）
     name = db.Column(db.String(255))  # 用户名
-    password = db.Column(db.String(64), nullable=False)  # 密码（SHA256长度）
+    password = db.Column(db.Text, nullable=False)  # 密码（哈希值，使用Text类型匹配数据库）
     email = db.Column(db.String(255), nullable=False)  # 邮箱
     level = db.Column(db.Enum('common', 'vip'), default='vip')  # 会员等级，默认VIP
     status = db.Column(db.Enum('enabled', 'disabled'), default='enabled')  # 账户状态
@@ -28,7 +28,34 @@ class Customer(db.Model):
         self.password = generate_password_hash(password)
 
     def verify_password(self, password):
-        return check_password_hash(self.password, password)
+        """验证密码（支持哈希和明文两种格式，兼容旧数据）"""
+        import logging
+        if not self.password:
+            logging.warning(f"密码字段为空: customer_id={self.id}")
+            return False
+        
+        if not password:
+            logging.warning(f"输入的密码为空: customer_id={self.id}")
+            return False
+        
+        # 如果密码是哈希格式（包含 $ 符号，这是werkzeug哈希的标准格式），使用 check_password_hash 验证
+        if '$' in self.password:
+            try:
+                result = check_password_hash(self.password, password)
+                if not result:
+                    # 记录更详细的信息用于调试
+                    logging.debug(f"密码哈希验证失败: customer_id={self.id}, 存储密码前缀={self.password[:30]}..., 输入密码长度={len(password)}")
+                return result
+            except Exception as e:
+                # 如果check_password_hash失败（可能是格式问题），尝试明文比较（兼容旧数据）
+                logging.warning(f"密码哈希验证异常，尝试明文比较: customer_id={self.id}, error={str(e)}")
+                return self.password == password
+        # 否则可能是明文存储（兼容旧数据），直接比较
+        else:
+            result = self.password == password
+            if not result:
+                logging.debug(f"明文密码比较失败: customer_id={self.id}, 存储密码长度={len(self.password)}, 输入密码长度={len(password)}")
+            return result
 
     def to_dict(self):
         """将模型实例转换为字典，处理所有需要序列化的字段"""

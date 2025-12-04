@@ -138,3 +138,23 @@ export function getQueueStatus() {
     });
 }
 
+// 获取用户翻译配置（如果没有则自动创建）
+export function getCustomerSetting() {
+    return request({
+        url: '/customer/setting',
+        method: 'GET'
+    });
+}
+
+// 保存用户翻译配置
+export function saveCustomerSetting(data) {
+    return request({
+        url: '/customer/setting',
+        method: 'POST',
+        data: data,
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    });
+}
+

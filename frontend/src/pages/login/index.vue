@@ -25,17 +25,13 @@
                 prefix-icon="el-icon-lock"
               />
             </el-form-item>
-            <el-form-item prop="tenant_code">
+            <el-form-item prop="tenant_code" v-if="false">
               <el-input
                 v-model="loginForm.tenant_code"
                 placeholder="租户代码"
                 prefix-icon="el-icon-office-building"
               />
             </el-form-item>
-            <!-- 隐藏忘记密码功能 -->
-            <!-- <div class="auth-actions">
-              <el-link type="primary" class="forget-link" @click="goToForgot"> 忘记密码? </el-link>
-            </div> -->
             <el-form-item class="center">
               <el-button type="primary" size="large" class="auth-btn" @click="doLogin" :loading="loginLoading">
                 {{ loginLoading ? '登录中...' : '登录' }}
@@ -43,65 +39,6 @@
             </el-form-item>
           </el-form>
         </el-tab-pane>
-
-        <!-- 注册功能已隐藏 -->
-        <!-- <el-tab-pane label="注册" name="register">
-          <el-form
-            :model="registerForm"
-            ref="registerFormRef"
-            :rules="registerRules"
-            @keyup.enter="doRegister"
-          >
-            <el-form-item prop="email">
-              <el-input
-                v-model="registerForm.email"
-                placeholder="输入邮箱"
-                prefix-icon="el-icon-message"
-              />
-            </el-form-item>
-            <el-form-item prop="code">
-              <el-input
-                v-model="registerForm.code"
-                placeholder="邮箱验证码"
-                prefix-icon="el-icon-key"
-              >
-                <template #suffix>
-                  <el-button
-                    type="text"
-                    class="code-btn"
-                    @click="sendCode"
-                    :disabled="codeDisabled"
-                  >
-                    {{ codeText }}
-                  </el-button>
-                </template>
-              </el-input>
-            </el-form-item>
-            <el-form-item prop="password">
-              <el-input
-                v-model="registerForm.password"
-                type="password"
-                show-password
-                placeholder="输入密码"
-                prefix-icon="el-icon-lock"
-              />
-            </el-form-item>
-            <el-form-item prop="password2">
-              <el-input
-                v-model="registerForm.password2"
-                type="password"
-                show-password
-                placeholder="确认输入密码"
-                prefix-icon="el-icon-lock"
-              />
-            </el-form-item>
-            <el-form-item class="center">
-              <el-button type="primary" size="large" class="auth-btn" @click="doRegister" :loading="registerLoading">
-                {{ registerLoading ? '提交中...' : '提交' }}
-              </el-button>
-            </el-form-item>
-          </el-form>
-        </el-tab-pane> -->
       </el-tabs>
     </div>
   </div>
@@ -124,7 +61,7 @@ const loginLoading = ref(false)
 const loginForm = reactive({
   email: '',
   password: '',
-  tenant_code: '' // 用户必须手动输入租户代码
+  tenant_code: 'TENANT_0001' // 用户必须手动输入租户代码
 })
 
 // 验证规则：租户代码始终必填
@@ -133,52 +70,6 @@ const loginRules = {
   password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
   tenant_code: [{ required: true, message: '请填写租户代码', trigger: 'blur' }]
 }
-
-// 注册功能已隐藏
-// const registerForm = reactive({
-//   email: '',
-//   code: '',
-//   password: '',
-//   password2: ''
-// })
-// const registerRules = reactive({
-//   email: [{ required: true, message: '请填写邮箱地址', trigger: 'blur' }],
-//   code: [{ required: true, message: '请填写邮箱验证码', trigger: 'blur' }],
-//   password: [{ required: true, message: '请填写密码', trigger: 'blur' }],
-//   password2: [{ required: true, message: '请填写确认密码', trigger: 'blur' }]
-// })
-// const registerFormRef = ref(null)
-
-// // 验证码相关
-// const codeText = ref('发送')
-// const codeDisabled = ref(false)
-// const sendCode = async () => {
-//   if (codeDisabled.value) return
-//   if (!registerForm.email.trim()) {
-//     ElMessage.error('请填写邮箱地址')
-//     return
-//   }
-
-//   try {
-//     await registerSendEmail(registerForm.email)
-//     ElMessage.success('验证码已发送')
-//     codeDisabled.value = true
-//     let count = 60
-//     codeText.value = `${count}s`
-//     const timer = setInterval(() => {
-//       if (count <= 0) {
-//         clearInterval(timer)
-//         codeDisabled.value = false
-//         codeText.value = '发送'
-//         return
-//       }
-//       count--
-//       codeText.value = `${count}s`
-//     }, 1000)
-//   } catch (error) {
-//     ElMessage.error(error.message)
-//   }
-// }
 
 // 登录
 const doLogin = async () => {
@@ -206,42 +97,6 @@ const doLogin = async () => {
   })
 }
 
-// 注册功能已隐藏
-// const doRegister = async () => {
-//   if (!registerFormRef.value) return
-//   registerFormRef.value.validate(async (valid) => {
-//     if (valid) {
-//       if (registerForm.password !== registerForm.password2) {
-//         ElMessage.error('两次密码输入不一致')
-//         return
-//       }
-      
-//       registerLoading.value = true // 开始loading
-      
-//       try {
-//         const data = await register(registerForm)
-//         if (data.code === 200) {
-//           ElMessage.success('注册成功')
-//           activeTab.value = 'login'
-//         } else {
-//           ElMessage.error(data.message)
-//         }
-//       } catch (error) {
-//         // 错误信息已经在request拦截器中处理了，这里不需要再显示
-//         console.error('注册失败:', error)
-//       } finally {
-//         registerLoading.value = false // 结束loading
-//       }
-//     } else {
-//       ElMessage.error('请正确填写表单')
-//     }
-//   })
-// }
-
-// 跳转到忘记密码页 - 已隐藏
-// const goToForgot = () => {
-//   router.push({ name: 'forget' })
-// }
 </script>
 
 <style scoped lang="scss">

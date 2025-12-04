@@ -225,6 +225,14 @@ class AdminUpdateCustomerResource(Resource):
             customer.email = data['email']
         if 'level' in data:
             customer.level = data['level']
+        if 'password' in data and data['password']:
+            # 更新密码（使用Customer模型的set_password方法，确保正确哈希）
+            import logging
+            logging.info(f"更新用户密码: customer_id={id}, email={customer.email}")
+            old_password_hash = customer.password[:20] if customer.password else "None"  # 只记录前20个字符用于调试
+            customer.set_password(data['password'])
+            new_password_hash = customer.password[:20] if customer.password else "None"
+            logging.info(f"密码已更新: customer_id={id}, 旧密码哈希前缀={old_password_hash}..., 新密码哈希前缀={new_password_hash}...")
         if 'add_storage' in data:
             additional_storage = int(data['add_storage']) * 1024 * 1024
             

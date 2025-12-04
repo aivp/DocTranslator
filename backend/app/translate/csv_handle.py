@@ -129,15 +129,11 @@ def start(trans):
             time.sleep(1)
 
     text_count = len(texts)
-    trans_type = trans['type']
-    only_trans_text = trans_type in ["trans_text_only_inherit", "trans_text_only_new", "trans_all_only_new", "trans_all_only_inherit"]
-
-    # 将翻译结果写入新的 CSV 文件
+    # 将翻译结果写入新的 CSV 文件（直接输出译文，不保留原文）
     try:
         with open(trans['target_file'], 'w', encoding='utf-8', newline='') as file:
             writer = csv.writer(file)
             translated_row = []
-            origin_row = []
             text_index = 0
 
             for row in content:
@@ -148,19 +144,12 @@ def start(trans):
                             translated_cell += texts[text_index]['text']
                             text_index += 1
                         translated_row.append(translated_cell)
-                        origin_row.append(cell)
                     else:
                         translated_row.append(cell)
-                        origin_row.append(cell)
 
-                if only_trans_text:
-                    writer.writerow(translated_row)
-                else:
-                    writer.writerow(origin_row)
-                    writer.writerow(translated_row)
+                writer.writerow(translated_row)
 
                 translated_row = []
-                origin_row = []
 
     except Exception as e:
         print(f"无法写入CSV文件 {trans['target_file']}: {e}")

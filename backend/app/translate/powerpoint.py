@@ -308,11 +308,15 @@ def start_traditional(trans):
     # 但避免在同一位置重复提取相同文本
     extracted_texts_by_location = {}  # {(slide_index, shape_index, text_type, text): True}
     
+    # 按slide统计原始文本总长度（用于整页字体缩放）
+    slide_original_lengths = {}  # {slide_index: total_length}
+    
     # 提取文本时保存样式信息，并建立文本与形状的对应关系
     slide_count = 0
     for slide in slides:
         slide_count += 1
         slide_text_count = 0
+        slide_original_length = 0  # 统计当前slide的原始文本总长度
         logger.info(f"正在处理第 {slide_count} 页幻灯片...")
         
         for shape_index, shape in enumerate(slide.shapes):
@@ -347,6 +351,7 @@ def start_traditional(trans):
                                     "original_text": cell_text  # 保存原始文本用于匹配
                                 })
                                 slide_text_count += 1
+                                slide_original_length += len(cell_text_clean)  # 累加原始文本长度
                                 extracted_texts_by_location[location_key] = True
                                 logger.debug(f"添加表格单元格文本: {cell_text_clean[:50]}... (位置: 幻灯片{slide_count}, 形状{shape_index}, 行{r}, 列{c})")
                             else:
@@ -384,6 +389,7 @@ def start_traditional(trans):
                                 "original_text": text  # 保存原始文本用于匹配
                             })
                             slide_text_count += 1
+                            slide_original_length += len(text_clean)  # 累加原始文本长度
                             # 记录已提取的文本
                             extracted_texts_in_frame.add(text_clean)
                             extracted_texts_by_location[location_key] = True
@@ -417,6 +423,7 @@ def start_traditional(trans):
                             "original_text": text  # 保存原始文本用于匹配
                         })
                         slide_text_count += 1
+                        slide_original_length += len(text_clean)  # 累加原始文本长度
                         extracted_texts_by_location[location_key] = True
                         logger.debug(f"添加形状文本: {text_clean[:50]}... (位置: 幻灯片{slide_count}, 形状{shape_index})")
                     else:
@@ -440,12 +447,15 @@ def start_traditional(trans):
                             "original_text": shape_name  # 保存原始文本用于匹配
                         })
                         slide_text_count += 1
+                        slide_original_length += len(shape_name_clean)  # 累加原始文本长度
                         extracted_texts_by_location[location_key] = True
                         logger.debug(f"添加形状名称文本: {shape_name_clean[:50]}... (位置: 幻灯片{slide_count}, 形状{shape_index})")
                     else:
                         logger.debug(f"跳过重复的形状名称文本: {shape_name_clean[:50]}... (同一位置)")
         
-        logger.info(f"第 {slide_count} 页幻灯片提取了 {slide_text_count} 个文本元素")
+        # 保存当前slide的原始文本总长度
+        slide_original_lengths[slide_count] = slide_original_length
+        logger.info(f"第 {slide_count} 页幻灯片提取了 {slide_text_count} 个文本元素，原始文本总长度: {slide_original_length} 字符")
     
     # 不再进行全局去重，因为相同文本在不同位置需要分别翻译
     logger.info(f"总共提取了 {len(texts)} 个文本元素")
@@ -574,12 +584,61 @@ def start_traditional(trans):
         else:
             time.sleep(1)
 
+    # 计算每个slide的翻译文本总长度和缩放比例
+    slide_translated_lengths = {}  # {slide_index: total_length}
+    slide_font_scale_ratios = {}  # {slide_index: scale_ratio}
+    
+    logger.info(f"=== 开始计算每页字体缩放比例 ===")
+    logger.info(f"已提取的slide原始长度: {slide_original_lengths}")
+    logger.info(f"已翻译的文本总数: {len([t for t in texts if t.get('complete', False)])}")
+    
+    # 先统计每个slide的翻译文本总长度
+    for item in texts:
+        if item.get('complete', False) and 'text' in item:
+            slide_idx = item.get('slide_index', 0)
+            if slide_idx > 0:
+                translated_text = item['text'].strip()
+                slide_translated_lengths[slide_idx] = slide_translated_lengths.get(slide_idx, 0) + len(translated_text)
+    
+    logger.info(f"统计后的slide翻译长度: {slide_translated_lengths}")
+    
+    # 计算每个slide的字体缩放比例（只缩小，不放大）
+    for slide_idx in slide_original_lengths:
+        original_len = slide_original_lengths[slide_idx]
+        translated_len = slide_translated_lengths.get(slide_idx, 0)
+        
+        if original_len > 0:
+            # 计算比例：如果译文比原文长50%，则缩小到 1/1.5 = 0.67
+            length_ratio = translated_len / original_len
+            # 缩放比例：只缩小，不放大
+            if length_ratio > 1.5:
+                # 译文比原文长超过50%，使用更温和的缩放策略：等比例缩放 * 2/3
+                base_scale_ratio = 1.0 / length_ratio
+                scale_ratio = max(0.5, base_scale_ratio * (2.0 / 3.0))
+                logger.info(f"📊 第 {slide_idx} 页字体缩放（超过50%，使用温和策略）: 原文={original_len}字符, 译文={translated_len}字符, 比例={length_ratio:.2f}, 基础缩放={base_scale_ratio:.2f}, 最终缩放={scale_ratio:.2f}")
+            elif length_ratio > 1.0:
+                # 译文更长但不超过50%，使用等比例缩放
+                scale_ratio = max(0.5, 1.0 / length_ratio)
+                logger.info(f"📊 第 {slide_idx} 页字体缩放: 原文={original_len}字符, 译文={translated_len}字符, 比例={length_ratio:.2f}, 缩小到={scale_ratio:.2f}")
+            else:
+                # 译文更短或相等，保持原大小（不放大）
+                scale_ratio = 1.0
+                logger.info(f"📊 第 {slide_idx} 页字体保持: 原文={original_len}字符, 译文={translated_len}字符, 比例={length_ratio:.2f}, 不缩放")
+            slide_font_scale_ratios[slide_idx] = scale_ratio
+        else:
+            slide_font_scale_ratios[slide_idx] = 1.0
+            logger.warning(f"⚠️ 第 {slide_idx} 页原始文本长度为0，不缩放")
+    
+    logger.info(f"最终计算的缩放比例: {slide_font_scale_ratios}")
+    
     text_count=0
     slide_count = 0
     for slide in slides:
         slide_count += 1
         slide_processed_count = 0
-        # logger.info(f"正在应用翻译结果到第 {slide_count} 页幻灯片...")
+        # 获取当前slide的字体缩放比例
+        current_slide_scale_ratio = slide_font_scale_ratios.get(slide_count, 1.0)
+        logger.info(f"🎯 正在应用翻译结果到第 {slide_count} 页幻灯片... (字体缩放比例: {current_slide_scale_ratio:.2f}, ENABLE_FONT_SCALING={ENABLE_FONT_SCALING})")
         
         for shape_index, shape in enumerate(slide.shapes):
             # 添加详细的形状信息日志
@@ -608,8 +667,8 @@ def start_traditional(trans):
                             cell = table.cell(r, c)
                             translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "table_cell", cell=cell, row=r, column=c)
                             if translated_item:
-                                # 默认启用自适应样式
-                                apply_translation_to_cell_with_adaptive_styles(cell, translated_item['text'], translated_item.get('style_info', {}))
+                                # 使用整页字体缩放比例
+                                apply_translation_to_cell_with_slide_scale(cell, translated_item['text'], translated_item.get('style_info', {}), current_slide_scale_ratio)
                                 text_count+=translated_item.get('count', 1)
                                 slide_processed_count += 1
                                 logger.info(f"表格单元格翻译应用成功: 原文='{cell_text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
@@ -626,9 +685,9 @@ def start_traditional(trans):
                         # 查找对应的翻译结果
                         translated_item = find_translated_text_for_shape(texts, slide_count, shape_index, "paragraph", paragraph=paragraph, paragraph_index=paragraph_index)
                         if translated_item:
-                            # 默认启用自适应样式
+                            # 使用整页字体缩放比例
                             logger.info(f"应用翻译到段落: 原文='{paragraph.text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
-                            apply_translation_to_paragraph_with_adaptive_styles(paragraph, translated_item['text'], translated_item.get('style_info', {}))
+                            apply_translation_to_paragraph_with_slide_scale(paragraph, translated_item['text'], translated_item.get('style_info', {}), current_slide_scale_ratio)
                             text_count+=translated_item.get('count', 1)
                             slide_processed_count += 1
                             logger.info(f"段落翻译完成，当前runs数: {len(paragraph.runs)}")
@@ -649,8 +708,8 @@ def start_traditional(trans):
                         # 处理形状文本
                         original_text = shape.text
                         shape.text = translated_item['text']
-                        # 应用自适应样式到形状文本
-                        apply_adaptive_styles_to_shape(shape, original_text, translated_item['text'])
+                        # 使用整页字体缩放比例
+                        apply_adaptive_styles_to_shape_with_scale(shape, original_text, translated_item['text'], current_slide_scale_ratio)
                         text_count+=translated_item.get('count', 1)
                         slide_processed_count += 1
                         logger.info(f"形状文本翻译应用成功: 原文='{original_text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
@@ -669,8 +728,8 @@ def start_traditional(trans):
                         # 处理形状名称文本
                         original_name = shape.name
                         shape.name = translated_item['text']
-                        # 应用自适应样式到形状名称
-                        apply_adaptive_styles_to_shape(shape, original_name, translated_item['text'])
+                        # 使用整页字体缩放比例
+                        apply_adaptive_styles_to_shape_with_scale(shape, original_name, translated_item['text'], current_slide_scale_ratio)
                         text_count+=translated_item.get('count', 1)
                         slide_processed_count += 1
                         logger.info(f"形状名称翻译应用成功: 原文='{original_name[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
@@ -687,13 +746,13 @@ def start_traditional(trans):
                         if hasattr(shape, 'text_frame') and shape.text_frame:
                             original_text = shape.text_frame.text
                             shape.text_frame.text = translated_item['text']
-                            # 应用自适应样式到所有段落
+                            # 使用整页字体缩放比例
                             if shape.text_frame.paragraphs:
                                 for paragraph in shape.text_frame.paragraphs:
                                     if paragraph.runs:
                                         for run in paragraph.runs:
                                             if ENABLE_FONT_SCALING:
-                                                apply_adaptive_styles_ppt(run, original_text, translated_item['text'])
+                                                apply_font_scale_to_run_ppt(run, current_slide_scale_ratio)
                             text_count += translated_item.get('count', 1)
                             slide_processed_count += 1
                             logger.info(f"占位符文本翻译应用成功: 原文='{original_text[:30]}...' -> 译文='{translated_item['text'][:30]}...'")
@@ -858,8 +917,37 @@ def apply_translation_to_cell(cell, translated_text, style_info):
                             apply_adaptive_styles_ppt(run, original_text, translated_text)
 
 
+def apply_translation_to_paragraph_with_slide_scale(paragraph, translated_text, style_info, scale_ratio):
+    """应用翻译结果到段落并恢复样式，使用slide级别的字体缩放比例"""
+    # 保存原始文本
+    original_text = paragraph.text
+    
+    # 清空段落内容
+    paragraph.clear()
+    
+    # 如果有样式信息，按run恢复样式（在恢复样式时直接应用缩放比例）
+    if style_info and 'runs' in style_info and style_info['runs']:
+        # 按原始run的样式分配翻译文本，并在应用样式时直接应用缩放比例
+        distribute_text_to_runs_with_scale(paragraph, translated_text, style_info['runs'], scale_ratio)
+    else:
+        # 没有样式信息，直接添加文本
+        paragraph.text = translated_text
+        # 应用slide级别的字体缩放比例到所有runs
+        if paragraph.runs and ENABLE_FONT_SCALING:
+            for run in paragraph.runs:
+                apply_font_scale_to_run_ppt(run, scale_ratio)
+    
+    # 恢复段落级别的样式
+    if style_info and 'paragraph_level' in style_info:
+        para_level = style_info['paragraph_level']
+        if 'alignment' in para_level:
+            paragraph.alignment = para_level['alignment']
+        if 'level' in para_level:
+            paragraph.level = para_level['level']
+
+
 def apply_translation_to_paragraph_with_adaptive_styles(paragraph, translated_text, style_info):
-    """应用翻译结果到段落并恢复样式，同时应用自适应样式"""
+    """应用翻译结果到段落并恢复样式，同时应用自适应样式（保留旧函数以兼容）"""
     # 保存原始文本用于自适应计算
     original_text = paragraph.text
     
@@ -888,8 +976,31 @@ def apply_translation_to_paragraph_with_adaptive_styles(paragraph, translated_te
             paragraph.level = para_level['level']
 
 
+def apply_translation_to_cell_with_slide_scale(cell, translated_text, style_info, scale_ratio):
+    """应用翻译结果到表格单元格并恢复样式，使用slide级别的字体缩放比例"""
+    # 保存原始文本
+    original_text = cell.text
+    
+    # 清空单元格内容
+    cell.text = ""
+    
+    # 如果有样式信息，按段落恢复样式（在恢复样式时直接应用缩放比例）
+    if style_info and 'paragraphs' in style_info and style_info['paragraphs']:
+        # 按原始段落的样式分配翻译文本，并在应用样式时直接应用缩放比例
+        distribute_text_to_paragraphs_with_scale(cell.text_frame, translated_text, style_info['paragraphs'], scale_ratio)
+    else:
+        # 没有样式信息，直接添加文本
+        cell.text = translated_text
+        # 应用slide级别的字体缩放比例到单元格中的所有段落的所有runs
+        if cell.text_frame.paragraphs and ENABLE_FONT_SCALING:
+            for paragraph in cell.text_frame.paragraphs:
+                if paragraph.runs:
+                    for run in paragraph.runs:
+                        apply_font_scale_to_run_ppt(run, scale_ratio)
+
+
 def apply_translation_to_cell_with_adaptive_styles(cell, translated_text, style_info):
-    """应用翻译结果到表格单元格并恢复样式，同时应用自适应样式"""
+    """应用翻译结果到表格单元格并恢复样式，同时应用自适应样式（保留旧函数以兼容）"""
     # 保存原始文本用于自适应计算
     original_text = cell.text
     
@@ -1032,8 +1143,8 @@ def distribute_text_to_paragraphs_with_adaptive_styles(text_frame, translated_te
                         if ENABLE_FONT_SCALING:
                             apply_adaptive_styles_ppt(run, original_text, allocated_text)
 
-def apply_run_style(run, style):
-    """应用run的样式"""
+def apply_run_style(run, style, scale_ratio=None):
+    """应用run的样式，可选应用缩放比例"""
     if not style:
         return
     
@@ -1042,9 +1153,34 @@ def apply_run_style(run, style):
         if 'font_name' in style:
             run.font.name = style['font_name']
         
-        # 字体大小
+        # 字体大小（如果提供了缩放比例，先应用缩放再设置）
         if 'font_size' in style:
-            run.font.size = style['font_size']
+            if scale_ratio and scale_ratio != 1.0:
+                # 如果有缩放比例，先获取原始字体大小，应用缩放后再设置
+                original_size = style['font_size']
+                # 处理不同的字体大小格式
+                if original_size is None:
+                    return  # 如果没有字体大小，跳过
+                elif hasattr(original_size, 'pt'):
+                    # 如果是 Pt 对象
+                    original_pt = original_size.pt
+                elif isinstance(original_size, (int, float)):
+                    # 如果是数字（可能是pt值）
+                    original_pt = float(original_size)
+                else:
+                    # 其他情况，尝试转换
+                    try:
+                        original_pt = float(original_size)
+                    except:
+                        logger.warning(f"无法解析字体大小: {original_size}")
+                        return
+                
+                from pptx.util import Pt
+                scaled_size = original_pt * scale_ratio
+                run.font.size = Pt(scaled_size)
+                logger.info(f"✅ 应用样式时缩放字体: {original_pt}pt -> {scaled_size:.1f}pt (比例: {scale_ratio:.2f})")
+            else:
+                run.font.size = style['font_size']
         
         # 粗体
         if 'bold' in style:
@@ -1123,8 +1259,58 @@ def calculate_adaptive_font_size_ppt(original_text, translated_text, original_fo
         return original_font_size
 
 
+def apply_font_scale_to_run_ppt(run, scale_ratio, original_font_size=None):
+    """直接应用字体缩放比例到PPT run（按slide级别统一缩放）"""
+    # 检查字体缩放功能是否启用
+    if not ENABLE_FONT_SCALING:
+        logger.debug(f"字体缩放功能已关闭，跳过缩放")
+        return  # 如果关闭了字体缩放，直接返回
+    
+    # 如果缩放比例为1.0，不需要调整
+    if scale_ratio == 1.0:
+        logger.debug(f"缩放比例为1.0，不需要调整")
+        return
+    
+    logger.info(f"🔍 开始应用字体缩放: scale_ratio={scale_ratio:.2f}, run.text='{run.text[:30] if run.text else ''}...'")
+    
+    try:
+        # 如果没有传入原始字体大小，尝试获取
+        if original_font_size is None:
+            # 方法1：直接从run获取字体大小
+            if run.font.size:
+                try:
+                    original_font_size = run.font.size.pt
+                except:
+                    original_font_size = None
+            
+            # 方法2：从段落级别获取字体大小
+            if not original_font_size and hasattr(run, '_element') and run._element.getparent():
+                try:
+                    paragraph = run._element.getparent()
+                    if hasattr(paragraph, 'pPr') and paragraph.pPr:
+                        defRPr = paragraph.pPr.defRPr
+                        if defRPr and defRPr.sz:
+                            original_font_size = defRPr.sz.val / 100  # 转换为pt
+                except:
+                    pass
+            
+            # 方法3：使用默认字体大小
+            if not original_font_size:
+                original_font_size = 14  # 默认14pt
+        
+        # 应用缩放比例
+        if original_font_size:
+            new_font_size = original_font_size * scale_ratio
+            from pptx.util import Pt
+            run.font.size = Pt(new_font_size)
+            logger.info(f"✅ 字体大小已按slide比例调整: {original_font_size}pt -> {new_font_size:.1f}pt (比例: {scale_ratio:.2f})")
+                    
+    except Exception as e:
+        logger.error(f"❌ 应用PPT字体缩放失败: {str(e)}")
+
+
 def apply_adaptive_styles_ppt(run, original_text, translated_text):
-    """应用自适应样式到PPT run"""
+    """应用自适应样式到PPT run（保留旧函数以兼容）"""
     # 检查字体缩放功能是否启用
     if not ENABLE_FONT_SCALING:
         return  # 如果关闭了字体缩放，直接返回
@@ -1181,8 +1367,25 @@ def apply_adaptive_styles_ppt(run, original_text, translated_text):
         logger.error(f"❌ 应用PPT自适应样式失败: {str(e)}")
 
 
+def apply_adaptive_styles_to_shape_with_scale(shape, original_text, translated_text, scale_ratio):
+    """应用自适应样式到形状文本（使用slide级别的缩放比例）"""
+    # 检查字体缩放功能是否启用
+    if not ENABLE_FONT_SCALING:
+        return  # 如果关闭了字体缩放，直接返回
+    
+    try:
+        # 应用到形状的文本框架
+        if hasattr(shape, 'text_frame') and shape.text_frame and shape.text_frame.paragraphs:
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    apply_font_scale_to_run_ppt(run, scale_ratio)
+            logger.debug(f"✅ 形状文本字体已按slide比例调整: 比例={scale_ratio:.2f}")
+    except Exception as e:
+        logger.error(f"应用PPT形状字体缩放失败: {str(e)}")
+
+
 def apply_adaptive_styles_to_shape(shape, original_text, translated_text):
-    """应用自适应样式到形状文本"""
+    """应用自适应样式到形状文本（保留旧函数以兼容）"""
     # 检查字体缩放功能是否启用
     if not ENABLE_FONT_SCALING:
         return  # 如果关闭了字体缩放，直接返回
@@ -1240,8 +1443,56 @@ def apply_adaptive_styles_to_shape(shape, original_text, translated_text):
         logger.error(f"应用PPT形状自适应样式失败: {str(e)}")
 
 
+def distribute_text_to_runs_with_scale(paragraph, translated_text, run_styles, scale_ratio):
+    """将翻译文本按原始run的样式分配到新的run中，并在应用样式时直接应用缩放比例"""
+    if not run_styles:
+        paragraph.text = translated_text
+        # 如果没有样式信息，直接应用缩放
+        if paragraph.runs and ENABLE_FONT_SCALING:
+            for run in paragraph.runs:
+                apply_font_scale_to_run_ppt(run, scale_ratio)
+        return
+    
+    # 计算每个run应该分配的文本长度
+    total_original_length = sum(len(run['text']) for run in run_styles)
+    if total_original_length == 0:
+        paragraph.text = translated_text
+        # 如果没有样式信息，直接应用缩放
+        if paragraph.runs and ENABLE_FONT_SCALING:
+            for run in paragraph.runs:
+                apply_font_scale_to_run_ppt(run, scale_ratio)
+        return
+    
+    # 按比例分配翻译文本
+    current_pos = 0
+    for i, run_style in enumerate(run_styles):
+        original_length = len(run_style['text'])
+        if original_length == 0:
+            continue
+        
+        # 计算这个run应该分配的文本长度
+        if i == len(run_styles) - 1:
+            # 最后一个run，分配剩余的所有文本
+            allocated_text = translated_text[current_pos:]
+        else:
+            # 按比例分配
+            ratio = original_length / total_original_length
+            allocated_length = max(1, int(len(translated_text) * ratio))
+            # 确保不超过剩余文本长度
+            remaining_length = len(translated_text) - current_pos
+            allocated_length = min(allocated_length, remaining_length)
+            allocated_text = translated_text[current_pos:current_pos + allocated_length]
+            current_pos += allocated_length
+        
+        if allocated_text:
+            # 创建新的run并应用样式（在应用样式时直接应用缩放比例）
+            run = paragraph.add_run()
+            run.text = allocated_text
+            apply_run_style(run, run_style['style'], scale_ratio)
+
+
 def distribute_text_to_runs(paragraph, translated_text, run_styles):
-    """将翻译文本按原始run的样式分配到新的run中（原始版本）"""
+    """将翻译文本按原始run的样式分配到新的run中（原始版本，保留以兼容）"""
     if not run_styles:
         paragraph.text = translated_text
         return
@@ -1280,8 +1531,81 @@ def distribute_text_to_runs(paragraph, translated_text, run_styles):
             apply_run_style(run, run_style['style'])
 
 
+def distribute_text_to_paragraphs_with_scale(text_frame, translated_text, paragraph_styles, scale_ratio):
+    """将翻译文本按原始段落的样式分配到新的段落中，并在应用样式时直接应用缩放比例"""
+    if not paragraph_styles:
+        text_frame.text = translated_text
+        # 如果没有样式信息，直接应用缩放
+        if text_frame.paragraphs and ENABLE_FONT_SCALING:
+            for paragraph in text_frame.paragraphs:
+                if paragraph.runs:
+                    for run in paragraph.runs:
+                        apply_font_scale_to_run_ppt(run, scale_ratio)
+        return
+    
+    # 清空文本框架
+    text_frame.clear()
+    
+    # 按段落分配文本
+    total_original_length = sum(len(run['text']) for para in paragraph_styles for run in para['runs'])
+    if total_original_length == 0:
+        text_frame.text = translated_text
+        # 如果没有样式信息，直接应用缩放
+        if text_frame.paragraphs and ENABLE_FONT_SCALING:
+            for paragraph in text_frame.paragraphs:
+                if paragraph.runs:
+                    for run in paragraph.runs:
+                        apply_font_scale_to_run_ppt(run, scale_ratio)
+        return
+    
+    current_pos = 0
+    for i, para_style in enumerate(paragraph_styles):
+        if i > 0:
+            # 添加段落分隔符
+            text_frame.add_paragraph()
+        
+        paragraph = text_frame.paragraphs[-1] if text_frame.paragraphs else text_frame.add_paragraph()
+        
+        # 计算这个段落应该分配的文本长度
+        para_original_length = sum(len(run['text']) for run in para_style['runs'])
+        if para_original_length == 0:
+            continue
+        
+        if i == len(paragraph_styles) - 1:
+            # 最后一个段落，分配剩余的所有文本
+            allocated_text = translated_text[current_pos:]
+        else:
+            # 按比例分配
+            ratio = para_original_length / total_original_length
+            allocated_length = max(1, int(len(translated_text) * ratio))
+            # 确保不超过剩余文本长度
+            remaining_length = len(translated_text) - current_pos
+            allocated_length = min(allocated_length, remaining_length)
+            allocated_text = translated_text[current_pos:current_pos + allocated_length]
+            current_pos += allocated_length
+        
+        if allocated_text:
+            # 按run分配文本并应用样式（在应用样式时直接应用缩放比例）
+            if para_style['runs']:
+                distribute_text_to_runs_with_scale(paragraph, allocated_text, para_style['runs'], scale_ratio)
+            else:
+                paragraph.text = allocated_text
+                # 如果没有样式信息，直接应用缩放
+                if paragraph.runs and ENABLE_FONT_SCALING:
+                    for run in paragraph.runs:
+                        apply_font_scale_to_run_ppt(run, scale_ratio)
+            
+            # 恢复段落级别的样式
+            if 'paragraph_level' in para_style:
+                para_level = para_style['paragraph_level']
+                if 'alignment' in para_level:
+                    paragraph.alignment = para_level['alignment']
+                if 'level' in para_level:
+                    paragraph.level = para_level['level']
+
+
 def distribute_text_to_paragraphs(text_frame, translated_text, paragraph_styles):
-    """将翻译文本按原始段落的样式分配到新的段落中（原始版本）"""
+    """将翻译文本按原始段落的样式分配到新的段落中（原始版本，保留以兼容）"""
     if not paragraph_styles:
         text_frame.text = translated_text
         return
@@ -1402,5 +1726,151 @@ def find_translated_text_for_shape(texts, slide_index, shape_index, text_type, *
     # 如果所有匹配都失败，记录警告并返回None
     logger.warning(f"未找到匹配的翻译结果: slide_index={slide_index}, shape_index={shape_index}, text_type={text_type}, kwargs={kwargs}")
     return None
+
+
+def apply_pptx_font_scaling_after_okapi(original_file: str, translated_file: str) -> bool:
+    """
+    在Okapi合并后，对PPTX文件应用字体缩放（按页级别）
+    
+    Args:
+        original_file: 原始PPTX文件路径
+        translated_file: 翻译后的PPTX文件路径（会被修改）
+        
+    Returns:
+        bool: 是否成功
+    """
+    if not ENABLE_FONT_SCALING:
+        logger.info("字体缩放功能已关闭，跳过")
+        return True
+    
+    try:
+        logger.info(f"=== 开始处理Okapi合并后的PPT字体缩放 ===")
+        logger.info(f"原始文件: {original_file}")
+        logger.info(f"翻译文件: {translated_file}")
+        
+        # 读取原始PPT，统计每页文本长度
+        original_prs = pptx.Presentation(original_file)
+        slide_original_lengths = {}
+        
+        for slide_idx, slide in enumerate(original_prs.slides, start=1):
+            total_length = 0
+            for shape in slide.shapes:
+                # 表格
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        for cell in row.cells:
+                            if cell.text:
+                                total_length += len(cell.text.strip())
+                # 文本框
+                elif shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        if paragraph.text:
+                            total_length += len(paragraph.text.strip())
+                # 其他文本
+                elif hasattr(shape, 'text') and shape.text:
+                    total_length += len(shape.text.strip())
+                # 形状名称
+                elif hasattr(shape, 'name') and shape.name:
+                    total_length += len(shape.name.strip())
+            
+            slide_original_lengths[slide_idx] = total_length
+            logger.info(f"原始PPT第 {slide_idx} 页文本长度: {total_length}字符")
+        
+        # 读取翻译后的PPT，统计每页文本长度
+        translated_prs = pptx.Presentation(translated_file)
+        slide_translated_lengths = {}
+        
+        for slide_idx, slide in enumerate(translated_prs.slides, start=1):
+            total_length = 0
+            for shape in slide.shapes:
+                # 表格
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        for cell in row.cells:
+                            if cell.text:
+                                total_length += len(cell.text.strip())
+                # 文本框
+                elif shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        if paragraph.text:
+                            total_length += len(paragraph.text.strip())
+                # 其他文本
+                elif hasattr(shape, 'text') and shape.text:
+                    total_length += len(shape.text.strip())
+                # 形状名称
+                elif hasattr(shape, 'name') and shape.name:
+                    total_length += len(shape.name.strip())
+            
+            slide_translated_lengths[slide_idx] = total_length
+            logger.info(f"翻译PPT第 {slide_idx} 页文本长度: {total_length}字符")
+        
+        # 计算每页的缩放比例
+        slide_font_scale_ratios = {}
+        for slide_idx in slide_original_lengths:
+            original_len = slide_original_lengths[slide_idx]
+            translated_len = slide_translated_lengths.get(slide_idx, 0)
+            
+            if original_len > 0:
+                length_ratio = translated_len / original_len
+                # 只缩小，不放大
+                if length_ratio > 1.5:
+                    # 译文比原文长超过50%，使用更温和的缩放策略：等比例缩放 * 2/3
+                    base_scale_ratio = 1.0 / length_ratio
+                    scale_ratio = max(0.5, base_scale_ratio * (2.0 / 3.0))
+                    logger.info(f"📊 第 {slide_idx} 页字体缩放（超过50%，使用温和策略）: 原文={original_len}字符, 译文={translated_len}字符, 比例={length_ratio:.2f}, 基础缩放={base_scale_ratio:.2f}, 最终缩放={scale_ratio:.2f}")
+                elif length_ratio > 1.0:
+                    # 译文更长但不超过50%，使用等比例缩放
+                    scale_ratio = max(0.5, 1.0 / length_ratio)
+                    logger.info(f"📊 第 {slide_idx} 页字体缩放: 原文={original_len}字符, 译文={translated_len}字符, 比例={length_ratio:.2f}, 缩小到={scale_ratio:.2f}")
+                else:
+                    scale_ratio = 1.0
+                    logger.info(f"📊 第 {slide_idx} 页字体保持: 原文={original_len}字符, 译文={translated_len}字符, 比例={length_ratio:.2f}, 不缩放")
+                slide_font_scale_ratios[slide_idx] = scale_ratio
+            else:
+                slide_font_scale_ratios[slide_idx] = 1.0
+                logger.warning(f"⚠️ 第 {slide_idx} 页原始文本长度为0，不缩放")
+        
+        logger.info(f"最终计算的缩放比例: {slide_font_scale_ratios}")
+        
+        # 应用缩放比例到翻译后的PPT
+        for slide_idx, slide in enumerate(translated_prs.slides, start=1):
+            scale_ratio = slide_font_scale_ratios.get(slide_idx, 1.0)
+            
+            if scale_ratio == 1.0:
+                continue  # 不需要缩放
+            
+            logger.info(f"🎯 正在应用字体缩放到第 {slide_idx} 页... (缩放比例: {scale_ratio:.2f})")
+            
+            for shape in slide.shapes:
+                # 表格
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        for cell in row.cells:
+                            if cell.text_frame.paragraphs:
+                                for paragraph in cell.text_frame.paragraphs:
+                                    if paragraph.runs:
+                                        for run in paragraph.runs:
+                                            apply_font_scale_to_run_ppt(run, scale_ratio)
+                # 文本框
+                elif shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        if paragraph.runs:
+                            for run in paragraph.runs:
+                                apply_font_scale_to_run_ppt(run, scale_ratio)
+                # 其他文本（通过text_frame处理）
+                elif hasattr(shape, 'text_frame') and shape.text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        if paragraph.runs:
+                            for run in paragraph.runs:
+                                apply_font_scale_to_run_ppt(run, scale_ratio)
+        
+        # 保存修改后的PPT
+        translated_prs.save(translated_file)
+        logger.info(f"✅ PPT字体缩放应用完成，已保存到: {translated_file}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ 应用PPT字体缩放失败: {str(e)}", exc_info=True)
+        return False
 
 

@@ -679,10 +679,47 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
                     time.sleep(wait_time)
                     continue
                 else:
+                    # 达到最大重试次数，打印所有传参（单条日志）- 使用error级别
+                    import json
+                    params_dict = {
+                        "text": text,
+                        "text_length": len(text) if text else 0,
+                        "target_language": target_language,
+                        "source_lang": source_lang,
+                        "tm_list_length": len(tm_list) if tm_list else 0,
+                        "terms_length": len(terms) if terms else 0,
+                        "prompt_id": prompt_id,
+                        "max_retries": max_retries,
+                        "attempt": attempt + 1,
+                        "translate_id": translate_id,
+                        "customer_id": customer_id,
+                        "tenant_id": tenant_id,
+                        "error_type": error_type,
+                        "error_msg": error_msg
+                    }
+                    # 如果有translation_options，也加入
+                    if 'translation_options' in locals() and translation_options:
+                        params_dict["translation_options"] = translation_options
+                    logging.error(f"❌ 达到最大重试次数 ({max_retries} 次)，所有传参: {json.dumps(params_dict, ensure_ascii=False, indent=2)}")
                     logging.error(f"🚫 达到最大重试次数，返回原文")
                     return text
     
-    # 如果所有重试都失败了
+    # 如果所有重试都失败了（理论上不应该到达这里，但为了安全起见）- 使用error级别
+    import json
+    params_dict = {
+        "text": text,
+        "text_length": len(text) if text else 0,
+        "target_language": target_language,
+        "source_lang": source_lang,
+        "tm_list_length": len(tm_list) if tm_list else 0,
+        "terms_length": len(terms) if terms else 0,
+        "prompt_id": prompt_id,
+        "max_retries": max_retries,
+        "translate_id": translate_id,
+        "customer_id": customer_id,
+        "tenant_id": tenant_id
+    }
+    logging.error(f"💥 所有重试都失败了（{max_retries} 次），所有传参: {json.dumps(params_dict, ensure_ascii=False, indent=2)}")
     logging.error(f"💥 所有重试都失败了，返回原文")
     return text
 

@@ -28,8 +28,9 @@ def create_app(config_class=None):
         db.session.remove()
     
     # 设置内存监控器
-    from app.utils.memory_manager import setup_memory_monitor
+    from app.utils.memory_manager import setup_memory_monitor, setup_periodic_cleanup
     setup_memory_monitor(app)
+    setup_periodic_cleanup(app)  # 启动定期内存清理任务
     
     # 启动图片合并PDF文件自动清理调度器
     from app.utils.images_to_pdf_cleanup_scheduler import init_cleanup_scheduler

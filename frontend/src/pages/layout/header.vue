@@ -28,10 +28,10 @@
               <div class="icon_svg"><svg-icon icon-class="corpus" /></div>
               <span class="pc_show">语料库</span>
             </div>
-            <div class="btn_set" @click="funOpenVideo">
+            <!-- <div class="btn_set" @click="funOpenVideo">
               <div class="icon_svg"><svg-icon icon-class="video" /></div>
               <span class="pc_show">视频翻译</span>
-            </div>
+            </div> -->
             <div class="btn_set" @click="funOpenTools">
               <div class="icon_svg"><svg-icon icon-class="tools" /></div>
               <span class="pc_show">工具</span>
@@ -134,6 +134,36 @@ const getUserInfo = async () => {
   }
 }
 
+// 从数据库加载用户翻译配置到Store（作为缓存）
+const loadUserTranslationSettings = async () => {
+  try {
+    const { getCustomerSetting } = await import('@/api/trans')
+    const { useTranslateStore } = await import('@/store/translate')
+    const translateStore = useTranslateStore()
+    
+    const settingRes = await getCustomerSetting()
+    if (settingRes.code === 200 && settingRes.data) {
+      const userSetting = settingRes.data
+      console.log('从数据库加载用户翻译配置到Store:', userSetting)
+      
+      // 同步到Store（作为缓存）
+      translateStore.updateAIServerSettings({
+        lang: userSetting.lang || 'English',
+        comparison_id: userSetting.comparison_id && userSetting.comparison_id.length > 0 
+          ? userSetting.comparison_id.map(id => parseInt(id)) 
+          : [],
+        prompt_id: userSetting.prompt_id || null,
+      })
+      translateStore.updateCommonSettings({
+        pdf_translate_method: userSetting.pdf_translate_method || 'direct',
+      })
+    }
+  } catch (error) {
+    console.error('加载用户翻译配置失败:', error)
+    // 静默失败，不影响其他功能
+  }
+}
+
 //用户操作
 function user_action(command) {
   if (command == 'pwd') {
@@ -223,10 +253,15 @@ const getTranslateSettingInfo = async () => {
     // translateStore.updateAISettingsField('api_url',res.data.api_url)
   }
 }
-onMounted(() => {
+onMounted(async () => {
   getUserInfo()
   getTranslateSettingInfo()
   getSystemSettingsInfo()
+  
+  // 如果用户已登录，从数据库加载翻译配置到Store（作为缓存）
+  if (userStore.token) {
+    await loadUserTranslationSettings()
+  }
 })
 </script>
 <style scoped lang="scss">

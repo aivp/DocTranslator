@@ -93,20 +93,16 @@ class TranslateEngine:
                 unregister_task(task_id)
                 app.logger.info(f"任务 {task_id} 已从任务管理器注销")
                 
-                # 释放内存
-                import gc
-                gc.collect()
-                
-                # 强制释放内存到操作系统
+                # 释放内存（使用更激进的清理策略）
                 try:
-                    import ctypes
-                    libc = ctypes.CDLL("libc.so.6")
-                    libc.malloc_trim(0)
-                    app.logger.info(f"🧹 任务 {task_id} 已调用malloc_trim释放内存")
+                    from app.utils.memory_manager import aggressive_memory_cleanup
+                    aggressive_memory_cleanup()
+                    app.logger.info(f"🧹 任务 {task_id} 已完成内存清理")
                 except Exception as e:
-                    app.logger.debug(f"malloc_trim不可用: {e}")
-                
-                app.logger.debug(f"任务 {task_id} 内存已释放")
+                    app.logger.warning(f"任务 {task_id} 内存清理失败: {e}")
+                    # 降级到基础清理
+                    import gc
+                    gc.collect()
                 
                 db.session.remove()  # 清理线程局部session
     

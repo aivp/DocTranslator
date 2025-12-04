@@ -25,11 +25,6 @@ def start(trans):
         print(f"无法读取文件 {trans['file_path']}: {e}")
         return False
 
-    trans_type = trans['type']
-    keepBoth = True
-    if trans_type in ["trans_text_only_inherit", "trans_text_only_new", "trans_all_only_new", "trans_all_only_inherit"]:
-        keepBoth = False
-
     # 使用专门修复表格分隔行的解析器
     parsed_elements = parse_markdown_separator_fix(content)
     
@@ -133,9 +128,7 @@ def start(trans):
                     if i < len(texts) - 1:
                         file.write('\n')
                 else:
-                    # 翻译的内容
-                    if keepBoth and item["origin"].strip() != "":
-                        file.write(item["origin"] + '\n')
+                    # 翻译的内容（直接输出译文，不保留原文）
                     file.write(item["text"])
                     # 如果不是最后一个项目，添加换行符
                     if i < len(texts) - 1:
