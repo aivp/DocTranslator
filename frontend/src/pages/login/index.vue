@@ -25,7 +25,7 @@
                 prefix-icon="el-icon-lock"
               />
             </el-form-item>
-            <el-form-item prop="tenant_code" v-if="false">
+            <el-form-item prop="tenant_code" v-if="true">
               <el-input
                 v-model="loginForm.tenant_code"
                 placeholder="租户代码"
@@ -61,7 +61,7 @@ const loginLoading = ref(false)
 const loginForm = reactive({
   email: '',
   password: '',
-  tenant_code: 'TENANT_0001' // 用户必须手动输入租户代码
+  tenant_code: '' // 用户必须手动输入租户代码
 })
 
 // 验证规则：租户代码始终必填
