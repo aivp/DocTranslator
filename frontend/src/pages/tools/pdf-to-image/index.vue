@@ -433,11 +433,20 @@ function downloadZip() {
   min-height: calc(100vh - 60px);
   background: #f5f7fa;
   padding: 20px;
+  overflow-y: auto; // 允许垂直滚动
+  height: calc(100vh - 60px); // 限制高度，确保可以滚动
+  
+  // 小屏幕适配
+  @media screen and (max-width: 768px) {
+    padding: 12px;
+    height: calc(100vh - 60px);
+  }
 }
 
 .page-container {
   max-width: 1400px;
   margin: 0 auto;
+  min-height: 100%; // 确保内容至少占满容器
 }
 
 .page-header {
@@ -445,6 +454,7 @@ function downloadZip() {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 24px;
+  flex-shrink: 0; // 防止头部被压缩
 
   .header-left {
     display: flex;
@@ -456,6 +466,11 @@ function downloadZip() {
       font-weight: bold;
       color: #111111;
       margin: 0;
+      
+      // 小屏幕适配
+      @media screen and (max-width: 768px) {
+        font-size: 20px;
+      }
     }
   }
 }
@@ -464,6 +479,7 @@ function downloadZip() {
   display: grid;
   grid-template-columns: 400px 1fr;
   gap: 24px;
+  align-items: start; // 顶部对齐，避免拉伸
 
   @media screen and (max-width: 1200px) {
     grid-template-columns: 1fr;
@@ -474,20 +490,39 @@ function downloadZip() {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  // 在小屏幕上，确保内容可以正常显示
+  @media screen and (max-width: 1200px) {
+    width: 100%;
+  }
 }
 
 .right-panel {
   min-height: 600px;
+  // 确保在小屏幕上也能正常显示
+  @media screen and (max-width: 1200px) {
+    width: 100%;
+    min-height: auto;
+  }
 }
 
 .upload-card,
 .settings-card,
 .result-card {
+  // 确保卡片内容不会溢出
+  overflow: visible;
+  
   .card-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     font-weight: bold;
+  }
+  
+  // 在小屏幕上，确保卡片内容可以正常显示
+  @media screen and (max-width: 768px) {
+    :deep(.el-card__body) {
+      padding: 16px;
+    }
   }
 }
 

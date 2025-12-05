@@ -501,15 +501,21 @@ async function handleGenerate() {
   flex: 1;
   overflow-y: auto;
   background: #f5f7fa;
+  height: calc(100vh - 60px); // 限制高度，确保可以滚动
 }
 
 .page-container {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
-  min-height: calc(100vh - 60px);
+  min-height: 100%; // 确保内容至少占满容器
   display: flex;
   flex-direction: column;
+  
+  // 小屏幕适配
+  @media screen and (max-width: 768px) {
+    padding: 12px;
+  }
 }
 
 .page-header {
@@ -517,6 +523,7 @@ async function handleGenerate() {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 24px;
+  flex-shrink: 0; // 防止头部被压缩
 
   .header-left {
     display: flex;
@@ -528,6 +535,11 @@ async function handleGenerate() {
       font-weight: bold;
       color: #111111;
       margin: 0;
+      
+      // 小屏幕适配
+      @media screen and (max-width: 768px) {
+        font-size: 20px;
+      }
     }
   }
 }
@@ -537,6 +549,7 @@ async function handleGenerate() {
   grid-template-columns: 400px 1fr;
   gap: 24px;
   flex: 1;
+  align-items: start; // 顶部对齐，避免拉伸
 
   @media screen and (max-width: 1024px) {
     grid-template-columns: 1fr;
@@ -547,21 +560,41 @@ async function handleGenerate() {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  
+  // 在小屏幕上，确保内容可以正常显示
+  @media screen and (max-width: 1024px) {
+    width: 100%;
+  }
 }
 
 .right-panel {
   display: flex;
   flex-direction: column;
+  
+  // 在小屏幕上，确保内容可以正常显示
+  @media screen and (max-width: 1024px) {
+    width: 100%;
+  }
 }
 
 .upload-card,
 .settings-card,
 .images-card {
+  // 确保卡片内容不会溢出
+  overflow: visible;
+  
   .card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     font-weight: 600;
+  }
+  
+  // 在小屏幕上，确保卡片内容可以正常显示
+  @media screen and (max-width: 768px) {
+    :deep(.el-card__body) {
+      padding: 16px;
+    }
   }
 }
 
@@ -629,6 +662,13 @@ async function handleGenerate() {
   max-height: calc(100vh - 300px);
   overflow-y: auto;
   padding: 8px;
+  
+  // 小屏幕适配：降低最大高度，确保可以滚动
+  @media screen and (max-width: 768px) {
+    max-height: calc(100vh - 400px);
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+  }
 }
 
 .image-item {
@@ -806,6 +846,18 @@ async function handleGenerate() {
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   border-top: 2px solid #f0f0f0;
+  flex-shrink: 0; // 防止底部被压缩
+  
+  // 小屏幕适配
+  @media screen and (max-width: 768px) {
+    padding: 16px;
+    flex-direction: column;
+    
+    .generate-btn {
+      width: 100%;
+      min-width: auto;
+    }
+  }
   
   .generate-btn {
     min-width: 200px;
@@ -891,10 +943,24 @@ async function handleGenerate() {
   .main-content {
     gap: 16px;
   }
-
-  .images-list {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 12px;
+  
+  .success-card {
+    margin-top: 16px;
+    
+    .success-content {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+      
+      .success-actions {
+        width: 100%;
+        flex-direction: column;
+        
+        .download-btn {
+          width: 100%;
+        }
+      }
+    }
   }
 }
 </style>

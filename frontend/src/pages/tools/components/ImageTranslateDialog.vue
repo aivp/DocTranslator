@@ -224,7 +224,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Picture, Delete, Check, Close, Plus, Promotion } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
-import { uploadImage, translateImage } from '@/api/tools'
+import { uploadImage, translateImageBatch } from '@/api/tools'
 
 const props = defineProps({
   modelValue: {
@@ -521,54 +521,49 @@ async function handleTranslate() {
       throw new Error('所有图片上传失败')
     }
 
-    // 批量翻译
-    const translatePromises = successUploads.map(async (uploadData) => {
-      try {
-        // 优先使用image_id，如果没有则使用save_path（兼容旧接口）
-        const translateParams = {
-          source_language: form.value.sourceLanguage,
-          target_language: form.value.targetLanguage
-        }
+    // 批量翻译 - 使用批量接口，后端控制并发和延迟
+    const imageIds = successUploads
+      .filter(uploadData => uploadData.imageId)
+      .map(uploadData => uploadData.imageId)
+
+    if (imageIds.length === 0) {
+      throw new Error('没有可翻译的图片ID')
+    }
+
+    try {
+      const result = await translateImageBatch({
+        image_ids: imageIds,
+        source_language: form.value.sourceLanguage,
+        target_language: form.value.targetLanguage
+      })
+
+      if (result.code === 200) {
+        const { success_count, failed_count, results: batchResults } = result.data
         
-        if (uploadData.imageId) {
-          translateParams.image_id = uploadData.imageId
+        // 构建翻译结果，匹配原有的数据结构
+        translationResults.value = successUploads.map((uploadData) => {
+          const batchResult = batchResults?.find(r => r.image_id === uploadData.imageId)
+          return {
+            imageName: uploadData.name,
+            imageId: uploadData.imageId,
+            success: batchResult?.success || false,
+            data: batchResult?.success ? { image_id: uploadData.imageId } : null,
+            error: batchResult?.error || null
+          }
+        })
+
+        if (failed_count > 0) {
+          ElMessage.warning(`成功提交 ${success_count} 个翻译任务，${failed_count} 个失败`)
         } else {
-          translateParams.image_url = uploadData.savePath
+          ElMessage.success(`成功提交 ${success_count} 个翻译任务，正在处理中...`)
         }
-        
-        const result = await translateImage(translateParams)
-
-        // 如果翻译成功，保存返回的image_id（新创建的记录）
-        const imageId = result.code === 200 && result.data?.image_id 
-          ? result.data.image_id 
-          : uploadData.imageId
-
-        return {
-          imageName: uploadData.name,
-          imageId: imageId,
-          success: result.code === 200,
-          data: result.code === 200 ? result.data : null,
-          error: result.code !== 200 ? (result.message || '翻译失败') : null
-        }
-      } catch (error) {
-        return {
-          imageName: uploadData.name,
-          imageId: uploadData.imageId,
-          success: false,
-          data: null,
-          error: error.message || '翻译失败'
-        }
+      } else {
+        throw new Error(result.message || '批量翻译失败')
       }
-    })
-
-    const results = await Promise.all(translatePromises)
-    translationResults.value = results
-
-    const successCount = results.filter(r => r.success).length
-    if (successCount > 0) {
-      ElMessage.success(`成功翻译 ${successCount}/${results.length} 张图片`)
-    } else {
-      ElMessage.error('所有图片翻译失败')
+    } catch (error) {
+      console.error('批量翻译失败:', error)
+      ElMessage.error(error.message || '批量翻译失败，请稍后重试')
+      throw error
     }
   } catch (error) {
     console.error('翻译失败:', error)

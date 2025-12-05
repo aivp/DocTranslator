@@ -16,6 +16,7 @@ from app.utils.response import APIResponse
 from app.utils.token_checker import require_valid_token
 from app.utils.api_key_helper import get_dashscope_key, get_current_tenant_id_from_request
 from app.utils.tenant_path import get_tenant_upload_dir
+from app.utils.qwen_mt_image_client import QwenMTImageClient
 from app.models.customer import Customer
 from app.models.image_translate import ImageTranslate
 from app.extensions import db
@@ -235,7 +236,7 @@ class ImageTranslateResource(Resource):
     
     def _create_qwen_mt_image_task(self, api_key, image_url, source_language, target_language):
         """
-        创建 Qwen-MT-Image 翻译任务（只提交，不等待结果）
+        创建 Qwen-MT-Image 翻译任务（使用统一客户端）
         
         Args:
             api_key: DashScope API Key
@@ -246,85 +247,13 @@ class ImageTranslateResource(Resource):
         Returns:
             dict: 包含task_id的字典
         """
-        try:
-            api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis"
-            
-            input_params = {
-                "image_url": image_url,
-                "source_lang": source_language,
-                "target_lang": target_language
-            }
-            
-            payload = {
-                "model": "qwen-mt-image",
-                "input": input_params
-            }
-            
-            current_app.logger.info(f"创建Qwen-MT-Image翻译任务: source_lang={source_language}, target_lang={target_language}, image_url={image_url}")
-            
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "X-DashScope-Async": "enable"  # 启用异步模式
-            }
-            
-            response = requests.post(
-                api_url,
-                json=payload,
-                headers=headers,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                current_app.logger.info(f"Qwen-MT-Image API响应: {result}")
-                
-                # 获取task_id
-                task_id = result.get('task_id') or result.get('output', {}).get('task_id')
-                
-                if task_id:
-                    return {
-                        'success': True,
-                        'task_id': task_id
-                    }
-                else:
-                    current_app.logger.error(f"未找到task_id，响应: {result}")
-                    return {
-                        'success': False,
-                        'error': 'API返回格式异常，未找到task_id'
-                    }
-            else:
-                error_msg = f"API请求失败: {response.status_code}"
-                try:
-                    error_data = response.json()
-                    error_msg = error_data.get('message') or error_data.get('error') or error_msg
-                    current_app.logger.error(f"Qwen-MT-Image API错误响应: {error_data}")
-                except:
-                    error_msg = response.text or error_msg
-                    current_app.logger.error(f"Qwen-MT-Image API错误: {error_msg}")
-                
-                return {
-                    'success': False,
-                    'error': error_msg
-                }
-                
-        except requests.exceptions.Timeout:
-            return {
-                'success': False,
-                'error': '请求超时，请稍后重试'
-            }
-        except requests.exceptions.RequestException as e:
-            current_app.logger.error(f"API请求异常: {str(e)}")
-            return {
-                'success': False,
-                'error': f'网络请求失败: {str(e)}'
-            }
-        except Exception as e:
-            current_app.logger.error(f"创建Qwen-MT-Image任务异常: {str(e)}")
-            return {
-                'success': False,
-                'error': f'创建任务失败: {str(e)}'
-            }
+        return QwenMTImageClient.create_translation_task(
+            api_key=api_key,
+            image_url=image_url,
+            source_language=source_language,
+            target_language=target_language,
+            enable_async=True
+        )
     
     def _convert_filepath_to_url(self, filepath):
         """
@@ -491,52 +420,14 @@ class ImageTranslateBatchResource(Resource):
             return None
 
     def _create_qwen_mt_image_task(self, api_key, image_url, source_language, target_language):
-        """创建 Qwen-MT-Image 翻译任务（复用ImageTranslateResource的方法）"""
-        try:
-            api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis"
-            input_params = {
-                "image_url": image_url,
-                "source_lang": source_language,
-                "target_lang": target_language
-            }
-            payload = {
-                "model": "qwen-mt-image",
-                "input": input_params
-            }
-            current_app.logger.info(f"创建Qwen-MT-Image翻译任务: source_lang={source_language}, target_lang={target_language}, image_url={image_url}")
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "X-DashScope-Async": "enable"
-            }
-            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                current_app.logger.info(f"Qwen-MT-Image API响应: {result}")
-                task_id = result.get('task_id') or result.get('output', {}).get('task_id')
-                if task_id:
-                    return {'success': True, 'task_id': task_id}
-                else:
-                    current_app.logger.error(f"未找到task_id，响应: {result}")
-                    return {'success': False, 'error': 'API返回格式异常，未找到task_id'}
-            else:
-                error_msg = f"API请求失败: {response.status_code}"
-                try:
-                    error_data = response.json()
-                    error_msg = error_data.get('message') or error_data.get('error') or error_msg
-                    current_app.logger.error(f"Qwen-MT-Image API错误响应: {error_data}")
-                except:
-                    error_msg = response.text or error_msg
-                    current_app.logger.error(f"Qwen-MT-Image API错误: {error_msg}")
-                return {'success': False, 'error': error_msg}
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error': '请求超时，请稍后重试'}
-        except requests.exceptions.RequestException as e:
-            current_app.logger.error(f"API请求异常: {str(e)}")
-            return {'success': False, 'error': f'网络请求失败: {str(e)}'}
-        except Exception as e:
-            current_app.logger.error(f"创建Qwen-MT-Image任务异常: {str(e)}")
-            return {'success': False, 'error': f'创建任务失败: {str(e)}'}
+        """创建 Qwen-MT-Image 翻译任务（使用统一客户端）"""
+        return QwenMTImageClient.create_translation_task(
+            api_key=api_key,
+            image_url=image_url,
+            source_language=source_language,
+            target_language=target_language,
+            enable_async=True
+        )
 
 
 class ImageTranslateStatusResource(Resource):

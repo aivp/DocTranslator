@@ -2,13 +2,17 @@
 """
 视频翻译队列管理器
 限制同时处理的视频翻译任务数（最大20个）
+支持多进程环境：使用文件锁确保只有一个进程运行队列管理器
 """
 import threading
 import time
 import logging
+import os
+import fcntl
 from typing import Dict
 from datetime import datetime
 from flask import current_app
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,8 @@ class VideoQueueManager:
         self.running = False
         self._app = None  # 缓存应用实例
         self.check_interval = 10  # 检查间隔（秒）
+        self._lock_file = None  # 文件锁
+        self._lock_file_handle = None  # 文件锁句柄
         
     def set_app(self, app):
         """设置应用实例（由主应用调用）"""
@@ -39,22 +45,77 @@ class VideoQueueManager:
         return self._app
     
     def start_monitor(self):
-        """启动队列监控线程"""
+        """启动队列监控线程（多进程安全：使用文件锁确保只有一个进程运行）"""
         if self.running:
             logger.warning("视频队列监控线程已经在运行")
+            return
+        
+        # 尝试获取文件锁（确保只有一个进程运行队列管理器）
+        if not self._acquire_lock():
+            logger.info("视频翻译队列管理器已在其他进程中运行，跳过启动")
             return
         
         self.running = True
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
-        logger.info("视频队列监控线程已启动")
+        logger.info("视频队列监控线程已启动（已获取进程锁）")
     
     def stop_monitor(self):
         """停止队列监控线程"""
         self.running = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
+        self._release_lock()
         logger.info("视频队列监控线程已停止")
+    
+    def _acquire_lock(self):
+        """获取文件锁（确保只有一个进程运行队列管理器）"""
+        try:
+            # 创建锁文件路径
+            lock_file_path = Path('/tmp/video_translate_queue_manager.lock')
+            
+            # 打开锁文件（如果不存在则创建）
+            self._lock_file_handle = open(lock_file_path, 'w')
+            
+            # 尝试获取非阻塞排他锁
+            fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            
+            # 写入进程ID
+            self._lock_file_handle.write(str(os.getpid()))
+            self._lock_file_handle.flush()
+            
+            self._lock_file = lock_file_path
+            return True
+            
+        except (IOError, OSError) as e:
+            # 无法获取锁（其他进程正在运行）
+            if self._lock_file_handle:
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            return False
+        except Exception as e:
+            logger.error(f"获取文件锁失败: {str(e)}")
+            if self._lock_file_handle:
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            return False
+    
+    def _release_lock(self):
+        """释放文件锁"""
+        try:
+            if self._lock_file_handle:
+                fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_UN)
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            
+            if self._lock_file and self._lock_file.exists():
+                try:
+                    self._lock_file.unlink()
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"释放文件锁失败: {str(e)}")
     
     def _monitor_loop(self):
         """监控循环"""
@@ -148,13 +209,36 @@ class VideoQueueManager:
             return 0
     
     def _get_queued_videos(self, limit=1):
-        """获取队列中的视频（按创建时间排序）"""
+        """
+        获取队列中的视频（按创建时间排序）
+        使用 SELECT FOR UPDATE SKIP LOCKED 避免多进程重复处理
+        """
         try:
             from app.models.video_translate import VideoTranslate
-            videos = VideoTranslate.query.filter_by(
-                status='queued',
-                deleted_flag='N'
-            ).order_by(VideoTranslate.created_at.asc()).limit(limit).all()
+            from app.extensions import db
+            from sqlalchemy import text
+            
+            # 使用 SELECT FOR UPDATE SKIP LOCKED 确保多进程环境下不会重复处理
+            query = text("""
+                SELECT id FROM video_translate
+                WHERE status = 'queued'
+                  AND deleted_flag = 'N'
+                ORDER BY created_at ASC
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+            """)
+            
+            result = db.session.execute(query, {'limit': limit})
+            video_ids = [row[0] for row in result]
+            
+            if not video_ids:
+                return []
+            
+            # 根据ID查询完整记录
+            videos = VideoTranslate.query.filter(
+                VideoTranslate.id.in_(video_ids)
+            ).order_by(VideoTranslate.created_at.asc()).all()
+            
             return videos
         except Exception as e:
             logger.error(f"获取队列视频失败: {str(e)}")
@@ -168,8 +252,26 @@ class VideoQueueManager:
             # 如果akool_task_id已经存在，说明任务已经在Akool创建了，只需要更新状态
             if video.akool_task_id:
                 logger.info(f"视频任务已在Akool创建，直接更新状态: video_id={video.id}, akool_task_id={video.akool_task_id}")
-                video.status = 'processing'
-                video.updated_at = datetime.utcnow()
+                
+                # 使用原子更新：只有状态为queued时才更新为processing
+                from sqlalchemy import text
+                update_result = db.session.execute(
+                    text("""
+                        UPDATE video_translate
+                        SET status = 'processing',
+                            updated_at = NOW()
+                        WHERE id = :video_id
+                          AND status = 'queued'
+                    """),
+                    {'video_id': video.id}
+                )
+                
+                if update_result.rowcount == 0:
+                    # 更新失败（可能已被其他进程处理）
+                    logger.warning(f"视频任务状态更新失败（可能已被其他进程处理）: video_id={video.id}")
+                    db.session.rollback()
+                    return False
+                
                 db.session.commit()
                 logger.info(f"视频翻译任务已启动: video_id={video.id}")
                 return True
@@ -215,22 +317,55 @@ class VideoQueueManager:
                 dynamic_duration=False  # 从队列启动的任务默认不启用动态时长
             )
             
-            # 更新视频状态
+            # 更新视频状态（使用原子更新）
             if result and result.get('data'):
                 video_data = result['data']
-                video.akool_task_id = video_data.get('_id') or video_data.get('task_id')
-                video.status = 'processing'
-                video.webhook_url = webhook_url
-                video.updated_at = datetime.utcnow()
+                akool_task_id = video_data.get('_id') or video_data.get('task_id')
+                
+                # 使用原子更新：只有状态为queued时才更新为processing
+                from sqlalchemy import text
+                update_result = db.session.execute(
+                    text("""
+                        UPDATE video_translate
+                        SET status = 'processing',
+                            akool_task_id = :akool_task_id,
+                            webhook_url = :webhook_url,
+                            updated_at = NOW()
+                        WHERE id = :video_id
+                          AND status = 'queued'
+                    """),
+                    {
+                        'video_id': video.id,
+                        'akool_task_id': akool_task_id,
+                        'webhook_url': webhook_url
+                    }
+                )
+                
+                if update_result.rowcount == 0:
+                    # 更新失败（可能已被其他进程处理）
+                    logger.warning(f"视频任务状态更新失败（可能已被其他进程处理）: video_id={video.id}")
+                    db.session.rollback()
+                    return False
                 
                 db.session.commit()
-                logger.info(f"视频翻译任务已启动: video_id={video.id}, akool_task_id={video.akool_task_id}")
+                logger.info(f"视频翻译任务已启动: video_id={video.id}, akool_task_id={akool_task_id}")
                 return True
             else:
                 logger.error(f"创建视频翻译任务失败: video_id={video.id}")
-                video.status = 'failed'
-                video.error_message = '创建翻译任务失败'
-                video.updated_at = datetime.utcnow()
+                
+                # 使用原子更新：只有状态为queued时才更新为failed
+                from sqlalchemy import text
+                update_result = db.session.execute(
+                    text("""
+                        UPDATE video_translate
+                        SET status = 'failed',
+                            error_message = '创建翻译任务失败',
+                            updated_at = NOW()
+                        WHERE id = :video_id
+                          AND status = 'queued'
+                    """),
+                    {'video_id': video.id}
+                )
                 db.session.commit()
                 return False
                 

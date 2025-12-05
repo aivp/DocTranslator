@@ -2,13 +2,17 @@
 """
 图片翻译队列管理器
 限制同时处理的图片翻译任务数（最大20个），间隔1秒提交
+支持多进程环境：使用文件锁确保只有一个进程运行队列管理器
 """
 import threading
 import time
 import logging
+import os
+import fcntl
 from typing import Dict
 from datetime import datetime
 from flask import current_app
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,8 @@ class ImageTranslateQueueManager:
         self.check_interval = 1  # 检查间隔（秒）
         self.processing_count = 0  # 当前正在处理的任务数
         self.last_submit_time = 0  # 上次提交时间
+        self._lock_file = None  # 文件锁
+        self._lock_file_handle = None  # 文件锁句柄
         
     def set_app(self, app):
         """设置应用实例（由主应用调用）"""
@@ -43,22 +49,77 @@ class ImageTranslateQueueManager:
         return self._app
     
     def start_monitor(self):
-        """启动队列监控线程"""
+        """启动队列监控线程（多进程安全：使用文件锁确保只有一个进程运行）"""
         if self.running:
             logger.warning("图片翻译队列监控线程已经在运行")
+            return
+        
+        # 尝试获取文件锁（确保只有一个进程运行队列管理器）
+        if not self._acquire_lock():
+            logger.info("图片翻译队列管理器已在其他进程中运行，跳过启动")
             return
         
         self.running = True
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
-        logger.info("图片翻译队列监控线程已启动")
+        logger.info("图片翻译队列监控线程已启动（已获取进程锁）")
     
     def stop_monitor(self):
         """停止队列监控线程"""
         self.running = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
+        self._release_lock()
         logger.info("图片翻译队列监控线程已停止")
+    
+    def _acquire_lock(self):
+        """获取文件锁（确保只有一个进程运行队列管理器）"""
+        try:
+            # 创建锁文件路径
+            lock_file_path = Path('/tmp/image_translate_queue_manager.lock')
+            
+            # 打开锁文件（如果不存在则创建）
+            self._lock_file_handle = open(lock_file_path, 'w')
+            
+            # 尝试获取非阻塞排他锁
+            fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            
+            # 写入进程ID
+            self._lock_file_handle.write(str(os.getpid()))
+            self._lock_file_handle.flush()
+            
+            self._lock_file = lock_file_path
+            return True
+            
+        except (IOError, OSError) as e:
+            # 无法获取锁（其他进程正在运行）
+            if self._lock_file_handle:
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            return False
+        except Exception as e:
+            logger.error(f"获取文件锁失败: {str(e)}")
+            if self._lock_file_handle:
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            return False
+    
+    def _release_lock(self):
+        """释放文件锁"""
+        try:
+            if self._lock_file_handle:
+                fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_UN)
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            
+            if self._lock_file and self._lock_file.exists():
+                try:
+                    self._lock_file.unlink()
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"释放文件锁失败: {str(e)}")
     
     def _monitor_loop(self):
         """监控循环"""
@@ -135,19 +196,38 @@ class ImageTranslateQueueManager:
             logger.error(f"处理图片翻译队列异常: {str(e)}", exc_info=True)
     
     def _get_queued_tasks(self, limit=1):
-        """获取队列中的任务（状态为uploaded，有source_language和target_language）"""
+        """
+        获取队列中的任务（状态为uploaded，有source_language和target_language）
+        使用 SELECT FOR UPDATE SKIP LOCKED 避免多进程重复处理
+        """
         try:
             from app.models.image_translate import ImageTranslate
             from app.extensions import db
+            from sqlalchemy import text
             
-            # 使用简单的查询，避免复杂操作阻塞
-            # 添加索引提示，确保查询快速执行
+            # 使用 SELECT FOR UPDATE SKIP LOCKED 确保多进程环境下不会重复处理
+            # 这样可以确保即使多个进程同时查询，也只有一个进程能获取到任务
+            query = text("""
+                SELECT id FROM image_translate
+                WHERE status = 'uploaded'
+                  AND source_language IS NOT NULL
+                  AND target_language IS NOT NULL
+                  AND deleted_flag = 'N'
+                ORDER BY created_at ASC
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+            """)
+            
+            result = db.session.execute(query, {'limit': limit})
+            task_ids = [row[0] for row in result]
+            
+            if not task_ids:
+                return []
+            
+            # 根据ID查询完整记录
             tasks = ImageTranslate.query.filter(
-                ImageTranslate.status == 'uploaded',
-                ImageTranslate.source_language.isnot(None),
-                ImageTranslate.target_language.isnot(None),
-                ImageTranslate.deleted_flag == 'N'
-            ).order_by(ImageTranslate.created_at.asc()).limit(limit).all()
+                ImageTranslate.id.in_(task_ids)
+            ).all()
             
             return tasks
         except Exception as e:
@@ -279,28 +359,69 @@ class ImageTranslateQueueManager:
                     from app.models.image_translate import ImageTranslate
                     from app.extensions import db
                     
-                    image_record = ImageTranslate.query.get(task_id)
-                    if not image_record:
-                        return
+                    # 使用原子更新，确保只有状态为uploaded的任务才会被更新
+                    from sqlalchemy import text
                     
                     if task_result.get('success'):
                         task_id_from_api = task_result.get('task_id')
                         if task_id_from_api:
-                            image_record.status = 'translating'
-                            image_record.qwen_task_id = task_id_from_api
-                            db.session.commit()
-                            logger.info(f"图片翻译任务已提交: image_id={image_record.id}, task_id={task_id_from_api}")
+                            # 原子更新：只有状态为uploaded时才更新为translating
+                            update_result = db.session.execute(
+                                text("""
+                                    UPDATE image_translate
+                                    SET status = 'translating',
+                                        qwen_task_id = :qwen_task_id,
+                                        updated_at = NOW()
+                                    WHERE id = :image_id
+                                      AND status = 'uploaded'
+                                """),
+                                {
+                                    'image_id': task_id,
+                                    'qwen_task_id': task_id_from_api
+                                }
+                            )
+                            
+                            if update_result.rowcount == 0:
+                                # 更新失败（可能已被其他进程处理）
+                                logger.warning(f"任务状态更新失败（可能已被其他进程处理）: task_id={task_id}")
+                                db.session.rollback()
+                            else:
+                                db.session.commit()
+                                logger.info(f"✅ 图片翻译任务已提交: image_id={task_id}, qwen_task_id={task_id_from_api}")
                         else:
-                            image_record.status = 'failed'
-                            image_record.error_message = '未获取到任务ID'
+                            # 更新为失败状态（原子操作）
+                            update_result = db.session.execute(
+                                text("""
+                                    UPDATE image_translate
+                                    SET status = 'failed',
+                                        error_message = '未获取到任务ID',
+                                        updated_at = NOW()
+                                    WHERE id = :image_id
+                                      AND status = 'uploaded'
+                                """),
+                                {'image_id': task_id}
+                            )
                             db.session.commit()
-                            logger.error(f"图片翻译任务提交失败: image_id={image_record.id}, 未获取到任务ID")
+                            logger.error(f"图片翻译任务提交失败: image_id={task_id}, 未获取到任务ID")
                     else:
                         error_msg = task_result.get('error', '创建翻译任务失败')
-                        image_record.status = 'failed'
-                        image_record.error_message = error_msg
+                        # 更新为失败状态（原子操作）
+                        update_result = db.session.execute(
+                            text("""
+                                UPDATE image_translate
+                                SET status = 'failed',
+                                    error_message = :error_msg,
+                                    updated_at = NOW()
+                                WHERE id = :image_id
+                                  AND status = 'uploaded'
+                            """),
+                            {
+                                'image_id': task_id,
+                                'error_msg': error_msg[:500]  # 限制错误信息长度
+                            }
+                        )
                         db.session.commit()
-                        logger.error(f"图片翻译任务提交失败: image_id={image_record.id}, error={error_msg}")
+                        logger.error(f"图片翻译任务提交失败: image_id={task_id}, error={error_msg}")
                     
                     # 立即关闭session，释放连接
                     db.session.close()
@@ -348,70 +469,16 @@ class ImageTranslateQueueManager:
             return None
     
     def _create_qwen_mt_image_task(self, api_key, image_url, source_language, target_language):
-        """创建 Qwen-MT-Image 翻译任务"""
-        try:
-            import requests
-            from flask import current_app
-            
-            api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis"
-            input_params = {
-                "image_url": image_url,
-                "source_lang": source_language,
-                "target_lang": target_language
-            }
-            payload = {
-                "model": "qwen-mt-image",
-                "input": input_params
-            }
-            
-            # 打印详细的请求参数
-            logger.info(f"📤 [队列管理器] 创建Qwen-MT-Image翻译任务")
-            logger.info(f"📤 [队列管理器] API URL: {api_url}")
-            logger.info(f"📤 [队列管理器] 请求参数 - source_lang: {source_language}, target_lang: {target_language}")
-            logger.info(f"📤 [队列管理器] 请求参数 - image_url: {image_url}")
-            logger.info(f"📤 [队列管理器] 完整Payload: {payload}")
-            logger.info(f"📤 [队列管理器] API Key长度: {len(api_key) if api_key else 0}")
-            
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "X-DashScope-Async": "enable"
-            }
-            
-            logger.info(f"📤 [队列管理器] 请求Headers: Content-Type={headers.get('Content-Type')}, X-DashScope-Async={headers.get('X-DashScope-Async')}")
-            
-            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
-            
-            logger.info(f"📥 [队列管理器] Qwen-MT-Image API响应状态码: {response.status_code}")
-            
-            if response.status_code == 200:
-                result = response.json()
-                logger.info(f"Qwen-MT-Image API响应: {result}")
-                task_id = result.get('task_id') or result.get('output', {}).get('task_id')
-                if task_id:
-                    return {'success': True, 'task_id': task_id}
-                else:
-                    logger.error(f"未找到task_id，响应: {result}")
-                    return {'success': False, 'error': 'API返回格式异常，未找到task_id'}
-            else:
-                error_msg = f"API请求失败: {response.status_code}"
-                try:
-                    error_data = response.json()
-                    error_msg = error_data.get('message') or error_data.get('error') or error_msg
-                    logger.error(f"Qwen-MT-Image API错误响应: {error_data}")
-                except:
-                    error_msg = response.text or error_msg
-                    logger.error(f"Qwen-MT-Image API错误: {error_msg}")
-                return {'success': False, 'error': error_msg}
-                
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error': '请求超时，请稍后重试'}
-        except requests.exceptions.RequestException as e:
-            logger.error(f"API请求异常: {str(e)}")
-            return {'success': False, 'error': f'网络请求失败: {str(e)}'}
-        except Exception as e:
-            logger.error(f"创建Qwen-MT-Image任务异常: {str(e)}")
-            return {'success': False, 'error': f'创建任务失败: {str(e)}'}
+        """创建 Qwen-MT-Image 翻译任务（使用统一客户端）"""
+        from app.utils.qwen_mt_image_client import QwenMTImageClient
+        
+        return QwenMTImageClient.create_translation_task(
+            api_key=api_key,
+            image_url=image_url,
+            source_language=source_language,
+            target_language=target_language,
+            enable_async=True
+        )
 
 
 # 全局队列管理器实例

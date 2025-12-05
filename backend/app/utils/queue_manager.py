@@ -2,12 +2,16 @@
 """
 队列管理器 - 智能任务调度
 根据系统资源（任务数和内存使用）智能调度翻译任务
+支持多进程环境：使用文件锁确保只有一个进程运行队列管理器
 """
 import threading
 import time
 import logging
+import os
+import fcntl
 from typing import Dict, Tuple
 from flask import current_app
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +34,8 @@ class QueueManager:
         self.monitor_thread = None
         self.running = False
         self._app = None  # 缓存应用实例
+        self._lock_file = None  # 文件锁
+        self._lock_file_handle = None  # 文件锁句柄
         
     def set_app(self, app):
         """设置应用实例（由主应用调用）"""
@@ -49,9 +55,14 @@ class QueueManager:
         return self._app
         
     def start_monitor(self):
-        """启动队列监控线程"""
+        """启动队列监控线程（多进程安全：使用文件锁确保只有一个进程运行）"""
         if self.monitor_thread and self.monitor_thread.is_alive():
             logger.info("队列监控线程已在运行")
+            return
+        
+        # 尝试获取文件锁（确保只有一个进程运行队列管理器）
+        if not self._acquire_lock():
+            logger.info("文件翻译队列管理器已在其他进程中运行，跳过启动")
             return
             
         self.running = True
@@ -61,7 +72,7 @@ class QueueManager:
             time.sleep(3)  # 等待3秒让Flask应用完全初始化
             self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
             self.monitor_thread.start()
-            logger.info("队列监控线程已启动")
+            logger.info("队列监控线程已启动（已获取进程锁）")
         
         # 在单独的线程中延迟启动
         threading.Thread(target=delayed_start, daemon=True).start()
@@ -72,7 +83,57 @@ class QueueManager:
         self.running = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
-            logger.info("队列监控线程已停止")
+        self._release_lock()
+        logger.info("队列监控线程已停止")
+    
+    def _acquire_lock(self):
+        """获取文件锁（确保只有一个进程运行队列管理器）"""
+        try:
+            # 创建锁文件路径
+            lock_file_path = Path('/tmp/file_translate_queue_manager.lock')
+            
+            # 打开锁文件（如果不存在则创建）
+            self._lock_file_handle = open(lock_file_path, 'w')
+            
+            # 尝试获取非阻塞排他锁
+            fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            
+            # 写入进程ID
+            self._lock_file_handle.write(str(os.getpid()))
+            self._lock_file_handle.flush()
+            
+            self._lock_file = lock_file_path
+            return True
+            
+        except (IOError, OSError) as e:
+            # 无法获取锁（其他进程正在运行）
+            if self._lock_file_handle:
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            return False
+        except Exception as e:
+            logger.error(f"获取文件锁失败: {str(e)}")
+            if self._lock_file_handle:
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            return False
+    
+    def _release_lock(self):
+        """释放文件锁"""
+        try:
+            if self._lock_file_handle:
+                fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_UN)
+                self._lock_file_handle.close()
+                self._lock_file_handle = None
+            
+            if self._lock_file and self._lock_file.exists():
+                try:
+                    self._lock_file.unlink()
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"释放文件锁失败: {str(e)}")
     
     def _monitor_loop(self):
         """队列监控循环"""
@@ -490,15 +551,30 @@ class QueueManager:
                     logger.debug(f"当前任务数已满({current_tasks}/{self.max_concurrent_tasks})，跳过启动新任务")
                     return
                 
-                # 获取队列中的所有任务，按创建时间排序
-                queued_tasks = Translate.query.filter_by(
-                    status='queued',
-                    deleted_flag='N'
-                ).order_by(Translate.created_at.asc()).all()
+                # 获取队列中的任务（使用 SELECT FOR UPDATE SKIP LOCKED 避免多进程重复处理）
+                from sqlalchemy import text
                 
-                if not queued_tasks:
+                # 使用 SELECT FOR UPDATE SKIP LOCKED 确保多进程环境下不会重复处理
+                query = text("""
+                    SELECT id FROM translate
+                    WHERE status = 'queued'
+                      AND deleted_flag = 'N'
+                    ORDER BY created_at ASC
+                    LIMIT 10
+                    FOR UPDATE SKIP LOCKED
+                """)
+                
+                result = db.session.execute(query)
+                task_ids = [row[0] for row in result]
+                
+                if not task_ids:
                     logger.debug("队列中没有等待的任务")
                     return
+                
+                # 根据ID查询完整记录
+                queued_tasks = Translate.query.filter(
+                    Translate.id.in_(task_ids)
+                ).order_by(Translate.created_at.asc()).all()
                 
                 # 智能选择要启动的任务
                 task_to_start = self._select_next_task(queued_tasks, current_pdf_tasks)
@@ -506,11 +582,32 @@ class QueueManager:
                 if task_to_start:
                     logger.info(f"准备启动队列任务 {task_to_start.id} ({task_to_start.origin_filepath})")
                     
-                    # 设置任务开始时间（从队列启动时开始计算）
+                    # 使用原子更新：只有状态为queued时才更新为process
                     from datetime import datetime
                     import pytz
-                    task_to_start.start_at = datetime.now(pytz.timezone(app.config['TIMEZONE']))
-                    task_to_start.status = 'process'
+                    start_time = datetime.now(pytz.timezone(app.config['TIMEZONE']))
+                    
+                    update_result = db.session.execute(
+                        text("""
+                            UPDATE translate
+                            SET status = 'process',
+                                start_at = :start_time,
+                                updated_at = NOW()
+                            WHERE id = :task_id
+                              AND status = 'queued'
+                        """),
+                        {
+                            'task_id': task_to_start.id,
+                            'start_time': start_time
+                        }
+                    )
+                    
+                    if update_result.rowcount == 0:
+                        # 更新失败（可能已被其他进程处理）
+                        logger.warning(f"任务状态更新失败（可能已被其他进程处理）: task_id={task_to_start.id}")
+                        db.session.rollback()
+                        return
+                    
                     db.session.commit()
                     logger.info(f"队列任务 {task_to_start.id} 开始时间已设置")
                     
