@@ -1319,6 +1319,19 @@ def start_direct_pdf_translation(trans):
         target_dir = os.path.dirname(trans['target_file'])
         os.makedirs(target_dir, exist_ok=True)
         
+        # 预加载术语库（与Okapi方式保持一致）
+        comparison_id = trans.get('comparison_id')
+        if comparison_id:
+            logger.info(f"📚 开始预加载术语库: {comparison_id}")
+            from .main import get_comparison
+            preloaded_terms = get_comparison(comparison_id)
+            if preloaded_terms:
+                logger.info(f"📚 术语库预加载成功: {len(preloaded_terms)} 个术语")
+                # 将预加载的术语库添加到trans中
+                trans['preloaded_terms'] = preloaded_terms
+            else:
+                logger.warning(f"📚 术语库预加载失败: {comparison_id}")
+        
         # 检测PDF页数，决定使用哪种翻译方法
         try:
             with PyMuPDFContext("检测PDF页数"):

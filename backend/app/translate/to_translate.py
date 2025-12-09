@@ -70,10 +70,82 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
         elif server == 'qwen':
             # 前端已直接传入英文名（English Name），无需映射
             # target_lang 已经是英文全拼格式（如 "English", "Chinese"），直接使用
+            
+            # 处理术语库（仅当使用千问模型且有术语库时）
+            tm_list = None
+            comparison_id = trans.get('comparison_id')
+            model = trans.get('model', 'gpt-3.5-turbo')
+            
+            if model == 'qwen-mt-plus' and comparison_id:
+                # 检查是否有预加载的术语库
+                preloaded_terms = trans.get('preloaded_terms')
+                if preloaded_terms:
+                    # 使用预加载的术语库进行筛选
+                    try:
+                        from .term_filter import optimize_terms_for_api
+                        
+                        # 记录术语库处理开始时间
+                        term_start_time = time.time()
+                        filtered_terms = optimize_terms_for_api(
+                            text, preloaded_terms, max_terms=10, 
+                            comparison_id=str(comparison_id) if comparison_id else None
+                        )
+                        term_end_time = time.time()
+                        term_duration = term_end_time - term_start_time
+                        
+                        logging.info(f"📚 术语库筛选用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms) if filtered_terms else 0}")
+                        
+                        if filtered_terms:
+                            # 转换为tm_list格式
+                            tm_list = []
+                            for term in filtered_terms:
+                                tm_list.append({
+                                    "source": term['source'],
+                                    "target": term['target']
+                                })
+                        else:
+                            logging.debug("没有找到相关术语")
+                            tm_list = []
+                            
+                    except Exception as e:
+                        logging.error(f"预加载术语库筛选失败: {str(e)}")
+                        tm_list = []
+                else:
+                    # 没有预加载的术语库，从数据库查询并筛选
+                    try:
+                        from .main import get_filtered_terms_for_text
+                        
+                        # 记录术语库处理开始时间
+                        term_start_time = time.time()
+                        filtered_terms_str = get_filtered_terms_for_text(text, comparison_id, max_terms=10)
+                        term_end_time = time.time()
+                        term_duration = term_end_time - term_start_time
+                        
+                        logging.info(f"📚 术语库处理用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms_str.split(chr(10))) if filtered_terms_str else 0}")
+                        
+                        if filtered_terms_str:
+                            # 将筛选后的术语字符串转换为tm_list格式
+                            tm_list = []
+                            for line in filtered_terms_str.split('\n'):
+                                if ':' in line:
+                                    source, target = line.split(':', 1)
+                                    tm_list.append({
+                                        "source": source.strip(),
+                                        "target": target.strip()
+                                    })
+                        else:
+                            logging.debug("没有找到相关术语")
+                            tm_list = []
+                            
+                    except Exception as e:
+                        logging.error(f"术语库筛选失败: {str(e)}")
+                        tm_list = []
+            
             return qwen_translate(
                 text=text,
                 target_language=target_lang,  # 直接使用，已经是英文名
                 source_lang="auto",
+                tm_list=tm_list,  # 传递术语库
                 prompt=trans.get('prompt'),
                 prompt_id=trans.get('prompt_id'),
                 texts=None,  # translate_text函数中没有texts数组
@@ -120,11 +192,50 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                 logging.error(f"OpenAI 翻译失败: {e}")
                 # 如果 OpenAI 失败，尝试使用 Qwen 作为备用
                 try:
+                    # 处理术语库（备用方案也支持术语库）
+                    tm_list = None
+                    comparison_id = trans.get('comparison_id')
+                    model = trans.get('model', 'gpt-3.5-turbo')
+                    
+                    if model == 'qwen-mt-plus' and comparison_id:
+                        # 检查是否有预加载的术语库
+                        preloaded_terms = trans.get('preloaded_terms')
+                        if preloaded_terms:
+                            try:
+                                from .term_filter import optimize_terms_for_api
+                                filtered_terms = optimize_terms_for_api(
+                                    text, preloaded_terms, max_terms=10, 
+                                    comparison_id=str(comparison_id) if comparison_id else None
+                                )
+                                if filtered_terms:
+                                    tm_list = [
+                                        {"source": term['source'], "target": term['target']}
+                                        for term in filtered_terms
+                                    ]
+                            except Exception as e:
+                                logging.error(f"备用方案术语库筛选失败: {str(e)}")
+                        else:
+                            try:
+                                from .main import get_filtered_terms_for_text
+                                filtered_terms_str = get_filtered_terms_for_text(text, comparison_id, max_terms=10)
+                                if filtered_terms_str:
+                                    tm_list = []
+                                    for line in filtered_terms_str.split('\n'):
+                                        if ':' in line:
+                                            source, target = line.split(':', 1)
+                                            tm_list.append({
+                                                "source": source.strip(),
+                                                "target": target.strip()
+                                            })
+                            except Exception as e:
+                                logging.error(f"备用方案术语库筛选失败: {str(e)}")
+                    
                     # 前端已直接传入英文名，直接使用
                     return qwen_translate(
                         text=text,
                         target_language=target_lang,  # 直接使用，已经是英文名
                         source_lang="auto",
+                        tm_list=tm_list,  # 传递术语库
                         prompt=trans.get('prompt'),
                         prompt_id=trans.get('prompt_id'),
                         texts=None,  # 备用方案中没有texts数组

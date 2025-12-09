@@ -4,6 +4,11 @@ Token计算工具
 使用 transformers 库精确计算 Qwen 模型的 token 数量
 """
 import logging
+import os
+
+# 禁用 Hugging Face Hub 的自动下载和重试，避免网络连接失败时的重试
+# 在导入 transformers 之前设置，确保生效
+os.environ['HF_HUB_OFFLINE'] = '1'
 
 # 全局缓存 tokenizer，避免重复加载
 _tokenizer_cache = {}
@@ -28,15 +33,25 @@ def get_qwen_tokenizer(model_name="Qwen/Qwen-7B"):
                 import transformers
                 from transformers import AutoTokenizer
             except ImportError as import_error:
-                logging.warning(f"⚠️ transformers 库不可用: {import_error}，将使用降级方案计算token")
+                logging.debug(f"⚠️ transformers 库不可用: {import_error}，将使用降级方案计算token")
                 _tokenizer_cache[model_name] = None
                 return None
             
-            logging.info(f"正在加载 Qwen tokenizer: {model_name}")
-            _tokenizer_cache[model_name] = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-            logging.info(f"✅ Qwen tokenizer 加载成功: {model_name}")
+            try:
+                # 尝试仅使用本地文件，如果本地没有则快速失败
+                logging.debug(f"尝试加载 Qwen tokenizer: {model_name}（仅本地文件）")
+                _tokenizer_cache[model_name] = AutoTokenizer.from_pretrained(
+                    model_name, 
+                    trust_remote_code=True,
+                    local_files_only=True  # 仅使用本地文件，不尝试下载
+                )
+                logging.debug(f"✅ Qwen tokenizer 加载成功: {model_name}")
+            except Exception as local_error:
+                # 本地文件不存在，直接使用降级方案，不重试
+                logging.debug(f"⚠️ 本地未找到 tokenizer: {model_name}，将使用降级方案计算token")
+                _tokenizer_cache[model_name] = None
         except Exception as e:
-            logging.warning(f"⚠️ 加载 Qwen tokenizer 失败: {model_name}, 错误: {e}，将使用降级方案计算token")
+            logging.debug(f"⚠️ 加载 Qwen tokenizer 失败: {model_name}, 错误: {e}，将使用降级方案计算token")
             # 如果加载失败，返回 None，后续会使用降级方案
             _tokenizer_cache[model_name] = None
     
