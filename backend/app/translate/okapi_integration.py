@@ -599,7 +599,7 @@ class DockerOkapiIntegration:
 
     def _clean_placeholder_spaces(self, translated_text: str, placeholder: str) -> str:
         """
-        智能清理占位符前后的空格
+        智能清理占位符前后的空格，确保不丢失必要的空格
         
         Args:
             translated_text: 翻译后的文本
@@ -610,16 +610,16 @@ class DockerOkapiIntegration:
         """
         import re
         
-        # 情况1：占位符前后都有空格，删除后面的一个空格
-        # 例如：♂ XCMG ♂ Personnel -> ♂ XCMG ♂Personnel
-        pattern = f"{placeholder} (.+?) {placeholder}"
-        replacement = f"{placeholder}\\1 {placeholder}"
-        cleaned_text = re.sub(pattern, replacement, translated_text)
+        # 不删除任何空格，保持翻译结果中的空格
+        # 占位符只是标记格式标签的位置，不应该影响文本中的空格
+        # 所有空格都应该保留，让翻译结果保持原样
         
-        # 其他情况（♂前面有空格后面没有，♂后面有空格前面没有，♂前后都没有空格）
-        # 都不删除空格，保持原样
+        cleaned_text = translated_text
         
-        logger.debug(f"智能清理占位符空格: '{translated_text}' -> '{cleaned_text}'")
+        # 只处理明显错误的情况：占位符紧挨着（中间没有内容），这种情况不应该出现
+        # 但如果有，我们也不删除空格，保持原样
+        
+        logger.debug(f"保留占位符空格: '{translated_text}' -> '{cleaned_text}'")
         return cleaned_text
 
     def apply_translation_with_placeholders(self, target_elem, translated_text: str, placeholder_info: Dict[str, Any]) -> bool:
@@ -640,6 +640,22 @@ class DockerOkapiIntegration:
             
             placeholder = placeholder_info['placeholder']
             format_tags = placeholder_info['format_tags']
+            was_adjusted = placeholder_info.get('was_adjusted', False)
+            
+            # 如果占位符被移到了末尾，需要将占位符从末尾移回原来的位置
+            if was_adjusted:
+                # 占位符应该在文本末尾，提取出来
+                placeholder_count = translated_text.count(placeholder)
+                if placeholder_count > 0 and format_tags:
+                    # 移除末尾的占位符
+                    text_without_trailing_placeholders = translated_text.rstrip(placeholder)
+                    # 由于占位符数量超过单词数量，格式标签的数量应该等于占位符数量
+                    # 我们需要将占位符均匀分布到格式标签位置
+                    # 简单处理：将所有占位符放在第一个格式标签之前
+                    # 这样在按占位符分割时，第一个部分会包含所有占位符，然后按格式标签数量分配
+                    adjusted_text = (placeholder * placeholder_count) + text_without_trailing_placeholders
+                    translated_text = adjusted_text
+                    logger.debug(f"已将 {placeholder_count} 个占位符从末尾移回文本开头（格式标签数量: {len(format_tags)}）")
             
             # 清理占位符后面的多余空格
             cleaned_text = self._clean_placeholder_spaces(translated_text, placeholder)
@@ -649,17 +665,26 @@ class DockerOkapiIntegration:
                 target_elem.text = cleaned_text
                 return True
             
-            # 按占位符分割翻译文本
+            # 按占位符分割翻译文本，保留所有空格
+            # 使用 split 时，如果占位符前后有空格，这些空格会保留在分割后的部分中
             translated_parts = cleaned_text.split(placeholder)
             logger.debug(f"翻译文本按占位符分割: {len(translated_parts)} 部分")
             
-            # 重建XML结构
+            # 验证分割后的部分数量应该等于格式标签数量+1
+            expected_parts = len(format_tags) + 1
+            if len(translated_parts) != expected_parts:
+                logger.warning(f"占位符分割数量不匹配: 期望 {expected_parts} 部分，实际 {len(translated_parts)} 部分")
+                logger.warning(f"翻译文本: '{cleaned_text[:200]}...'")
+                logger.warning(f"占位符数量: {cleaned_text.count(placeholder)}")
+            
+            # 重建XML结构，确保空格不丢失
             current_part_index = 0
             
             for i, format_tag in enumerate(format_tags):
-                # 添加格式标签前的文本
+                # 添加格式标签前的文本（包含所有空格）
                 if current_part_index < len(translated_parts):
                     text_before = translated_parts[current_part_index]
+                    # 保留文本中的所有空格，不做任何修改
                     if target_elem.text is None:
                         target_elem.text = text_before
                     else:
@@ -669,15 +694,17 @@ class DockerOkapiIntegration:
                             last_child = target_elem[-1]
                             last_child.tail = (last_child.tail or "") + text_before
                     current_part_index += 1
+                    logger.debug(f"添加格式标签前的文本: '{text_before}' (长度: {len(text_before)})")
                 
                 # 添加格式标签
                 new_tag = ET.SubElement(target_elem, format_tag['tag'], format_tag['attrib'])
                 if format_tag['content']:
                     new_tag.text = format_tag['content']
             
-            # 添加剩余的文本
+            # 添加剩余的文本（包含所有空格）
             if current_part_index < len(translated_parts):
                 remaining_text = translated_parts[current_part_index]
+                # 保留文本中的所有空格，不做任何修改
                 if target_elem.text is None:
                     target_elem.text = remaining_text
                 else:
@@ -686,6 +713,7 @@ class DockerOkapiIntegration:
                     else:
                         last_child = target_elem[-1]
                         last_child.tail = (last_child.tail or "") + remaining_text
+                logger.debug(f"添加剩余文本: '{remaining_text}' (长度: {len(remaining_text)})")
             
             logger.debug(f"占位符格式映射成功，翻译文本长度: {len(cleaned_text)}")
             return True
@@ -1076,10 +1104,18 @@ class OkapiWordTranslator:
             placeholder_infos = {}
             batch_texts = []
             batch_ids = []
+            adjusted_flags = {}  # 记录哪些文本被调整过
             
             # 提取带占位符的文本进行翻译
             for unit in translation_units:
-                batch_texts.append(unit['source'])
+                source_text = unit['source']
+                placeholder = unit['placeholder_info']['placeholder']
+                
+                # 检查并调整占位符位置
+                adjusted_text, was_adjusted = self._adjust_text_with_placeholders(source_text, placeholder)
+                adjusted_flags[unit['id']] = was_adjusted
+                
+                batch_texts.append(adjusted_text)
                 batch_ids.append(unit['id'])
                 placeholder_infos[unit['id']] = unit['placeholder_info']
             
@@ -1096,9 +1132,11 @@ class OkapiWordTranslator:
             
             # 保存翻译结果和占位符信息
             for i, unit_id in enumerate(batch_ids):
+                placeholder_info = placeholder_infos[unit_id].copy()
+                placeholder_info['was_adjusted'] = adjusted_flags.get(unit_id, False)
                 translations[unit_id] = {
                     'text': translated_texts[i],
-                    'placeholder_info': placeholder_infos[unit_id]
+                    'placeholder_info': placeholder_info
                 }
             
             # 复制原文件并更新翻译
@@ -1117,6 +1155,41 @@ class OkapiWordTranslator:
         except Exception as e:
             logger.error(f"翻译 XLIFF 内容失败: {e}")
             return False
+
+    def _adjust_text_with_placeholders(self, text: str, placeholder: str) -> tuple[str, bool]:
+        """
+        调整文本中的占位符位置
+        如果占位符数量超过单词数量，将所有占位符移到文本末尾
+        
+        Args:
+            text: 包含占位符的文本
+            placeholder: 占位符字符
+            
+        Returns:
+            tuple: (调整后的文本, 是否进行了调整)
+        """
+        placeholder_count = text.count(placeholder)
+        if placeholder_count == 0:
+            return text, False
+        
+        # 计算单词数量（去除占位符后按空格分割）
+        text_without_placeholder = text.replace(placeholder, ' ')
+        # 分割单词，过滤空字符串
+        words = [w.strip() for w in text_without_placeholder.split() if w.strip()]
+        word_count = len(words)
+        
+        # 如果占位符数量超过单词数量，将所有占位符移到末尾
+        if placeholder_count > word_count:
+            # 移除所有占位符
+            text_without_placeholders = text.replace(placeholder, '')
+            # 将所有占位符拼接到末尾
+            adjusted_text = text_without_placeholders + (placeholder * placeholder_count)
+            logger.info(f"占位符数量({placeholder_count})超过单词数量({word_count})，已将占位符移到文本末尾")
+            logger.debug(f"原文: {text[:200]}")
+            logger.debug(f"调整后: {adjusted_text[:200]}")
+            return adjusted_text, True
+        
+        return text, False
 
     def _adjust_xliff_font(self, xliff_file: str, target_lang: str) -> bool:
         """
@@ -1579,10 +1652,18 @@ class OkapiPptxTranslator:
             placeholder_infos = {}
             batch_texts = []
             batch_ids = []
+            adjusted_flags = {}  # 记录哪些文本被调整过
             
             # 提取带占位符的文本进行翻译
             for unit in translation_units:
-                batch_texts.append(unit['source'])
+                source_text = unit['source']
+                placeholder = unit['placeholder_info']['placeholder']
+                
+                # 检查并调整占位符位置
+                adjusted_text, was_adjusted = self._adjust_text_with_placeholders(source_text, placeholder)
+                adjusted_flags[unit['id']] = was_adjusted
+                
+                batch_texts.append(adjusted_text)
                 batch_ids.append(unit['id'])
                 placeholder_infos[unit['id']] = unit['placeholder_info']
             
@@ -1599,9 +1680,11 @@ class OkapiPptxTranslator:
             
             # 保存翻译结果和占位符信息
             for i, unit_id in enumerate(batch_ids):
+                placeholder_info = placeholder_infos[unit_id].copy()
+                placeholder_info['was_adjusted'] = adjusted_flags.get(unit_id, False)
                 translations[unit_id] = {
                     'text': translated_texts[i],
-                    'placeholder_info': placeholder_infos[unit_id]
+                    'placeholder_info': placeholder_info
                 }
             
             # 复制原文件并更新翻译

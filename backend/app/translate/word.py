@@ -1673,26 +1673,56 @@ def distribute_translation_to_runs_with_adaptive_styles(runs, translated_text, o
             else:
                 run.text = ""
     else:
-        # 长度变化较大，尝试按空格和标点分割
+        # 长度变化较大，优先按单词分配，避免在单词中间切分导致空格丢失
         words = translated_text.split()
+        logger.info(f"按单词分配: 单词数={len(words)}, Run数={len(runs)}")
+        
         if len(words) >= len(runs):
-            # 按run数量分配单词
+            # 单词数量足够，按run数量平均分配单词
+            words_per_run = len(words) // len(runs)
+            remainder = len(words) % len(runs)
+            
+            current_word_index = 0
             for i, run in enumerate(runs):
-                if i < len(words):
-                    allocated_text = words[i]
-                    run.text = allocated_text
-                    apply_adaptive_styles(run, run.text, allocated_text)
+                # 计算当前run应该包含的单词数
+                if i < remainder:
+                    run_word_count = words_per_run + 1
                 else:
-                    run.text = ""
+                    run_word_count = words_per_run
+                
+                # 提取当前run的单词
+                run_words = words[current_word_index:current_word_index + run_word_count]
+                allocated_text = ' '.join(run_words)
+                
+                # 更新run文本
+                run.text = allocated_text
+                apply_adaptive_styles(run, run.text, allocated_text)
+                
+                current_word_index += run_word_count
+                logger.info(f"Run {i}: '{allocated_text}' (单词数: {run_word_count})")
         else:
-            # 单词数量少于run数量，平均分配
+            # 单词数量少于run数量，按字符平均分配（但尽量在空格处切分）
             chars_per_run = len(translated_text) // len(runs)
             for i, run in enumerate(runs):
                 start_pos = i * chars_per_run
                 end_pos = start_pos + chars_per_run if i < len(runs) - 1 else len(translated_text)
+                
+                # 尝试在空格处切分，避免在单词中间切分
+                if i < len(runs) - 1 and end_pos < len(translated_text):
+                    # 向前查找最近的空格
+                    space_pos = translated_text.rfind(' ', start_pos, end_pos)
+                    if space_pos > start_pos:
+                        end_pos = space_pos + 1  # 包含空格
+                    else:
+                        # 向后查找最近的空格
+                        space_pos = translated_text.find(' ', end_pos)
+                        if space_pos > 0:
+                            end_pos = space_pos + 1  # 包含空格
+                
                 allocated_text = translated_text[start_pos:end_pos]
                 run.text = allocated_text
                 apply_adaptive_styles(run, run.text, allocated_text)
+                logger.info(f"Run {i}: '{allocated_text}' (字符位置: {start_pos}-{end_pos})")
 
 
 def update_special_elements(docx_path, texts):
@@ -2149,7 +2179,10 @@ def is_english_text(text):
 
 
 def distribute_preserving_original_spaces(runs, translated_text, original_text):
-    """保持原始空格格式的分配"""
+    """
+    保持原始空格格式的分配
+    优先按单词分配，避免在单词中间切分导致空格丢失
+    """
     # 计算原始文本的总长度
     original_total_length = sum(len(run.text) for run in runs)
     
@@ -2168,12 +2201,53 @@ def distribute_preserving_original_spaces(runs, translated_text, original_text):
             else:
                 run.text = ""
     else:
-        # 长度变化较大，按字符平均分配
-        chars_per_run = len(translated_text) // len(runs)
-        for i, run in enumerate(runs):
-            start_pos = i * chars_per_run
-            end_pos = start_pos + chars_per_run if i < len(runs) - 1 else len(translated_text)
-            run.text = translated_text[start_pos:end_pos]
+        # 长度变化较大，优先按单词分配，避免在单词中间切分
+        words = translated_text.split()
+        logger.info(f"按单词分配: 单词数={len(words)}, Run数={len(runs)}")
+        
+        if len(words) >= len(runs):
+            # 单词数量足够，按run数量分配单词
+            words_per_run = len(words) // len(runs)
+            remainder = len(words) % len(runs)
+            
+            current_word_index = 0
+            for i, run in enumerate(runs):
+                # 计算当前run应该包含的单词数
+                if i < remainder:
+                    run_word_count = words_per_run + 1
+                else:
+                    run_word_count = words_per_run
+                
+                # 提取当前run的单词
+                run_words = words[current_word_index:current_word_index + run_word_count]
+                run_text = ' '.join(run_words)
+                
+                # 更新run文本
+                run.text = run_text
+                current_word_index += run_word_count
+                
+                logger.info(f"Run {i}: '{run_text}' (单词数: {run_word_count})")
+        else:
+            # 单词数量少于run数量，按字符平均分配（但尽量在空格处切分）
+            chars_per_run = len(translated_text) // len(runs)
+            for i, run in enumerate(runs):
+                start_pos = i * chars_per_run
+                end_pos = start_pos + chars_per_run if i < len(runs) - 1 else len(translated_text)
+                
+                # 尝试在空格处切分，避免在单词中间切分
+                if i < len(runs) - 1 and end_pos < len(translated_text):
+                    # 向前查找最近的空格
+                    space_pos = translated_text.rfind(' ', start_pos, end_pos)
+                    if space_pos > start_pos:
+                        end_pos = space_pos + 1  # 包含空格
+                    else:
+                        # 向后查找最近的空格
+                        space_pos = translated_text.find(' ', end_pos)
+                        if space_pos > 0:
+                            end_pos = space_pos + 1  # 包含空格
+                
+                run.text = translated_text[start_pos:end_pos]
+                logger.info(f"Run {i}: '{run.text}' (字符位置: {start_pos}-{end_pos})")
 
 
 def _is_table_in_textbox(table):

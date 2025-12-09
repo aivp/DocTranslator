@@ -322,6 +322,8 @@ class TranslateStartResource(Resource):
             if data.get('prompt_id'):
                 prompt_id = data.get('prompt_id', '0')
                 prompt_id = int(prompt_id) if prompt_id else None
+            # 将最终的 prompt_id 写回任务，确保后续翻译流程能识别为“提示词翻译”模式
+            translate.prompt_id = prompt_id
             
             # 如果选择了提示词，获取提示词内容并保存到prompt字段
             if prompt_id and int(prompt_id) > 0:
