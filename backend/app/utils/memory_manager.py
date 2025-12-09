@@ -199,29 +199,65 @@ def aggressive_memory_cleanup():
     激进的内存清理：清理所有可能的缓存和引用
     
     包括：
-    1. 多次垃圾回收
+    1. 清理应用级缓存（tokenizer、术语库缓存等）
     2. 清理Python内部缓存
-    3. 释放内存到操作系统
+    3. 多次垃圾回收
+    4. 释放内存到操作系统
     """
     try:
         logger.info("🧹 开始激进内存清理...")
         
-        # 1. 清理Python内部缓存
-        import sys
-        # 清理模块缓存（谨慎使用，可能影响性能）
-        # sys.modules 不应该清理，但可以清理一些大对象
+        # 1. 清理应用级缓存
+        try:
+            # 清理 tokenizer 缓存
+            try:
+                from app.utils.token_counter import _tokenizer_cache
+                cache_size = len(_tokenizer_cache)
+                _tokenizer_cache.clear()
+                logger.info(f"✅ 已清理 tokenizer 缓存 ({cache_size} 个条目)")
+            except Exception as e:
+                logger.debug(f"清理 tokenizer 缓存失败: {e}")
+            
+            # 清理术语库倒排索引缓存
+            try:
+                from app.translate.term_filter import (
+                    _inverted_index_cache,
+                    _inverted_index_cache_time,
+                    _result_cache,
+                    _result_cache_time
+                )
+                index_cache_size = len(_inverted_index_cache)
+                result_cache_size = len(_result_cache)
+                _inverted_index_cache.clear()
+                _inverted_index_cache_time.clear()
+                _result_cache.clear()
+                _result_cache_time.clear()
+                logger.info(f"✅ 已清理术语库缓存 (倒排索引: {index_cache_size} 个, 结果: {result_cache_size} 个)")
+            except Exception as e:
+                logger.debug(f"清理术语库缓存失败: {e}")
+        except Exception as e:
+            logger.debug(f"清理应用级缓存时出错: {e}")
         
-        # 2. 多次强制垃圾回收
+        # 2. 清理Python内部缓存
+        try:
+            import sys
+            if hasattr(sys, '_clear_type_cache'):
+                sys._clear_type_cache()
+                logger.info("✅ 已清理Python类型缓存")
+        except Exception as e:
+            logger.debug(f"清理Python类型缓存失败: {e}")
+        
+        # 3. 多次强制垃圾回收
         total_collected = 0
         for i in range(5):  # 执行5次垃圾回收
-            collected = gc.collect()
+            collected = gc.collect() 
             total_collected += collected
             if collected == 0:
                 break  # 如果没有更多对象可回收，提前退出
         
         logger.info(f"垃圾回收释放了 {total_collected} 个对象")
         
-        # 3. 强制释放内存到操作系统
+        # 4. 强制释放内存到操作系统
         try:
             libc = ctypes.CDLL("libc.so.6")
             libc.malloc_trim(0)
@@ -229,7 +265,7 @@ def aggressive_memory_cleanup():
         except Exception as e:
             logger.debug(f"malloc_trim不可用: {e}")
         
-        # 4. 检查清理后的系统总内存（所有Gunicorn进程的总和）
+        # 5. 检查清理后的系统总内存（所有Gunicorn进程的总和）
         after_memory = get_gunicorn_total_memory()
         if after_memory > 0:
             logger.info(f"✅ 激进内存清理完成，系统总内存: {after_memory / 1024 / 1024:.1f}MB")

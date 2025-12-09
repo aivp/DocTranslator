@@ -192,14 +192,15 @@ def get_comparison(comparison_id):
                 logging.info(f"任务使用术语表ID: {comparison_id}")
                 # logging.info(f"总共合并了 {len(all_terms)} 条术语")
                 
-                # 如果术语库较大（>1000条），预建立倒排索引以提升性能
+                # 如果术语库较大（>1000条），预建立倒排索引和精确匹配索引以提升性能
                 if len(all_terms) > 1000:
                     try:
-                        from .term_filter import build_inverted_index
+                        from .term_filter import build_inverted_index, build_exact_match_index
                         build_inverted_index(all_terms, comparison_id)
-                        logging.info(f"已预建立倒排索引，术语库大小: {len(all_terms)}")
+                        build_exact_match_index(all_terms, comparison_id)
+                        logging.info(f"已预建立倒排索引和精确匹配索引，术语库大小: {len(all_terms)}")
                     except Exception as e:
-                        logging.warning(f"预建立倒排索引失败: {e}")
+                        logging.warning(f"预建立索引失败: {e}")
                 
                 return all_terms
             else:

@@ -23,6 +23,15 @@ _inverted_index_cache: Dict[str, Dict[str, List[Tuple[str, str]]]] = {}
 # 倒排索引缓存访问时间：{comparison_id: last_access_time}
 _inverted_index_cache_time: Dict[str, float] = {}
 
+# 全局精确匹配索引缓存：{comparison_id: exact_match_index}
+# exact_match_index 结构：{
+#   'source_set': set,  # 所有术语原文的集合（O(1)查找）
+#   'source_lower_set': set,  # 所有术语原文小写的集合（O(1)查找）
+#   'source_to_target': dict  # 术语映射 {source: target}
+# }
+_exact_match_index_cache: Dict[str, Dict[str, any]] = {}
+_exact_match_index_cache_time: Dict[str, float] = {}
+
 # 结果缓存：{text_hash: filtered_terms}
 _result_cache: Dict[str, List[Dict[str, str]]] = {}
 # 结果缓存访问时间：{text_hash: last_access_time}
@@ -88,9 +97,10 @@ def calculate_similarity(text: str, term_source: str) -> float:
 
 def _cleanup_expired_cache():
     """
-    清理过期的缓存（倒排索引和结果缓存）
+    清理过期的缓存（倒排索引、精确匹配索引和结果缓存）
     """
     global _inverted_index_cache, _inverted_index_cache_time, _result_cache, _result_cache_time
+    global _exact_match_index_cache, _exact_match_index_cache_time
     
     current_time = time.time()
     
@@ -109,6 +119,21 @@ def _cleanup_expired_cache():
     if expired_keys:
         logger.info(f"清理了 {len(expired_keys)} 个过期的倒排索引缓存")
     
+    # 清理过期的精确匹配索引缓存
+    expired_exact_keys = []
+    for key, last_access in _exact_match_index_cache_time.items():
+        if current_time - last_access > _cache_expire_time:
+            expired_exact_keys.append(key)
+    
+    for key in expired_exact_keys:
+        if key in _exact_match_index_cache:
+            del _exact_match_index_cache[key]
+        if key in _exact_match_index_cache_time:
+            del _exact_match_index_cache_time[key]
+    
+    if expired_exact_keys:
+        logger.info(f"清理了 {len(expired_exact_keys)} 个过期的精确匹配索引缓存")
+    
     # 清理过期的结果缓存
     expired_result_keys = []
     for key, last_access in _result_cache_time.items():
@@ -123,6 +148,75 @@ def _cleanup_expired_cache():
     
     if expired_result_keys:
         logger.info(f"清理了 {len(expired_result_keys)} 个过期的结果缓存")
+
+
+def build_exact_match_index(all_terms: Dict[str, str], comparison_id: Optional[str] = None) -> Dict[str, any]:
+    """
+    为术语库建立精确匹配快速查找索引（O(1)查找）
+    
+    Args:
+        all_terms: 所有术语字典 {source: target}
+        comparison_id: 术语库ID（用于缓存）
+        
+    Returns:
+        Dict: 精确匹配索引 {
+            'source_set': set,  # 所有术语原文的集合
+            'source_lower_set': set,  # 所有术语原文小写的集合
+            'source_to_target': dict  # 术语映射
+        }
+    """
+    if not all_terms:
+        return {'source_set': set(), 'source_lower_set': set(), 'source_to_target': {}}
+    
+    # 检查缓存
+    cache_key = comparison_id or str(id(all_terms))
+    if cache_key in _exact_match_index_cache:
+        # 检查是否过期
+        if cache_key in _exact_match_index_cache_time:
+            current_time = time.time()
+            if current_time - _exact_match_index_cache_time[cache_key] <= _cache_expire_time:
+                # 更新访问时间
+                _exact_match_index_cache_time[cache_key] = current_time
+                logger.debug(f"使用缓存的精确匹配索引，术语库大小: {len(all_terms)}")
+                return _exact_match_index_cache[cache_key]
+            else:
+                # 缓存已过期，删除
+                logger.debug(f"精确匹配索引缓存已过期，重新构建")
+                del _exact_match_index_cache[cache_key]
+                del _exact_match_index_cache_time[cache_key]
+    
+    logger.info(f"开始建立精确匹配索引，术语库大小: {len(all_terms)}")
+    start_time = time.time()
+    
+    # 建立精确匹配索引
+    source_set = set(all_terms.keys())
+    source_lower_set = set(source.lower() for source in all_terms.keys())
+    source_to_target = all_terms.copy()
+    
+    # 建立小写到原始术语的映射（用于忽略大小写的O(1)查找）
+    lower_to_sources = {}
+    for source in source_set:
+        source_lower = source.lower()
+        if source_lower not in lower_to_sources:
+            lower_to_sources[source_lower] = []
+        lower_to_sources[source_lower].append(source)
+    
+    exact_match_index = {
+        'source_set': source_set,
+        'source_lower_set': source_lower_set,
+        'source_to_target': source_to_target,
+        'lower_to_sources': lower_to_sources  # 新增：小写到原始术语的映射
+    }
+    
+    # 缓存索引
+    if cache_key:
+        _exact_match_index_cache[cache_key] = exact_match_index
+        _exact_match_index_cache_time[cache_key] = time.time()  # 记录缓存时间
+    
+    elapsed = time.time() - start_time
+    logger.info(f"精确匹配索引建立完成，用时: {elapsed:.3f}秒, 术语数: {len(source_set)}")
+    
+    return exact_match_index
 
 
 def build_inverted_index(all_terms: Dict[str, str], comparison_id: Optional[str] = None) -> Dict[str, List[Tuple[str, str]]]:
@@ -193,9 +287,9 @@ def build_inverted_index(all_terms: Dict[str, str], comparison_id: Optional[str]
 
 
 def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int = 10, 
-                         comparison_id: Optional[str] = None, use_index: bool = True) -> List[Dict[str, str]]:
+                         comparison_id: Optional[str] = None, use_index: bool = True) -> List[Dict[str, any]]:
     """
-    根据文本内容筛选最相关的术语（优化版本，支持倒排索引）
+    根据文本内容筛选最相关的术语（优化版本，支持倒排索引和精确匹配索引）
     
     Args:
         text: 要翻译的文本
@@ -205,7 +299,7 @@ def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int =
         use_index: 是否使用倒排索引（默认True）
         
     Returns:
-        List[Dict]: 筛选后的术语列表 [{"source": "...", "target": "..."}]
+        List[Dict]: 筛选后的术语列表，包含分数 [{"source": "...", "target": "...", "score": 95.0}]
     """
     if not text or not all_terms:
         logger.debug("文本或术语库为空，返回空列表")
@@ -244,38 +338,126 @@ def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int =
     # 使用倒排索引优化（当术语库大于1000条时）
     if use_index and term_count > 1000:
         inverted_index = build_inverted_index(all_terms, comparison_id)
+        exact_match_index = build_exact_match_index(all_terms, comparison_id)
         
-        # 先尝试精确匹配（提前终止优化）
+        # 使用精确匹配索引快速查找（真正的O(1) set查找，而不是O(n)遍历）
         exact_matches = []
         text_lower = text.lower()
+        source_set = exact_match_index['source_set']
+        source_lower_set = exact_match_index['source_lower_set']
+        source_to_target = exact_match_index['source_to_target']
         
-        for source, target in all_terms.items():
-            source_lower = source.lower()
-            # 精确匹配（最高优先级）
-            if source in text or source_lower in text_lower:
-                exact_matches.append({
-                    'source': source,
-                    'target': target,
-                    'score': 100.0 if source in text else 95.0
-                })
-                # 如果找到足够多的精确匹配，可以提前终止
+        # 真正的set查找：提取文本中的所有可能的子串，检查是否在术语set中
+        # 方法：按词汇边界提取子串，然后检查是否在术语set中（O(1)查找）
+        matched_sources = set()  # 记录已匹配的术语，避免重复
+        
+        # 提取文本中的所有可能的子串（按词汇边界，避免生成过多子串）
+        # 先提取所有词汇，然后检查这些词汇是否在术语set中
+        text_words = re.findall(r'\b\w+\b', text)  # 提取所有词汇（保持大小写）
+        text_words_lower = [w.lower() for w in text_words]
+        
+        # 方法1：检查单个词汇是否在术语set中（O(1)查找）
+        for word in text_words:
+            if word in source_set:  # O(1) set查找
+                if word not in matched_sources:
+                    exact_matches.append({
+                        'source': word,
+                        'target': source_to_target[word],
+                        'score': 100.0
+                    })
+                    matched_sources.add(word)
+                    if len(exact_matches) >= max_terms:
+                        break
+        
+        # 方法2：检查忽略大小写的匹配（使用source_lower_set进行O(1)查找）
+        # 需要建立反向映射：lower -> [original sources]
+        if len(exact_matches) < max_terms:
+            # 建立小写到原始术语的映射（如果还没有）
+            if 'lower_to_sources' not in exact_match_index:
+                lower_to_sources = {}
+                for source in source_set:
+                    source_lower = source.lower()
+                    if source_lower not in lower_to_sources:
+                        lower_to_sources[source_lower] = []
+                    lower_to_sources[source_lower].append(source)
+                exact_match_index['lower_to_sources'] = lower_to_sources
+            
+            lower_to_sources = exact_match_index['lower_to_sources']
+            
+            for word_lower in text_words_lower:
+                if word_lower in lower_to_sources:  # O(1) set查找
+                    for source in lower_to_sources[word_lower]:
+                        if source not in matched_sources:
+                            exact_matches.append({
+                                'source': source,
+                                'target': source_to_target[source],
+                                'score': 95.0
+                            })
+                            matched_sources.add(source)
+                            if len(exact_matches) >= max_terms:
+                                break
+                    if len(exact_matches) >= max_terms:
+                        break
+        
+        # 方法3：检查多词术语（如果文本较短，可以检查所有可能的子串）
+        # 对于长文本，只检查词汇边界处的短语
+        if len(exact_matches) < max_terms and len(text) < 200:  # 只对短文本检查所有子串
+            # 提取所有可能的短语（2-5个词）
+            for phrase_len in range(2, min(6, len(text_words) + 1)):
+                for i in range(len(text_words) - phrase_len + 1):
+                    phrase = ' '.join(text_words[i:i+phrase_len])
+                    phrase_lower = phrase.lower()
+                    
+                    # 检查完整短语是否在术语set中
+                    if phrase in source_set and phrase not in matched_sources:
+                        exact_matches.append({
+                            'source': phrase,
+                            'target': source_to_target[phrase],
+                            'score': 100.0
+                        })
+                        matched_sources.add(phrase)
+                        if len(exact_matches) >= max_terms:
+                            break
+                    
+                    # 检查忽略大小写的匹配（使用lower_to_sources）
+                    if len(exact_matches) < max_terms:
+                        if 'lower_to_sources' in exact_match_index:
+                            lower_to_sources = exact_match_index['lower_to_sources']
+                            if phrase_lower in lower_to_sources:  # O(1) set查找
+                                for source in lower_to_sources[phrase_lower]:
+                                    if source not in matched_sources:
+                                        exact_matches.append({
+                                            'source': source,
+                                            'target': source_to_target[source],
+                                            'score': 95.0
+                                        })
+                                        matched_sources.add(source)
+                                        if len(exact_matches) >= max_terms:
+                                            break
+                    
+                    if len(exact_matches) >= max_terms:
+                        break
                 if len(exact_matches) >= max_terms:
-                    logger.debug(f"找到 {len(exact_matches)} 个精确匹配，提前终止")
-                    result = [
-                        {'source': term['source'], 'target': term['target']}
-                        for term in exact_matches[:max_terms]
-                    ]
-                    # 缓存结果
-                    if len(_result_cache) >= _max_cache_size:
-                        keys_to_remove = list(_result_cache.keys())[:_max_cache_size // 2]
-                        for key in keys_to_remove:
-                            if key in _result_cache:
-                                del _result_cache[key]
-                            if key in _result_cache_time:
-                                del _result_cache_time[key]
-                    _result_cache[cache_key] = result
-                    _result_cache_time[cache_key] = time.time()  # 记录缓存时间
-                    return result
+                    break
+        
+        # 如果找到足够多的精确匹配，可以提前终止
+        if len(exact_matches) >= max_terms:
+            logger.debug(f"找到 {len(exact_matches)} 个精确匹配，提前终止")
+            result = [
+                {'source': term['source'], 'target': term['target'], 'score': term['score']}
+                for term in exact_matches[:max_terms]
+            ]
+            # 缓存结果
+            if len(_result_cache) >= _max_cache_size:
+                keys_to_remove = list(_result_cache.keys())[:_max_cache_size // 2]
+                for key in keys_to_remove:
+                    if key in _result_cache:
+                        del _result_cache[key]
+                    if key in _result_cache_time:
+                        del _result_cache_time[key]
+            _result_cache[cache_key] = result
+            _result_cache_time[cache_key] = time.time()  # 记录缓存时间
+            return result
         
         # 通过索引快速查找相关术语
         candidate_terms = {}  # {source: (target, max_score)}
@@ -300,19 +482,19 @@ def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int =
                         if term_key not in candidate_terms or score > candidate_terms[term_key][1]:
                             candidate_terms[term_key] = (target, score)
         
-        # 转换为列表并排序
+        # 转换为列表并排序（保留分数）
         scored_terms = [
             {'source': source, 'target': target, 'score': score}
             for source, (target, score) in candidate_terms.items()
         ]
         scored_terms.sort(key=lambda x: x['score'], reverse=True)
         
-        # 限制数量
+        # 限制数量（保留分数）
         selected_terms = scored_terms[:max_terms]
         
-        # 转换为标准格式
+        # 返回带分数的结果
         result = [
-            {'source': term['source'], 'target': term['target']}
+            {'source': term['source'], 'target': term['target'], 'score': term['score']}
             for term in selected_terms
         ]
         
@@ -350,16 +532,16 @@ def filter_relevant_terms(text: str, all_terms: Dict[str, str], max_terms: int =
                     if term['score'] > all_scored_terms[term_key]['score']:
                         all_scored_terms[term_key] = term
         
-        # 转换为列表并排序
+        # 转换为列表并排序（保留分数）
         scored_terms = list(all_scored_terms.values())
         scored_terms.sort(key=lambda x: x['score'], reverse=True)
         
-        # 限制总数不超过max_terms
+        # 限制总数不超过max_terms（保留分数）
         selected_terms = scored_terms[:max_terms]
         
-        # 转换为标准格式
+        # 返回带分数的结果
         result = [
-            {'source': term['source'], 'target': term['target']}
+            {'source': term['source'], 'target': term['target'], 'score': term['score']}
             for term in selected_terms
         ]
     
@@ -456,6 +638,7 @@ def optimize_terms_for_api(text: str, all_terms: Dict[str, str], max_terms: int 
         logger.info(f"术语库检测（{len(all_terms)}条），使用严格筛选：最多{strict_max_terms}个术语")
     
     # 使用优化版本的筛选函数（自动使用倒排索引）
+    # 注意：filter_relevant_terms 现在返回带分数的结果，避免重复计算
     relevant_terms = filter_relevant_terms(text, all_terms, strict_max_terms, comparison_id, use_index=True)
     
     # 检查术语库大小和字符数，进一步优化以避免API超时
@@ -463,12 +646,15 @@ def optimize_terms_for_api(text: str, all_terms: Dict[str, str], max_terms: int 
     MAX_TERMS_COUNT = 10  # 最多10个术语
     MAX_CHARS_LIMIT = 1000  # 最多1000字符
     
-    # 先按相似度重新评分并排序
+    # 直接使用 filter_relevant_terms 返回的分数，不再重新计算
+    # 如果结果中没有分数（兼容旧版本），则使用默认分数
     scored_terms = []
     for term in relevant_terms:
-        score = calculate_similarity(text, term['source'])
+        # 如果已有分数，直接使用；否则使用默认分数（不应该发生，但为了兼容性保留）
+        score = term.get('score', 50.0)
         scored_terms.append((term, score))
     
+    # 按分数排序（虽然 filter_relevant_terms 已经排序，但为了确保顺序）
     scored_terms.sort(key=lambda x: x[1], reverse=True)
     
     # 根据字符数和数量限制，选择最相关的术语
@@ -503,50 +689,6 @@ def optimize_terms_for_api(text: str, all_terms: Dict[str, str], max_terms: int 
         logger.debug(f"📚 术语筛选完成: {len(optimized_terms)} 个术语, 字符数: {current_chars}, 用时: {duration:.3f}秒")
     
     return optimized_terms
-    
-    # 如果筛选后的术语仍然太多，进一步优化
-    if len(relevant_terms) > 15:
-        # 重新评分并只保留最相关的15个
-        scored_terms = []
-        for term in relevant_terms:
-            score = calculate_similarity(text, term['source'])
-            scored_terms.append((term, score))
-        
-        scored_terms.sort(key=lambda x: x[1], reverse=True)
-        relevant_terms = [term for term, _ in scored_terms[:15]]
-        logger.debug(f"进一步优化：限制为最相关的15个术语")
-    
-    # 检查字符数限制（1500字符）
-    total_chars = sum(len(term['source']) + len(term['target']) for term in relevant_terms)
-    if total_chars > 1500:
-        # 按分数排序，优先保留高分术语
-        scored_terms = []
-        for term in relevant_terms:
-            score = calculate_similarity(text, term['source'])
-            scored_terms.append((term, score))
-        
-        scored_terms.sort(key=lambda x: x[1], reverse=True)
-        
-        # 逐步减少术语数量，直到满足字符限制
-        optimized_terms = []
-        current_chars = 0
-        for term, score in scored_terms:
-            term_chars = len(term['source']) + len(term['target'])
-            if current_chars + term_chars <= 1500:
-                optimized_terms.append(term)
-                current_chars += term_chars
-            else:
-                break
-        
-        logger.debug(f"字符数优化：{len(relevant_terms)} -> {len(optimized_terms)} 个术语, {total_chars} -> {current_chars} 字符")
-        relevant_terms = optimized_terms
-    
-    # 计算总用时
-    end_time = time.time()
-    duration = end_time - start_time
-    logger.debug(f"📚 术语筛选算法用时: {duration:.3f}秒, 筛选结果: {len(relevant_terms)}个术语")
-    
-    return relevant_terms
 
 
 def clear_term_cache(comparison_id: Optional[str] = None):
@@ -557,6 +699,7 @@ def clear_term_cache(comparison_id: Optional[str] = None):
         comparison_id: 术语库ID，如果为None则清除所有缓存
     """
     global _inverted_index_cache, _inverted_index_cache_time, _result_cache, _result_cache_time
+    global _exact_match_index_cache, _exact_match_index_cache_time
     
     if comparison_id:
         if comparison_id in _inverted_index_cache:
@@ -564,6 +707,12 @@ def clear_term_cache(comparison_id: Optional[str] = None):
             logger.info(f"已清除术语库 {comparison_id} 的倒排索引缓存")
         if comparison_id in _inverted_index_cache_time:
             del _inverted_index_cache_time[comparison_id]
+        
+        if comparison_id in _exact_match_index_cache:
+            del _exact_match_index_cache[comparison_id]
+            logger.info(f"已清除术语库 {comparison_id} 的精确匹配索引缓存")
+        if comparison_id in _exact_match_index_cache_time:
+            del _exact_match_index_cache_time[comparison_id]
         
         # 清除相关的结果缓存
         keys_to_remove = [k for k in _result_cache.keys() if k.startswith(f"{comparison_id}_")]
@@ -576,6 +725,8 @@ def clear_term_cache(comparison_id: Optional[str] = None):
     else:
         _inverted_index_cache.clear()
         _inverted_index_cache_time.clear()
+        _exact_match_index_cache.clear()
+        _exact_match_index_cache_time.clear()
         _result_cache.clear()
         _result_cache_time.clear()
         logger.info("已清除所有术语库缓存")
