@@ -87,8 +87,8 @@ def check_if_textbox(run):
 
 def start(trans):
     """主入口函数，处理Word文档翻译"""
-    # 恢复线程数为30，提高翻译效率
-    max_threads = 30
+    # 恢复线程数为40，提高翻译效率
+    max_threads = 40
     start_time = datetime.datetime.now()
 
     # ============== 检查是否使用Okapi方案 ==============
@@ -116,8 +116,8 @@ def start_with_okapi(trans, start_time):
         # 验证 Okapi 安装
         if not verify_okapi_installation():
             logger.error("❌ Okapi 安装验证失败，回退到传统方法")
-            # 恢复线程数为30，提高翻译效率
-            max_threads = 30
+            # 恢复线程数为40，提高翻译效率
+            max_threads = 40
             return start_traditional(trans, start_time, max_threads)
         
         # 如果用户选择了qwen-mt-plus，设置server为qwen
@@ -153,11 +153,11 @@ def start_with_okapi(trans, start_time):
                 import threading
                 
                 translated_texts = [None] * len(texts)  # 预分配结果数组
-                # 从前端配置获取最大线程数，默认为30
-                # 恢复线程数为30，提高翻译效率
-                max_workers = min(30, len(texts))
+                # 从前端配置获取最大线程数，默认为40
+                # 恢复线程数为40，提高翻译效率
+                max_workers = min(40, len(texts))
                 
-                logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程（恢复为30）")
+                logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程（恢复为40）")
                 
                 # 进度更新相关变量
                 total_count = len(texts)
@@ -393,11 +393,11 @@ def start_traditional(trans, start_time, max_threads):
     if trans.get('model') == 'qwen-mt-plus':
         try:
             trans['server'] = 'qwen'
-            # 建议线程数（Qwen并发已提升到1000次/分钟）
-            if max_threads > 30:
-                logger.info(f"建议: 当前线程数 {max_threads}，建议设置为 10-30 以获得最佳性能")
+            # 建议线程数（Qwen并发已提升到1200次/分钟）
+            if max_threads > 40:
+                logger.info(f"建议: 当前线程数 {max_threads}，建议设置为 10-40 以获得最佳性能")
             elif max_threads < 5:
-                logger.info(f"建议: 当前线程数 {max_threads}，可以适当增加到 10-30 以提升翻译速度")
+                logger.info(f"建议: 当前线程数 {max_threads}，可以适当增加到 10-40 以提升翻译速度")
             from .qwen_translate import check_qwen_availability
             qwen_available, qwen_message = check_qwen_availability()
             logger.info(f"Qwen服务检查: {qwen_message}")

@@ -26,8 +26,8 @@ run_threads=0
 
 def main():
     global run_threads
-    # 硬编码线程数为30，忽略前端传入的配置
-    max_threads=30
+    # 硬编码线程数为40，忽略前端传入的配置
+    max_threads=40
     # 当前执行的索引位置
     run_index=0
     # 是否保留原文

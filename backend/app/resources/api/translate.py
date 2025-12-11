@@ -439,82 +439,123 @@ class TranslateStartResource(Resource):
             
             # 检查资源状态，决定是直接启动还是加入队列
             from app.utils.queue_manager import queue_manager
+            from sqlalchemy import text
             
+            # 使用原子更新，然后在提交前检查资源，确保不会超限
+            from datetime import datetime
+            import pytz
+            start_time = datetime.now(pytz.timezone(current_app.config.get('TIMEZONE', 'Asia/Shanghai')))
+            
+            # 先快速检查资源（避免不必要的数据库操作）
             can_start, reason = queue_manager.can_start_task(translate.origin_filepath)
-            
-            if can_start:
-                # 资源充足，直接启动
-                # 再次检查状态，确保在启动前状态仍然是可启动的
-                db.session.refresh(translate)
-                if translate.status in ['process', 'changing', 'done']:
-                    current_app.logger.warning(f"任务状态在启动前已改变: uuid={uuid_value}, status={translate.status}")
-                    return APIResponse.error(f"任务状态已改变（状态: {translate.status}），无法启动", 400)
-                
-                # 如果是失败状态，重置为可启动状态（重试场景）
-                if translate.status == 'failed':
-                    current_app.logger.info(f"重试失败任务: uuid={uuid_value}, 重置状态为 queued")
-                    translate.status = 'queued'
-                    translate.failed_reason = None  # 清空失败原因
-                    translate.end_at = None  # 清空结束时间，让任务可以重新开始
-                    translate.process = 0.0  # 重置进度
-                    db.session.commit()
-                elif translate.status not in ['none', 'queued']:
-                    current_app.logger.warning(f"任务状态异常，但尝试启动: uuid={uuid_value}, status={translate.status}")
-                
-                success = TranslateEngine(translate.id).execute()
-                if success:
-                    # 再次刷新状态，确保获取最新状态
-                    db.session.refresh(translate)
-                    translate.status = 'process'  # 直接设为进行中
-                    db.session.commit()
-                    
-                    # 再次确认状态已更新
-                    db.session.refresh(translate)
-                    if translate.status != 'process':
-                        current_app.logger.error(f"任务状态更新失败: uuid={uuid_value}, 期望状态=process, 实际状态={translate.status}")
-                    
-                    return APIResponse.success({
-                        "task_id": translate.id,
-                        "uuid": translate.uuid,
-                        "target_path": target_abs_path,
-                        "status": "started",
-                        "message": "任务已启动"
-                    })
-                else:
-                    translate.status = 'failed'
-                    translate.failed_reason = '任务启动失败'
-                    db.session.commit()
-                    return APIResponse.error("任务启动失败", 500)
-            else:
-                # 资源不足，加入队列
-                # 再次检查状态，确保在加入队列前状态仍然是可启动的
-                db.session.refresh(translate)
-                if translate.status in ['process', 'changing', 'done']:
-                    current_app.logger.warning(f"任务状态在加入队列前已改变: uuid={uuid_value}, status={translate.status}")
-                    return APIResponse.error(f"任务状态已改变（状态: {translate.status}），无法加入队列", 400)
-                
-                # 确保状态是 'none'，如果不是，记录警告但继续
-                if translate.status not in ['none', 'queued']:
-                    current_app.logger.warning(f"任务状态异常，但尝试加入队列: uuid={uuid_value}, status={translate.status}")
-                
+            if not can_start:
+                # 资源不足，直接加入队列
                 translate.status = 'queued'
                 db.session.commit()
-                
-                # 再次确认状态已更新
-                db.session.refresh(translate)
-                if translate.status != 'queued':
-                    current_app.logger.error(f"任务状态更新失败: uuid={uuid_value}, 期望状态=queued, 实际状态={translate.status}")
-                
-                # 对于用户，只显示通用的资源紧张消息，不显示具体限制详情
-                user_message = "系统资源紧张，任务已加入队列，等待系统资源释放后自动开始"
-                
                 return APIResponse.success({
                     "task_id": translate.id,
                     "uuid": translate.uuid,
                     "target_path": target_abs_path,
                     "status": "queued",
-                    "message": user_message
+                    "message": "系统资源紧张，任务已加入队列"
                 })
+            
+            # 资源充足，尝试原子更新状态
+            # 使用 SELECT FOR UPDATE 锁定任务，然后检查资源，最后更新状态
+            # 这样可以确保在同一个事务中完成检查和更新
+            lock_result = db.session.execute(
+                text("""
+                    SELECT id, status FROM translate
+                    WHERE id = :task_id
+                    FOR UPDATE
+                """),
+                {'task_id': translate.id}
+            )
+            locked_task = lock_result.fetchone()
+            
+            if not locked_task:
+                db.session.rollback()
+                return APIResponse.error("任务不存在", 404)
+            
+            if locked_task[1] not in ('none', 'queued'):
+                # 状态已改变，回滚并返回
+                db.session.rollback()
+                db.session.refresh(translate)
+                if translate.status == 'process':
+                    return APIResponse.error("任务已在处理中", 400)
+                elif translate.status == 'queued':
+                    return APIResponse.success({
+                        "task_id": translate.id,
+                        "uuid": translate.uuid,
+                        "target_path": target_abs_path,
+                        "status": "queued",
+                        "message": "任务已加入队列"
+                    })
+                else:
+                    return APIResponse.error(f"任务状态异常（状态: {translate.status}），无法启动", 400)
+            
+            # 在锁定状态下再次检查资源（此时其他进程无法同时检查）
+            can_start_locked, reason_locked = queue_manager.can_start_task(translate.origin_filepath)
+            if not can_start_locked:
+                # 资源已满，回滚并加入队列
+                db.session.rollback()
+                translate.status = 'queued'
+                db.session.commit()
+                current_app.logger.info(f"任务 {translate.id} 资源检查失败（锁定后），加入队列: {reason_locked}")
+                return APIResponse.success({
+                    "task_id": translate.id,
+                    "uuid": translate.uuid,
+                    "target_path": target_abs_path,
+                    "status": "queued",
+                    "message": "系统资源紧张，任务已加入队列"
+                })
+            
+            # 资源充足，更新状态
+            update_result = db.session.execute(
+                text("""
+                    UPDATE translate
+                    SET status = 'process',
+                        start_at = :start_time,
+                        updated_at = NOW()
+                    WHERE id = :task_id
+                """),
+                {
+                    'task_id': translate.id,
+                    'start_time': start_time
+                }
+            )
+            
+            # 提交状态更新（此时任务状态已经是 'process'，会被其他进程看到）
+            db.session.commit()
+            current_app.logger.info(f"任务 {translate.id} 状态已更新为 process（原子更新+锁定检查）")
+            
+            # 启动任务
+            success = TranslateEngine(translate.id).execute()
+            if success:
+                # 再次刷新状态，确保获取最新状态
+                db.session.refresh(translate)
+                # 状态应该已经是 'process'，但确保一下
+                if translate.status != 'process':
+                    translate.status = 'process'
+                    db.session.commit()
+                
+                # 再次确认状态已更新
+                db.session.refresh(translate)
+                if translate.status != 'process':
+                    current_app.logger.error(f"任务状态更新失败: uuid={uuid_value}, 期望状态=process, 实际状态={translate.status}")
+                
+                return APIResponse.success({
+                    "task_id": translate.id,
+                    "uuid": translate.uuid,
+                    "target_path": target_abs_path,
+                    "status": "started",
+                    "message": "任务已启动"
+                })
+            else:
+                translate.status = 'failed'
+                translate.failed_reason = '任务启动失败'
+                db.session.commit()
+                return APIResponse.error("任务启动失败", 500)
 
         except Exception as e:
             db.session.rollback()

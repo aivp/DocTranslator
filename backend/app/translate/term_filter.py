@@ -36,7 +36,7 @@ _exact_match_index_cache_time: Dict[str, float] = {}
 _result_cache: Dict[str, List[Dict[str, str]]] = {}
 # 结果缓存访问时间：{text_hash: last_access_time}
 _result_cache_time: Dict[str, float] = {}
-_max_cache_size = 1000  # 最大缓存条目数
+_max_cache_size = 20000  # 最大缓存条目数（进一步扩大，换更多时间）
 
 # 缓存过期时间（秒）：1小时未使用则过期
 _cache_expire_time = 3600  # 1小时 = 3600秒
@@ -743,10 +743,20 @@ def batch_filter_terms(texts: List[str], all_terms: Dict[str, str], max_terms: i
     Returns:
         List[List[Dict]]: 每个文本对应的术语列表
     """
-    results = []
-    for i, text in enumerate(texts):
-        logger.debug(f"处理第 {i+1}/{len(texts)} 个文本")
-        terms = optimize_terms_for_api(text, all_terms, max_terms)
-        results.append(terms)
+    results: List[List[Dict[str, str]]] = [None] * len(texts)
     
-    return results 
+    # 1) 文本去重：相同文本只筛一次，批量命中缓存和分词结果
+    unique_map: Dict[str, List[int]] = {}
+    for idx, text in enumerate(texts):
+        if text not in unique_map:
+            unique_map[text] = []
+        unique_map[text].append(idx)
+    
+    # 2) 对唯一文本进行筛选
+    for i, (text, idx_list) in enumerate(unique_map.items()):
+        logger.debug(f"批量去重处理 {i+1}/{len(unique_map)} 个唯一文本，对应 {len(idx_list)} 个位置")
+        terms = optimize_terms_for_api(text, all_terms, max_terms)
+        for idx in idx_list:
+            results[idx] = terms
+    
+    return results

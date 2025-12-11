@@ -87,10 +87,31 @@ class QueueManager:
         logger.info("队列监控线程已停止")
     
     def _acquire_lock(self):
-        """获取文件锁（确保只有一个进程运行队列管理器）"""
+        """获取文件锁（确保只有一个进程运行队列管理器，支持健康检查）"""
         try:
             # 创建锁文件路径
             lock_file_path = Path('/tmp/file_translate_queue_manager.lock')
+            
+            # 检查锁文件是否存在且进程是否存活
+            if lock_file_path.exists():
+                try:
+                    # 读取锁文件中的进程ID
+                    with open(lock_file_path, 'r') as f:
+                        pid_str = f.read().strip()
+                        if pid_str.isdigit():
+                            pid = int(pid_str)
+                            # 检查进程是否存活
+                            try:
+                                os.kill(pid, 0)  # 发送信号0检查进程是否存在
+                            except OSError:
+                                # 进程不存在，清理僵尸锁文件
+                                logger.warning(f"发现僵尸锁文件（进程 {pid} 不存在），清理锁文件")
+                                try:
+                                    lock_file_path.unlink()
+                                except:
+                                    pass
+                except Exception as e:
+                    logger.debug(f"检查锁文件时出错（可能正常）: {e}")
             
             # 打开锁文件（如果不存在则创建）
             self._lock_file_handle = open(lock_file_path, 'w')
@@ -98,32 +119,63 @@ class QueueManager:
             # 尝试获取非阻塞排他锁
             fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             
-            # 写入进程ID
-            self._lock_file_handle.write(str(os.getpid()))
+            # 写入进程ID和时间戳
+            import time
+            lock_info = f"{os.getpid()}\n{time.time()}\n"
+            self._lock_file_handle.write(lock_info)
             self._lock_file_handle.flush()
             
             self._lock_file = lock_file_path
+            logger.info(f"成功获取队列管理器文件锁（进程ID: {os.getpid()}）")
             return True
             
         except (IOError, OSError) as e:
             # 无法获取锁（其他进程正在运行）
             if self._lock_file_handle:
-                self._lock_file_handle.close()
+                try:
+                    self._lock_file_handle.close()
+                except:
+                    pass
                 self._lock_file_handle = None
             return False
         except Exception as e:
             logger.error(f"获取文件锁失败: {str(e)}")
             if self._lock_file_handle:
-                self._lock_file_handle.close()
+                try:
+                    self._lock_file_handle.close()
+                except:
+                    pass
                 self._lock_file_handle = None
+            return False
+    
+    def _check_lock_validity(self):
+        """检查文件锁是否仍然有效"""
+        try:
+            if not self._lock_file_handle:
+                return False
+            
+            # 检查文件句柄是否仍然有效
+            try:
+                os.fstat(self._lock_file_handle.fileno())
+                return True
+            except OSError:
+                return False
+        except Exception as e:
+            logger.debug(f"检查锁有效性时出错: {e}")
             return False
     
     def _release_lock(self):
         """释放文件锁"""
         try:
             if self._lock_file_handle:
-                fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_UN)
-                self._lock_file_handle.close()
+                try:
+                    fcntl.flock(self._lock_file_handle.fileno(), fcntl.LOCK_UN)
+                except:
+                    pass
+                try:
+                    self._lock_file_handle.close()
+                except:
+                    pass
                 self._lock_file_handle = None
             
             if self._lock_file and self._lock_file.exists():
@@ -136,18 +188,45 @@ class QueueManager:
             logger.error(f"释放文件锁失败: {str(e)}")
     
     def _monitor_loop(self):
-        """队列监控循环"""
+        """队列监控循环（多进程优化版本）"""
+        logger.info("队列监控循环已启动（多进程优化模式）")
+        error_count = 0
+        max_errors = 10  # 最多连续错误10次
+        
         while self.running:
             try:
+                # 检查文件锁是否仍然有效
+                if not self._check_lock_validity():
+                    logger.warning("文件锁已失效，队列管理器可能在其他进程中运行")
+                    self.running = False
+                    break
+                
                 self._process_queue()
+                error_count = 0  # 重置错误计数
                 time.sleep(2)  # 每2秒检查一次
+                
             except Exception as e:
-                logger.error(f"队列监控异常: {e}")
-                time.sleep(5)
+                error_count += 1
+                logger.error(f"队列监控异常 ({error_count}/{max_errors}): {e}", exc_info=True)
+                
+                if error_count >= max_errors:
+                    logger.critical(f"队列监控连续错误 {max_errors} 次，停止监控")
+                    self.running = False
+                    break
+                
+                # 错误后等待更长时间再重试
+                time.sleep(min(5 * error_count, 30))  # 最多等待30秒
     
     def _process_queue(self):
-        """处理队列中的任务"""
-        with self.queue_lock:
+        """处理队列中的任务（多进程安全）
+        
+        注意：
+        1. 文件锁确保只有一个进程运行队列管理器
+        2. 线程锁确保单进程内不会并发处理队列
+        3. 数据库使用 SKIP LOCKED 避免行锁等待
+        4. 所有事务都尽可能短，避免长时间持有锁
+        """
+        with self.queue_lock:  # 线程锁：确保单进程内不会并发（文件锁已保证只有一个进程运行）
             try:
                 # 检查当前资源状态
                 current_tasks = self._get_current_running_tasks()
@@ -201,21 +280,73 @@ class QueueManager:
                     self.emergency_pause_active = False
                     self.emergency_start_time = None
                 
-                # 如果资源充足，启动队列中的任务
+                # 如果资源充足，启动队列中的任务（一次可以启动多个）
                 if current_tasks < self.max_concurrent_tasks and memory_gb < self.max_memory_gb:
-                    self._start_next_task()
+                    # 计算可以启动的任务数
+                    available_slots = self.max_concurrent_tasks - current_tasks
+                    # 一次最多启动5个任务，避免一次性启动太多导致资源紧张
+                    max_start_per_cycle = min(5, available_slots)
+                    
+                    # 循环启动任务，直到没有可用资源或没有符合条件的任务
+                    started_count = 0
+                    consecutive_failures = 0  # 连续失败计数
+                    max_consecutive_failures = 3  # 最多连续失败3次后退出
+                    
+                    while started_count < max_start_per_cycle:
+                        # 快速检查资源（避免每次都查询数据库）
+                        if current_tasks >= self.max_concurrent_tasks or memory_gb >= self.max_memory_gb:
+                            break
+                        
+                        # 尝试启动一个任务
+                        task_started = self._start_next_task()
+                        if task_started:
+                            started_count += 1
+                            consecutive_failures = 0  # 重置失败计数
+                            # 更新当前任务数（避免重复查询）
+                            current_tasks += 1
+                            # 短暂延迟，避免数据库连接竞争和CPU占用过高
+                            time.sleep(0.05)  # 减少延迟时间，提高启动速度
+                        else:
+                            consecutive_failures += 1
+                            if consecutive_failures >= max_consecutive_failures:
+                                # 连续失败多次，可能没有符合条件的任务，退出循环
+                                logger.debug(f"连续 {consecutive_failures} 次启动失败，退出启动循环")
+                                break
+                            # 短暂延迟后重试
+                            time.sleep(0.1)
+                    
+                    if started_count > 0:
+                        logger.info(f"✅ 本次循环启动了 {started_count} 个任务（当前运行: {current_tasks + started_count}/{self.max_concurrent_tasks}）")
                     
             except Exception as e:
                 logger.error(f"处理队列时出错: {e}")
     
     def _get_current_running_tasks(self) -> int:
-        """获取当前运行的任务数"""
+        """获取当前运行的任务数（使用数据库状态，支持多进程环境）"""
         try:
-            from app.utils.task_manager import get_running_tasks
-            return len(get_running_tasks())
+            from app.models.translate import Translate
+            
+            # 获取应用实例并创建上下文
+            app = self._get_app()
+            
+            # 在应用上下文中执行数据库操作
+            with app.app_context():
+                # 使用数据库状态查询，而不是进程内字典，以支持多进程环境
+                # 查询所有状态为 process 或 changing 的任务（这些是正在运行的任务）
+                running_count = Translate.query.filter(
+                    Translate.status.in_(['process', 'changing']),
+                    Translate.deleted_flag == 'N'
+                ).count()
+                
+                return running_count
         except Exception as e:
             logger.error(f"获取运行任务数失败: {e}")
-            return 0
+            # 出错时回退到进程内方法（虽然不准确，但至少不会崩溃）
+            try:
+                from app.utils.task_manager import get_running_tasks
+                return len(get_running_tasks())
+            except:
+                return 0
     
     def _get_memory_usage_gb(self) -> float:
         """
@@ -533,100 +664,168 @@ class QueueManager:
             logger.error(f"强制恢复任务失败: {e}")
     
     def _start_next_task(self):
-        """启动下一个队列中的任务 - 智能调度"""
+        """启动下一个队列中的任务 - 智能调度（多进程优化版本）
+        
+        Returns:
+            bool: 是否成功启动了任务
+        """
         try:
             from app.models.translate import Translate
             from app.resources.task.translate_service import TranslateEngine
             from app.extensions import db
+            from sqlalchemy import text
+            from datetime import datetime
+            import pytz
             
             # 获取应用实例并创建上下文（解决线程上下文问题）
             app = self._get_app()
             
             with app.app_context():
+                # 快速检查：如果任务数已满，直接返回（避免不必要的数据库查询）
                 current_tasks = self._get_current_running_tasks()
-                current_pdf_tasks = self._get_current_pdf_tasks()
-                
-                # 如果任务数已满，不启动新任务
                 if current_tasks >= self.max_concurrent_tasks:
                     logger.debug(f"当前任务数已满({current_tasks}/{self.max_concurrent_tasks})，跳过启动新任务")
-                    return
+                    return False
                 
-                # 获取队列中的任务（使用 SELECT FOR UPDATE SKIP LOCKED 避免多进程重复处理）
-                from sqlalchemy import text
+                # 使用单个事务完成：查询+更新+启动
+                # 这样可以减少数据库往返次数，提高多进程环境下的性能
+                start_time = datetime.now(pytz.timezone(app.config.get('TIMEZONE', 'Asia/Shanghai')))
                 
-                # 使用 SELECT FOR UPDATE SKIP LOCKED 确保多进程环境下不会重复处理
+                # 使用 SELECT FOR UPDATE SKIP LOCKED 原子获取并锁定任务
+                # SKIP LOCKED 确保：如果行被其他进程锁定，会跳过而不是等待，避免死锁
+                # 一次只获取1个任务，减少多进程竞争和锁持有时间
                 query = text("""
-                    SELECT id FROM translate
+                    SELECT id, origin_filepath FROM translate
                     WHERE status = 'queued'
                       AND deleted_flag = 'N'
                     ORDER BY created_at ASC
-                    LIMIT 10
+                    LIMIT 1
                     FOR UPDATE SKIP LOCKED
                 """)
                 
                 result = db.session.execute(query)
-                task_ids = [row[0] for row in result]
+                task_row = result.fetchone()
                 
-                if not task_ids:
+                if not task_row:
                     logger.debug("队列中没有等待的任务")
-                    return
+                    return False
                 
-                # 根据ID查询完整记录
-                queued_tasks = Translate.query.filter(
-                    Translate.id.in_(task_ids)
-                ).order_by(Translate.created_at.asc()).all()
+                task_id, origin_filepath = task_row[0], task_row[1]
                 
-                # 智能选择要启动的任务
-                task_to_start = self._select_next_task(queued_tasks, current_pdf_tasks)
+                # 快速检查PDF任务限制（在事务外检查，避免长时间持有行锁）
+                # 注意：这里检查可能不准确（因为其他进程可能同时启动任务），
+                # 但可以避免大部分无效更新，最终通过UPDATE的WHERE条件保证原子性
+                if origin_filepath and origin_filepath.lower().endswith('.pdf'):
+                    current_pdf_tasks = self._get_current_pdf_tasks()
+                    is_large_pdf = self._is_large_pdf(origin_filepath)
+                    
+                    if is_large_pdf:
+                        if current_pdf_tasks.get('large', 0) >= self.max_large_pdf_tasks:
+                            logger.debug(f"大PDF任务数已达上限({current_pdf_tasks.get('large', 0)}/{self.max_large_pdf_tasks})，跳过任务 {task_id}")
+                            db.session.rollback()
+                            return False
+                    else:
+                        # 小PDF：可用配额 = 小PDF限制 - 大PDF数量
+                        available_small_slots = self.max_small_pdf_tasks - current_pdf_tasks.get('large', 0)
+                        if current_pdf_tasks.get('small', 0) >= available_small_slots:
+                            logger.debug(f"小PDF任务数已达上限({current_pdf_tasks.get('small', 0)}/{available_small_slots})，跳过任务 {task_id}")
+                            db.session.rollback()
+                            return False
                 
-                if task_to_start:
-                    logger.info(f"准备启动队列任务 {task_to_start.id} ({task_to_start.origin_filepath})")
-                    
-                    # 使用原子更新：只有状态为queued时才更新为process
-                    from datetime import datetime
-                    import pytz
-                    start_time = datetime.now(pytz.timezone(app.config['TIMEZONE']))
-                    
-                    update_result = db.session.execute(
-                        text("""
-                            UPDATE translate
-                            SET status = 'process',
-                                start_at = :start_time,
-                                updated_at = NOW()
-                            WHERE id = :task_id
-                              AND status = 'queued'
-                        """),
-                        {
-                            'task_id': task_to_start.id,
-                            'start_time': start_time
-                        }
-                    )
-                    
-                    if update_result.rowcount == 0:
-                        # 更新失败（可能已被其他进程处理）
-                        logger.warning(f"任务状态更新失败（可能已被其他进程处理）: task_id={task_to_start.id}")
-                        db.session.rollback()
-                        return
-                    
-                    db.session.commit()
-                    logger.info(f"队列任务 {task_to_start.id} 开始时间已设置")
-                    
-                    # 启动任务
-                    success = TranslateEngine(task_to_start.id).execute()
+                # 原子更新：只有状态为queued时才更新为process
+                # 这个WHERE条件确保即使多个进程同时处理，也只有一个能成功更新
+                # 使用SKIP LOCKED已经避免了行锁等待，这里只是最终的一致性保证
+                update_result = db.session.execute(
+                    text("""
+                        UPDATE translate
+                        SET status = 'process',
+                            start_at = :start_time,
+                            updated_at = NOW()
+                        WHERE id = :task_id
+                          AND status = 'queued'
+                    """),
+                    {
+                        'task_id': task_id,
+                        'start_time': start_time
+                    }
+                )
+                
+                if update_result.rowcount == 0:
+                    # 更新失败（可能已被其他进程处理）
+                    logger.debug(f"任务状态更新失败（可能已被其他进程处理）: task_id={task_id}")
+                    db.session.rollback()
+                    return False
+                
+                # 立即提交事务，释放行锁（避免长时间持有锁）
+                db.session.commit()
+                logger.info(f"队列任务 {task_id} ({origin_filepath}) 状态已更新为 process")
+                
+                # 获取完整任务信息（在事务外，避免长时间持有连接）
+                task = Translate.query.get(task_id)
+                if not task:
+                    logger.warning(f"任务 {task_id} 不存在（可能已被删除）")
+                    return False
+                
+                # 在事务外启动任务（避免长时间持有数据库连接和锁）
+                # 注意：此时任务状态已经是 'process'，即使启动失败也会被标记为失败
+                try:
+                    success = TranslateEngine(task_id).execute()
                     
                     if success:
-                        logger.info(f"队列任务 {task_to_start.id} 已启动")
+                        logger.info(f"队列任务 {task_id} 已启动")
+                        return True
                     else:
-                        # 启动失败，标记为失败
-                        task_to_start.status = 'failed'
-                        task_to_start.failed_reason = '任务启动失败'
-                        db.session.commit()
-                        logger.error(f"队列任务 {task_to_start.id} 启动失败")
-                else:
-                    logger.debug("没有找到合适的任务启动")
+                        # 启动失败，标记为失败（使用新的事务，避免影响其他操作）
+                        try:
+                            with app.app_context():
+                                # 使用原子更新，避免并发问题
+                                db.session.execute(
+                                    text("""
+                                        UPDATE translate
+                                        SET status = 'failed',
+                                            failed_reason = '任务启动失败',
+                                            updated_at = NOW()
+                                        WHERE id = :task_id
+                                    """),
+                                    {'task_id': task_id}
+                                )
+                                db.session.commit()
+                        except Exception as e:
+                            logger.error(f"更新任务失败状态时出错: {e}")
+                        logger.error(f"队列任务 {task_id} 启动失败")
+                        return False
+                except Exception as e:
+                    # 启动异常，标记为失败
+                    logger.error(f"队列任务 {task_id} 启动异常: {e}", exc_info=True)
+                    try:
+                        with app.app_context():
+                            # 使用原子更新，避免并发问题
+                            db.session.execute(
+                                text("""
+                                    UPDATE translate
+                                    SET status = 'failed',
+                                        failed_reason = :reason,
+                                        updated_at = NOW()
+                                    WHERE id = :task_id
+                                """),
+                                {
+                                    'task_id': task_id,
+                                    'reason': f'任务启动异常: {str(e)[:200]}'  # 限制长度
+                                }
+                            )
+                            db.session.commit()
+                    except Exception as update_error:
+                        logger.error(f"更新任务失败状态时出错: {update_error}")
+                    return False
                     
         except Exception as e:
-            logger.error(f"启动队列任务时出错: {e}")
+            logger.error(f"启动队列任务时出错: {e}", exc_info=True)
+            try:
+                from app.extensions import db
+                db.session.rollback()
+            except:
+                pass
+            return False
     
     def _select_next_task(self, queued_tasks, current_pdf_tasks):
         """智能选择下一个要启动的任务

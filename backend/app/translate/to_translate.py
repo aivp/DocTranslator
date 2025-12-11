@@ -7,9 +7,93 @@ import os
 import sys
 import re
 import openai
+import time
+import pathlib
+import logging
 from . import common
 from . import db
-import time
+from .main import get_comparison
+
+# 术语库进程内缓存，避免在同一次翻译流程中重复访问数据库
+_comparison_cache = {}
+_comparison_cache_time = {}
+_comparison_cache_ttl = 3600  # 秒，1小时
+
+# 耗时日志（独立文件，完整记录，不滚动）
+_TIMING_LOGGER_NAME = "translate_timing"
+_TIMING_LOG_FILE = pathlib.Path(__file__).resolve().parent.parent / "logs" / "translate_timing.log"
+
+
+def _get_timing_logger():
+    logger = logging.getLogger(_TIMING_LOGGER_NAME)
+    if logger.handlers:
+        return logger
+    logger.setLevel(logging.INFO)
+    _TIMING_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(_TIMING_LOG_FILE, encoding="utf-8")
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
+    # 不向上冒泡，避免重复输出
+    logger.propagate = False
+    return logger
+
+
+def _log_timing(step: str, duration: float, translate_id=None, comparison_id=None, extra: dict = None):
+    logger = _get_timing_logger()
+    base = {
+        "step": step,
+        "duration_s": f"{duration:.3f}",
+    }
+    if translate_id is not None:
+        base["translate_id"] = translate_id
+    if comparison_id is not None:
+        base["comparison_id"] = comparison_id
+    if extra:
+        base.update(extra)
+    # 扁平化输出
+    msg = " | ".join([f"{k}={v}" for k, v in base.items()])
+    logger.info(msg)
+
+
+def _preload_terms_if_needed(trans):
+    """
+    若有 comparison_id 且尚未加载，则预加载术语库到 trans['preloaded_terms']。
+    使用进程内缓存，避免翻译过程中重复从数据库读取。
+    """
+    comparison_id = trans.get('comparison_id')
+    if not comparison_id:
+        return None
+    
+    # 已有预加载
+    if trans.get('preloaded_terms'):
+        return trans['preloaded_terms']
+    
+    cache_key = str(comparison_id)
+    now = time.time()
+    if cache_key in _comparison_cache:
+        if now - _comparison_cache_time.get(cache_key, 0) <= _comparison_cache_ttl:
+            terms = _comparison_cache[cache_key]
+            trans['preloaded_terms'] = terms
+            return terms
+        else:
+            _comparison_cache.pop(cache_key, None)
+            _comparison_cache_time.pop(cache_key, None)
+    
+    # 从数据库加载
+    try:
+        terms = get_comparison(comparison_id)
+        if terms:
+            _comparison_cache[cache_key] = terms
+            _comparison_cache_time[cache_key] = now
+            trans['preloaded_terms'] = terms
+            logging.info(f"📚 术语库预加载成功（缓存）: {comparison_id}, 条目={len(terms)}")
+            return terms
+        else:
+            logging.warning(f"📚 术语库预加载失败: {comparison_id}")
+    except Exception as e:
+        logging.error(f"📚 术语库预加载异常: {e}")
+    return None
 
 from .baidu.main import baidu_translate
 
@@ -49,6 +133,16 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
         app_id = trans.get('app_id', '')
         app_key = trans.get('app_key', '')
         
+        timing_logger = _get_timing_logger()
+        translate_id_val = trans.get('id')
+        comparison_id_val = trans.get('comparison_id')
+        total_start = time.time()
+        
+        # 术语库预加载（若勾选了术语库），避免翻译过程中重复访问数据库
+        preload_start = time.time()
+        _preload_terms_if_needed(trans)
+        _log_timing("术语库预加载", time.time() - preload_start, translate_id=translate_id_val, comparison_id=comparison_id_val)
+        
         # 如果没有传递target_lang参数，从trans中获取
         if target_lang is None or not target_lang or not str(target_lang).strip():
             target_lang = trans.get('lang')
@@ -84,14 +178,13 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                     try:
                         from .term_filter import optimize_terms_for_api
                         
-                        # 记录术语库处理开始时间
                         term_start_time = time.time()
                         filtered_terms = optimize_terms_for_api(
                             text, preloaded_terms, max_terms=10, 
                             comparison_id=str(comparison_id) if comparison_id else None
                         )
-                        term_end_time = time.time()
-                        term_duration = term_end_time - term_start_time
+                        term_duration = time.time() - term_start_time
+                        _log_timing("术语库筛选(预加载)", term_duration, translate_id=translate_id_val, comparison_id=comparison_id, extra={"count": len(filtered_terms) if filtered_terms else 0})
                         
                         logging.info(f"📚 术语库筛选用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms) if filtered_terms else 0}")
                         
@@ -115,11 +208,10 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                     try:
                         from .main import get_filtered_terms_for_text
                         
-                        # 记录术语库处理开始时间
                         term_start_time = time.time()
                         filtered_terms_str = get_filtered_terms_for_text(text, comparison_id, max_terms=10)
-                        term_end_time = time.time()
-                        term_duration = term_end_time - term_start_time
+                        term_duration = time.time() - term_start_time
+                        _log_timing("术语库筛选(DB)", term_duration, translate_id=translate_id_val, comparison_id=comparison_id, extra={"count": len(filtered_terms_str.split(chr(10))) if filtered_terms_str else 0})
                         
                         logging.info(f"📚 术语库处理用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms_str.split(chr(10))) if filtered_terms_str else 0}")
                         
@@ -141,7 +233,8 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                         logging.error(f"术语库筛选失败: {str(e)}")
                         tm_list = []
             
-            return qwen_translate(
+            api_start = time.time()
+            result = qwen_translate(
                 text=text,
                 target_language=target_lang,  # 直接使用，已经是英文名
                 source_lang="auto",
@@ -156,6 +249,9 @@ def translate_text(trans, text, source_lang="auto", target_lang=None):
                 tenant_id=trans.get('tenant_id'),
                 uuid=trans.get('uuid')
             )
+            _log_timing("API调用", time.time() - api_start, translate_id=translate_id_val, comparison_id=comparison_id_val)
+            _log_timing("单次文本总耗时", time.time() - total_start, translate_id=translate_id_val, comparison_id=comparison_id_val)
+            return result
         else:
             # OpenAI 翻译 (兼容新旧版本)
             try:
@@ -278,10 +374,15 @@ def get(trans, event, texts, index):
                 logging.info(f"任务 {trans.get('id')} 在暂停期间被取消")
                 exit(0)
         logging.info(f"任务 {trans.get('id')} 已恢复")
-    # 恢复线程数为30，提高翻译效率
-    max_threads = 30
+    # 恢复线程数为40，提高翻译效率
+    max_threads = 40
     translate_id = trans['id']
     target_lang = trans['lang']
+    comparison_id = trans.get('comparison_id')
+    # 术语库预加载（若勾选了术语库），避免翻译过程中重复访问数据库
+    preload_start = time.time()
+    _preload_terms_if_needed(trans)
+    _log_timing("术语库预加载(get)", time.time() - preload_start, translate_id=translate_id, comparison_id=comparison_id)
     
     # ============== 模型配置 ==============
     model = trans['model']
@@ -392,8 +493,8 @@ def get(trans, event, texts, index):
                             term_start_time = time.time()
                             comparison_id = trans.get('comparison_id')
                             filtered_terms = optimize_terms_for_api(old_text, preloaded_terms, max_terms=10, comparison_id=str(comparison_id) if comparison_id else None)
-                            term_end_time = time.time()
-                            term_duration = term_end_time - term_start_time
+                            term_duration = time.time() - term_start_time
+                            _log_timing("术语库筛选(预加载 get)", term_duration, translate_id=translate_id, comparison_id=comparison_id, extra={"count": len(filtered_terms) if filtered_terms else 0})
                             
                             logging.info(f"📚 术语库筛选用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms) if filtered_terms else 0}")
                             
@@ -422,8 +523,8 @@ def get(trans, event, texts, index):
                             # 记录术语库处理开始时间
                             term_start_time = time.time()
                             filtered_terms_str = get_filtered_terms_for_text(old_text, comparison_id, max_terms=10)
-                            term_end_time = time.time()
-                            term_duration = term_end_time - term_start_time
+                            term_duration = time.time() - term_start_time
+                            _log_timing("术语库筛选(DB get)", term_duration, translate_id=translate_id, comparison_id=comparison_id, extra={"count": len(filtered_terms_str.split(chr(10))) if filtered_terms_str else 0})
                             
                             logging.info(f"📚 术语库处理用时: {term_duration:.3f}秒, 找到术语数: {len(filtered_terms_str.split(chr(10))) if filtered_terms_str else 0}")
                             
@@ -553,6 +654,7 @@ def get(trans, event, texts, index):
                         tenant_id_val = trans.get('tenant_id')
                         uuid_val = trans.get('uuid')
                         logging.debug(f"🔍 Token记录参数: translate_id={translate_id_val}, customer_id={customer_id_val}, tenant_id={tenant_id_val}, uuid={uuid_val}")
+                        api_start = time.time()
                         content = qwen_translate(
                             text['text'], target_lang, source_lang="auto", 
                             tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), 
@@ -562,6 +664,7 @@ def get(trans, event, texts, index):
                             customer_id=customer_id_val,
                             uuid=uuid_val
                         )
+                        _log_timing("API调用(MD)", time.time() - api_start, translate_id=translate_id_val, comparison_id=trans.get('comparison_id'), extra={"index": index})
                     else:
                         content = req(text['text'], target_lang, model, prompt, True)
                 else:
@@ -573,6 +676,7 @@ def get(trans, event, texts, index):
                         tenant_id_val = trans.get('tenant_id')
                         uuid_val = trans.get('uuid')
                         logging.debug(f"🔍 Token记录参数: translate_id={translate_id_val}, customer_id={customer_id_val}, tenant_id={tenant_id_val}, uuid={uuid_val}")
+                        api_start = time.time()
                         content = qwen_translate(
                             text['text'], target_lang, source_lang="auto", 
                             tm_list=tm_list, prompt=prompt, prompt_id=trans.get('prompt_id'), 
@@ -582,6 +686,7 @@ def get(trans, event, texts, index):
                             customer_id=customer_id_val,
                             uuid=uuid_val
                         )
+                        _log_timing("API调用(get)", time.time() - api_start, translate_id=translate_id_val, comparison_id=trans.get('comparison_id'), extra={"index": index})
                     else:
                         # 其他模型：根据是否有上下文选择翻译方式
                         if 'context_text' in text and text.get('context_type') == 'body':
@@ -682,8 +787,8 @@ def get(trans, event, texts, index):
 def get11(trans, event, texts, index):
     if event.is_set():
         exit(0)
-    # 恢复线程数为30，提高翻译效率
-    max_threads = 30
+    # 恢复线程数为40，提高翻译效率
+    max_threads = 40
     # mredis=rediscon.get_conn()
     # threading_num=get_threading_num(mredis)
     # while threading_num>=max_threads:

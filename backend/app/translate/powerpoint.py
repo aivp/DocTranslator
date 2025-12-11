@@ -114,7 +114,7 @@ def start_with_okapi(trans):
                 import threading
                 
                 translated_texts = [None] * len(texts)  # 预分配结果数组
-                max_workers = min(30, len(texts))  # 最多30个线程
+                max_workers = min(40, len(texts))  # 最多40个线程
                 
                 logger.info(f"开始并行翻译 {len(texts)} 个文本，使用 {max_workers} 个线程")
                 

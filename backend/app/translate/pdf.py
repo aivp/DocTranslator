@@ -17,6 +17,7 @@ import shutil
 import fitz
 import json
 import logging
+import pathlib
 from app.utils.pymupdf_queue import (
     safe_fitz_open, safe_fitz_close, safe_fitz_save, 
     safe_fitz_new_document, safe_fitz_insert_pdf,
@@ -29,6 +30,40 @@ from ..utils.doc2x import Doc2XService
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
+
+# PDF耗时日志（完整记录，不滚动）
+_PDF_TIMING_LOGGER_NAME = "pdf_timing"
+_PDF_TIMING_LOG_FILE = pathlib.Path(__file__).resolve().parent.parent.parent / "logs" / "pdf_timing.log"
+
+
+def _get_pdf_timing_logger():
+    log = logging.getLogger(_PDF_TIMING_LOGGER_NAME)
+    if log.handlers:
+        return log
+    log.setLevel(logging.INFO)
+    _PDF_TIMING_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(_PDF_TIMING_LOG_FILE, encoding="utf-8")
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(fmt)
+    log.addHandler(handler)
+    log.propagate = False
+    return log
+
+
+def _log_pdf_timing(step: str, duration: float, translate_id=None, comparison_id=None, extra: dict = None):
+    log = _get_pdf_timing_logger()
+    base = {
+        "step": step,
+        "duration_s": f"{duration:.3f}",
+    }
+    if translate_id is not None:
+        base["translate_id"] = translate_id
+    if comparison_id is not None:
+        base["comparison_id"] = comparison_id
+    if extra:
+        base.update(extra)
+    msg = " | ".join([f"{k}={v}" for k, v in base.items()])
+    log.info(msg)
 
 # 线程安全打印锁（保留用于向后兼容）
 print_lock = Lock()
@@ -170,6 +205,10 @@ def get_doc2x_save_dir():
 def start(trans):
     """PDF翻译入口"""
     logger.debug("PDF翻译函数被调用")
+    timing_start = time.time()
+    translate_id = trans.get('id')
+    comparison_id = trans.get('comparison_id')
+    _log_pdf_timing("PDF开始", 0, translate_id=translate_id, comparison_id=comparison_id)
     
     try:
         # 开始时间
@@ -190,10 +229,13 @@ def start(trans):
         # 根据设置选择翻译方法
         if pdf_translate_method == 'direct':
             logger.info("🎯 使用直接PDF翻译方法")
-            return start_direct_pdf_translation(trans)
+            result = start_direct_pdf_translation(trans)
         else:
             logger.info("🎯 使用Doc2x转换后翻译方法")
-            return start_doc2x_pdf_translation(trans)
+            result = start_doc2x_pdf_translation(trans)
+
+        _log_pdf_timing("PDF总耗时", time.time() - timing_start, translate_id=translate_id, comparison_id=comparison_id, extra={"method": pdf_translate_method})
+        return result
 
     except Exception as e:
         # 记录详细错误信息
@@ -511,7 +553,7 @@ def start_doc2x_pdf_translation(trans):
             # 验证 Okapi 安装
             if not verify_okapi_installation():
                 print("❌ Okapi 安装验证失败，回退到传统方法")
-                run_translation(docx_trans, filtered_texts, max_threads=30)
+                run_translation(docx_trans, filtered_texts, max_threads=40)
             else:
                 print("✅ Okapi 安装验证成功，使用XLIFF转换方案")
                 
@@ -583,7 +625,7 @@ def start_doc2x_pdf_translation(trans):
                     return True
                 else:
                     print("❌ Okapi XLIFF转换 + Qwen翻译失败，回退到传统方法")
-                    run_translation(docx_trans, filtered_texts, max_threads=30)
+                    run_translation(docx_trans, filtered_texts, max_threads=40)
                     
         except Exception as e:
             print("❌ Okapi XLIFF转换 + Qwen翻译出错: " + str(e) + "，回退到传统方法")
@@ -1024,8 +1066,8 @@ def extract_comments(file_path, texts):
         print(f"提取批注时出错: {str(e)}")
 
 
-def run_translation(trans, texts, max_threads=30):
-    # 硬编码线程数为30，忽略前端传入的配置
+def run_translation(trans, texts, max_threads=40):
+    # 硬编码线程数为40，忽略前端传入的配置
     """执行多线程翻译"""
     if not texts:
         print("没有需要翻译的内容")
@@ -1298,6 +1340,9 @@ def get_pdf_translate_method():
 def start_direct_pdf_translation(trans):
     """直接PDF翻译方法"""
     try:
+        direct_start = time.time()
+        translate_id = trans.get('id')
+        comparison_id = trans.get('comparison_id')
         print("🚀 开始直接PDF翻译流程")
         
         # 更新任务状态为处理中，但不设置初始进度
@@ -1322,6 +1367,7 @@ def start_direct_pdf_translation(trans):
         # 预加载术语库（与Okapi方式保持一致）
         comparison_id = trans.get('comparison_id')
         if comparison_id:
+            preload_start = time.time()
             logger.info(f"📚 开始预加载术语库: {comparison_id}")
             from .main import get_comparison
             preloaded_terms = get_comparison(comparison_id)
@@ -1331,25 +1377,33 @@ def start_direct_pdf_translation(trans):
                 trans['preloaded_terms'] = preloaded_terms
             else:
                 logger.warning(f"📚 术语库预加载失败: {comparison_id}")
+            _log_pdf_timing("术语库预加载(PDF)", time.time() - preload_start, translate_id=translate_id, comparison_id=comparison_id)
         
         # 检测PDF页数，决定使用哪种翻译方法
         try:
+            page_detect_start = time.time()
             with PyMuPDFContext("检测PDF页数"):
                 doc = safe_fitz_open(str(original_path))
                 total_pages = doc.page_count
                 safe_fitz_close(doc)
                 print(f"📄 PDF总页数: {total_pages}")
+            _log_pdf_timing("检测PDF页数", time.time() - page_detect_start, translate_id=translate_id, comparison_id=comparison_id, extra={"pages": total_pages})
             
             if total_pages > 25:
                 print("📊 检测到大文件（超过25页），使用多线程分批处理")
-                return start_large_pdf_translation(trans, total_pages)
+                result = start_large_pdf_translation(trans, total_pages)
             else:
                 print("📊 检测到小文件（25页以内），使用标准处理")
-                return start_small_pdf_translation(trans)
+                result = start_small_pdf_translation(trans)
+            
+            _log_pdf_timing("直接PDF耗时", time.time() - direct_start, translate_id=translate_id, comparison_id=comparison_id, extra={"pages": total_pages})
+            return result
                 
         except Exception as e:
             print(f"⚠️ 检测PDF页数失败: {e}，使用标准处理")
-            return start_small_pdf_translation(trans)
+            result = start_small_pdf_translation(trans)
+            _log_pdf_timing("直接PDF耗时", time.time() - direct_start, translate_id=translate_id, comparison_id=comparison_id, extra={"pages": "unknown"})
+            return result
             
     except Exception as e:
         print(f"❌ 直接PDF翻译异常: {str(e)}")
@@ -1360,6 +1414,9 @@ def start_direct_pdf_translation(trans):
 def start_small_pdf_translation(trans):
     """小文件PDF翻译方法（25页以内）"""
     try:
+        small_start = time.time()
+        translate_id = trans.get('id')
+        comparison_id = trans.get('comparison_id')
         print("🎯 使用小文件翻译方法")
         
         original_path = Path(trans['file_path'])
@@ -1383,10 +1440,12 @@ def start_small_pdf_translation(trans):
         )
         
         # 执行完整翻译流程
+        run_start = time.time()
         result_file = translator.run_complete_translation(
             trans=trans,
             output_file=trans['target_file']
         )
+        _log_pdf_timing("小文件翻译执行", time.time() - run_start, translate_id=translate_id, comparison_id=comparison_id)
         
         if result_file and os.path.exists(result_file):
             # 翻译成功日志已关闭（调试时可打开）
@@ -1409,22 +1468,28 @@ def start_small_pdf_translation(trans):
             except Exception as e:
                 print(f"⚠️ 汇总token使用失败: translate_id={trans['id']}, 错误: {e}")
             
+            _log_pdf_timing("小文件翻译总耗时", time.time() - small_start, translate_id=translate_id, comparison_id=comparison_id, extra={"status": "success"})
             return True
         else:
             print(f"❌ 小文件PDF翻译失败")
             to_translate.error(trans['id'], "小文件PDF翻译失败")
+            _log_pdf_timing("小文件翻译总耗时", time.time() - small_start, translate_id=translate_id, comparison_id=comparison_id, extra={"status": "result_missing"})
             return False
 
     except Exception as e:
         print(f"❌ 小文件PDF翻译过程出错: {str(e)}")
         traceback.print_exc()
         to_translate.error(trans['id'], "小文件PDF翻译过程出错: " + str(e))
+        _log_pdf_timing("小文件翻译总耗时", time.time() - small_start, translate_id=trans.get('id'), comparison_id=trans.get('comparison_id'), extra={"status": "exception", "error": str(e)})
         return False
 
 
 def start_large_pdf_translation(trans, total_pages):
     """大文件PDF翻译方法（超过20页）"""
     try:
+        large_start = time.time()
+        translate_id = trans.get('id')
+        comparison_id = trans.get('comparison_id')
         print("🎯 使用大文件多线程翻译方法")
         print(f"📊 总页数: {total_pages}")
         
@@ -1437,16 +1502,18 @@ def start_large_pdf_translation(trans, total_pages):
         translator = LargePDFTranslator(
             input_pdf_path=str(original_path),
             batch_size=3,  # 减小批次大小，降低内存占用
-            max_workers=15,  # 与小PDF保持一致，使用系统默认30线程
+            max_workers=15,  # 与小PDF保持一致，使用系统默认40线程
             target_lang=trans.get('lang', 'zh'),  # 使用 'lang' 字段与翻译函数一致
             user_id=trans.get('user_id')  # 传递用户ID用于临时文件隔离
         )
         
         # 执行完整翻译流程
+        run_start = time.time()
         result_file = translator.run_complete_translation(
             trans=trans,
             output_file=trans['target_file']
         )
+        _log_pdf_timing("大文件翻译执行", time.time() - run_start, translate_id=translate_id, comparison_id=comparison_id, extra={"pages": total_pages})
         
         if result_file and os.path.exists(result_file):
             # 翻译成功日志已关闭（调试时可打开）
@@ -1469,16 +1536,19 @@ def start_large_pdf_translation(trans, total_pages):
             except Exception as e:
                 print(f"⚠️ 汇总token使用失败: translate_id={trans['id']}, 错误: {e}")
             
+            _log_pdf_timing("大文件翻译总耗时", time.time() - large_start, translate_id=translate_id, comparison_id=comparison_id, extra={"pages": total_pages, "status": "success"})
             return True
         else:
             print("❌ 大文件PDF翻译失败")
             to_translate.error(trans['id'], "大文件PDF翻译失败")
+            _log_pdf_timing("大文件翻译总耗时", time.time() - large_start, translate_id=translate_id, comparison_id=comparison_id, extra={"pages": total_pages, "status": "result_missing"})
             return False
 
     except Exception as e:
         print(f"❌ 大文件PDF翻译过程出错: {str(e)}")
         traceback.print_exc()
         to_translate.error(trans['id'], "大文件PDF翻译过程出错: " + str(e))
+        _log_pdf_timing("大文件翻译总耗时", time.time() - large_start, translate_id=trans.get('id'), comparison_id=trans.get('comparison_id'), extra={"pages": total_pages, "status": "exception", "error": str(e)})
         return False
 
 
@@ -1783,7 +1853,7 @@ class DirectPDFTranslator:
             print("\n3. 开始多线程翻译...")
             if texts_for_translation:
                 # 使用现有的多线程翻译系统
-                run_translation(trans, texts_for_translation, max_threads=30)
+                run_translation(trans, texts_for_translation, max_threads=40)
                 # 翻译成功日志已关闭（调试时可打开）
                 # print("   多线程翻译完成")
             else:

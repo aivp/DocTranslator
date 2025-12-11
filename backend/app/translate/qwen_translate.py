@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import re
+from typing import Tuple
 from openai import OpenAI
 from app.utils.api_key_helper import get_dashscope_key, get_current_tenant_id_from_request
 
@@ -14,6 +15,15 @@ dashscope_key = os.environ.get('DASH_SCOPE_KEY', '')
 
 # 在模块级别缓存 API Key（以 tenant_id 为 key）
 _api_key_cache = {}
+
+
+def _calc_edge_spaces(s: str) -> Tuple[int, int]:
+    """计算字符串前后空格数量"""
+    if s is None:
+        return 0, 0
+    leading = len(s) - len(s.lstrip(' '))
+    trailing = len(s) - len(s.rstrip(' '))
+    return leading, trailing
 
 def is_pure_symbol(text: str) -> bool:
     """
@@ -105,43 +115,43 @@ def is_pure_number(text: str) -> bool:
 # 请求频率控制 - 线程安全版本
 import threading
 
-# 已解锁到1000次/分钟
+# 已解锁到1200次/分钟
 class QwenRateLimiter:
     def __init__(self):
-        self.request_times = []  # 记录最近1000次请求的时间戳
+        self.request_times = []  # 记录最近1200次请求的时间戳
         self.last_request_time = 0  # 上次请求时间
         self.lock = threading.Lock()
     
     def wait_for_rate_limit(self):
-        """保证每分钟持续1000次请求"""
+        """保证每分钟持续1200次请求"""
         with self.lock:
             current_time = time.time()
             
             # 清理超过60秒的记录
             self.request_times = [t for t in self.request_times if current_time - t < 60]
             
-            # 计算理论上的最小间隔（60秒/1000次 = 0.06秒/次）
-            min_interval = 0.06
+            # 计算理论上的最小间隔（60秒/1200次 = 0.05秒/次）
+            min_interval = 0.05
             # min_interval = 0.1
 
             
-            # 如果最近60秒内已经有1000次请求，需要等待
-            if len(self.request_times) >= 1000:
+            # 如果最近60秒内已经有1200次请求，需要等待
+            if len(self.request_times) >= 1200:
                 # 等待到最早请求过期
                 wait_time = self.request_times[0] + 60 - current_time
                 if wait_time > 0:
-                    logging.warning(f"达到每分钟1000次限制，等待 {wait_time:.1f} 秒...")
+                    logging.warning(f"达到每分钟1200次限制，等待 {wait_time:.1f} 秒...")
                     time.sleep(wait_time)
                     # 重新清理过期记录
                     current_time = time.time()
                     self.request_times = [t for t in self.request_times if current_time - t < 60]
             
-            # 动态调整间隔，确保持续1000次/分钟
+            # 动态调整间隔，确保持续1200次/分钟
             if len(self.request_times) > 0:
                 # 计算当前窗口的剩余时间
                 window_start = self.request_times[0]
                 remaining_time = 60 - (current_time - window_start)
-                remaining_requests = 1000 - len(self.request_times)
+                remaining_requests = 1200 - len(self.request_times)
                 
                 if remaining_requests > 0 and remaining_time > 0:
                     # 计算理论间隔
@@ -170,11 +180,11 @@ class QwenRateLimiter:
                 elapsed = current_time - self.request_times[0]
                 if elapsed > 0:
                     current_rate = len(self.request_times) / (elapsed / 60)
-                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/1000, 当前速率: {current_rate:.1f}次/分钟")
+                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/1200, 当前速率: {current_rate:.1f}次/分钟")
                 else:
-                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/1000")
+                    logging.debug(f"Qwen请求计数: {len(self.request_times)}/1200")
             else:
-                logging.debug(f"Qwen请求计数: {len(self.request_times)}/1000")
+                logging.debug(f"Qwen请求计数: {len(self.request_times)}/1200")
     
     def get_current_rate(self):
         """获取当前请求速率（次/分钟）"""
@@ -191,7 +201,7 @@ class QwenRateLimiter:
 qwen_rate_limiter = QwenRateLimiter()
 
 def wait_for_rate_limit():
-    """等待请求间隔，确保不超过每分钟1000次限制"""
+    """等待请求间隔，确保不超过每分钟1200次限制"""
     qwen_rate_limiter.wait_for_rate_limit()
 
 def get_current_request_rate():
@@ -566,15 +576,33 @@ def qwen_translate(text, target_language, source_lang="auto", tm_list=None, term
             translated_text_before_clean = translated_text
             translated_text = _clean_domain_hint_from_result(translated_text)
             
-            # 打印响应结果
+            # 尝试修复首尾空格：如果翻译结果首尾空格少于原文，则补齐
+            orig_leading, orig_trailing = _calc_edge_spaces(text)
+            cleaned_leading, cleaned_trailing = _calc_edge_spaces(translated_text)
+            fixed_text = translated_text
+            if cleaned_leading < orig_leading:
+                fixed_text = (' ' * (orig_leading - cleaned_leading)) + fixed_text
+            if cleaned_trailing < orig_trailing:
+                fixed_text = fixed_text + (' ' * (orig_trailing - cleaned_trailing))
+            fixed_leading, fixed_trailing = _calc_edge_spaces(fixed_text)
+
+            # 打印响应结果（含补齐后的文本）
             logging.info("=" * 80)
             logging.info("✅ QWEN-MT-PLUS 翻译响应")
             logging.info("=" * 80)
             logging.info(f"📝 原始文本 (完整): {text}")
             logging.info(f"📥 API返回的原始结果 (完整): {translated_text_before_clean}")
             logging.info(f"🎯 清理后的翻译结果 (完整): {translated_text}")
+            logging.info(f"🎯 空格补齐后的翻译结果 (完整): {fixed_text}")
+            logging.info(
+                f"⚖️ 空格对比: 原始(前{orig_leading}/后{orig_trailing}), "
+                f"清理后(前{cleaned_leading}/后{cleaned_trailing}), "
+                f"补齐后(前{fixed_leading}/后{fixed_trailing})"
+            )
             logging.info(f"⏱️ API调用用时: {api_duration:.3f}秒")
             logging.info("=" * 80)
+
+            translated_text = fixed_text
             
             # 检查翻译结果质量（暂时注释掉）
             # if _is_translation_result_abnormal(translated_text):
